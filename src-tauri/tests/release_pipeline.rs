@@ -12,6 +12,8 @@
 //!   and asks for the least permission it needs;
 //! - `.github/workflows/release-channels.yml` moves the beta manifest forward
 //!   only;
+//! - `.github/workflows/landing.yml` redeploys the landing, which lives in
+//!   MAECLY/pluryprint-landing, through a Vercel Deploy Hook and no token;
 //! - `scripts/release/release_tools.py` implements those rules (exercised
 //!   here where a `python3` exists);
 //! - `scripts/bump-version.sh` keeps the version sources in step, the
@@ -608,6 +610,61 @@ fn fr_086_beta_pointer_moves_forward_only() {
     assert!(!wf.contains("run: ${{"));
 }
 
+/// Publishing a release redeploys the landing, which lives in
+/// MAECLY/pluryprint-landing and is built by Vercel: `landing.yml` only calls
+/// the Vercel Deploy Hook. It holds no token, checks nothing out, keeps the
+/// hook's URL out of its commands and fails when the hook does.
+#[test]
+fn landing_redeploys_on_every_published_release() {
+    let wf = read(".github/workflows/landing.yml");
+    let on = wf
+        .split_once("\non:\n")
+        .unwrap()
+        .1
+        .split_once("\npermissions:")
+        .unwrap()
+        .0;
+    assert!(on.contains("  release:\n    types: [published]\n"), "{on}");
+    assert!(on.contains("  workflow_dispatch:"), "{on}");
+    assert!(
+        !on.contains("push:") && !on.contains("pull_request"),
+        "{on}"
+    );
+
+    // No token at all: the top level grants nothing and no job asks again.
+    assert!(wf.contains("\npermissions: {}\n"), "{wf}");
+    assert_eq!(wf.matches("permissions:").count(), 1, "{wf}");
+    assert!(!wf.contains("actions/checkout"), "{wf}");
+    assert!(!wf.contains("github.token") && !wf.contains("GITHUB_TOKEN:"));
+
+    assert_eq!(job_names(&wf), ["redeploy"]);
+    let redeploy = job(&wf, "redeploy");
+    // The hook's URL reaches the shell through the environment, never
+    // spliced into a command, and an empty secret fails the run.
+    assert!(
+        redeploy.contains("LANDING_DEPLOY_HOOK: ${{ secrets.LANDING_DEPLOY_HOOK }}"),
+        "{redeploy}"
+    );
+    assert_eq!(wf.matches("${{ secrets.").count(), 1, "{wf}");
+    let run = &redeploy[redeploy.find("run: |").expect("a run step")..];
+    assert!(!run.contains("${{"), "{run}");
+    assert!(run.contains("if [ -z \"$LANDING_DEPLOY_HOOK\" ]"), "{run}");
+    assert!(run.contains("::error::"), "{run}");
+    assert!(
+        run.contains("curl --fail-with-body --silent --show-error --retry 3"),
+        "{run}"
+    );
+    assert!(
+        run.contains("--request POST \"$LANDING_DEPLOY_HOOK\""),
+        "{run}"
+    );
+    assert!(!run.contains("echo \"$LANDING_DEPLOY_HOOK"), "{run}");
+    // Nothing turns a failed deploy into a green run.
+    for bypass in ["continue-on-error", "|| true", "|| :", "--insecure", " -k "] {
+        assert!(!wf.contains(bypass), "{bypass}");
+    }
+}
+
 /// AGPL-3.0 and GPL-3.0 section 6: every release carries the source of
 /// Pluryprint and of the SumatraPDF build its installers contain.
 #[test]
@@ -1097,21 +1154,13 @@ fn release_bump_version_script_keeps_the_sources_in_step() {
     assert!(root.join("package.json").exists());
 }
 
-/// What the site tells agents about the dependency install consent matches
-/// the dialog: it flags that a Store component may cost money (a boolean in
-/// the recipe); it never shows a price.
+/// The landing's `llms.txt` (in MAECLY/pluryprint-landing) tells agents that
+/// the dependency install consent flags a Store component that may cost money
+/// and never shows a price, quoting this dialog. The landing repository checks
+/// its own side; this keeps the dialog from drifting away from it unnoticed.
+/// Change both together.
 #[test]
-fn site_llms_txt_describes_the_install_consent_as_the_dialog_does() {
-    let llms = read("site/llms.txt");
-    let consent = llms
-        .lines()
-        .find(|l| l.contains("offers to install it"))
-        .expect("llms.txt describes the install offer");
-    assert!(!consent.contains("the price"), "{consent}");
-    assert!(
-        consent.contains("may cost money in the Microsoft Store"),
-        "{consent}"
-    );
+fn install_dialog_paid_notice_matches_what_the_landing_quotes() {
     let dialog: serde_json::Value =
         serde_json::from_str(&read("src/i18n/locales/en/printJob.json")).unwrap();
     assert_eq!(

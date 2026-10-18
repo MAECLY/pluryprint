@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://pluryprint.maecly.com/sitemap.xml

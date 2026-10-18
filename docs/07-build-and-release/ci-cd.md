@@ -1,6 +1,6 @@
 # CI/CD
 
-> **TL;DR.** `ci.yml` is the lean pull-request gate: frontend lint, typecheck, format, tests and `pnpm audit` on ubuntu, and Rust fmt, clippy and the full test suite on Windows and macOS, plus `cargo audit` on macOS. It builds no bundle and reads no secret. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `pages.yml` redeploys the landing with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
+> **TL;DR.** `ci.yml` is the lean pull-request gate: frontend lint, typecheck, format, tests and `pnpm audit` on ubuntu, and Rust fmt, clippy and the full test suite on Windows and macOS, plus `cargo audit` on macOS. It builds no bundle and reads no secret. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `landing.yml` has Vercel redeploy the landing, which lives in its own repository, with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
 
 This document specifies what CI does; [releasing.md](./releasing.md) covers the release workflows.
 
@@ -11,7 +11,7 @@ This document specifies what CI does; [releasing.md](./releasing.md) covers the 
 | **CI** | `.github/workflows/ci.yml` | `pull_request`, `push` → `main`, `workflow_dispatch` | No | No |
 | **release** | `.github/workflows/release.yml` | `push` of a `v*` tag; `workflow_dispatch` (build only) | Update artifacts (minisign); no OS code signing | A **draft** release, published by a person |
 | **release-channels** | `.github/workflows/release-channels.yml` | `release: published` | No | Overwrites `latest.json` on the `channel-beta` prerelease, forward only |
-| **Pages** | `.github/workflows/pages.yml` | `push` → `main` touching `site/`, `scripts/site/` or itself; `release: published`; `workflow_dispatch` | No | The landing page, filled with the latest published release ([below](#the-landing-follows-the-release)) |
+| **Landing** | `.github/workflows/landing.yml` | `release: published`; `workflow_dispatch` | No | Nothing itself: it calls the Vercel Deploy Hook that redeploys the landing from `MAECLY/pluryprint-landing` ([below](#the-landing-follows-the-release)) |
 
 Only `ci.yml` runs on a pull request. There is no scheduled workflow.
 
@@ -95,22 +95,13 @@ Fixed rather than accepted in October 2026: RUSTSEC-2026-0187 (lopdf 0.39, stack
 
 ## The landing follows the release
 
-`site/` names no version, release date, download link or file size. Those places carry markers (`{{release.version}}`, `{{release.date}}`, `{{release.date_es}}`, `{{release.date_en}}`, `{{release.notes_url}}`, `{{release.sha256sums_url}}`, and `{{release.<file>.url}}`, `.mib_en`, `.mib_es` for `windows_x64`, `windows_arm64`, `apple_silicon` and `apple_intel`) in both landings, their JSON-LD and meta descriptions, the two `site.webmanifest` files, `llms.txt` and `agents.txt`.
+The landing page, https://pluryprint.maecly.com, is not in this repository. It lives in [`MAECLY/pluryprint-landing`](https://github.com/MAECLY/pluryprint-landing), a public repository connected to the Vercel project `pluryprint-landing-page` through Vercel's Git integration: a push to its `main` is a production deployment, and a pull request there gets a preview deployment. Its source names no version, release date, download link or file size; Vercel's build fills them in from `GET /repos/MAECLY/pluryprint/releases/latest`, the latest published release of this repository. How it does that, and what it refuses to link, is documented and tested in that repository; a failed Vercel build leaves the previous deployment online.
 
-`pages.yml` fetches `GET /repos/MAECLY/pluryprint/releases/latest` with the job's `GITHUB_TOKEN` (`contents: read`), and `scripts/site/apply_release.py` (standard-library Python, run with `python3 -I`) copies `site/` to `$RUNNER_TEMP/site` with every marker filled. That copy is what Pages publishes; nothing generated is committed. The script fails the deploy, with nothing published, when the release is a draft or pre-release, its tag is not `v<SemVer>`, any of the four installers or `SHA256SUMS` is missing, empty, not fully uploaded or not at `releases/download/<tag>/<name>`, a marker is unknown or malformed, a download marker is used nowhere, or a JSON-LD block or manifest no longer parses. It has no switch to skip a check.
+`landing.yml` is what makes publishing a release here redeploy the landing. It runs on `release: published` and does one thing: it POSTs to a Vercel Deploy Hook for the landing repository's `main` branch, whose URL is this repository's `LANDING_DEPLOY_HOOK` Actions secret. The job holds no token (`permissions: {}`), checks nothing out, passes the hook's URL to `curl` through the environment without ever printing it, and fails, with an error that names the secret, when the secret is empty or Vercel refuses the call. Drafts and pre-releases are never "latest", so the redeploy a beta starts leaves the landing on the stable release. GitHub does not start workflows from events caused by `GITHUB_TOKEN`, so a release published by a workflow would not trigger it; ours are published by a person.
 
-The workflow runs on `release: published`, so publishing a release redeploys the landing. The `github-pages` environment only deploys from `main` and a release event runs on the tag, so that run's only job (`redeploy`) starts `pages.yml` on `main` with `workflow_dispatch`, and the `main` run deploys. GitHub does not start workflows from events caused by `GITHUB_TOKEN`, so a release published by a workflow would not; ours are published by a person, and **Run workflow** redeploys by hand. Pre-releases are never "latest", so a beta leaves the landing on the stable release.
+To redeploy the landing by hand, use **Run workflow** on **Landing** in this repository, or push to `main` of `MAECLY/pluryprint-landing`. If the hook is regenerated in Vercel (the project's Git settings, under Deploy Hooks), replace the `LANDING_DEPLOY_HOOK` secret with the new URL. Anyone holding that URL can start a deployment, so it is kept only in the secret.
 
-To preview the filled landing locally:
-
-```bash
-gh api repos/MAECLY/pluryprint/releases/latest > /tmp/release.json
-python3 -I scripts/site/apply_release.py --release-json /tmp/release.json \
-  --repo MAECLY/pluryprint --site site --out /tmp/site
-python3 -m http.server -d /tmp/site 8000
-```
-
-`src-tauri/tests/site_release.rs` runs the script against a fixture release, checks that no file in `site/` hardcodes a release link or version, that a missing installer or `SHA256SUMS` is refused, and pins the trigger and the step order in `pages.yml`.
+`src-tauri/tests/release_pipeline.rs` (`landing_redeploys_on_every_published_release`) pins the triggers, the empty permissions, the secret reaching the shell only through the environment, and the failing `curl`. `install_dialog_paid_notice_matches_what_the_landing_quotes`, in the same file, keeps the install dialog's Microsoft Store cost notice equal to the wording the landing's `llms.txt` quotes, which the landing repository checks from its side.
 
 ## Caching
 
@@ -126,7 +117,7 @@ Everything in this section is **unimplemented**. It is recorded as design intent
 | OS code signing | No Authenticode certificate, no Apple Developer ID, no notarization, no stapling (decision D2). macOS bundles are signed ad hoc. Update artifacts **are** signed, by `release.yml`. |
 | Artifact publication outside GitHub (Cloudflare R2, own domain) | Not planned for now: releases and manifests live on GitHub Releases ([ADR-0011](../adr/0011-release-channel.md)). |
 | `installers/windows/build.ps1`, `installers/macos/*.sh` | The `installers/` tree contains only `.gitkeep` files. |
-| `scripts/sign-*.ps1`, `scripts/upload-to-r2.sh`, `scripts/update-manifest.sh`, `scripts/build-mac-universal.sh`, `scripts/setup-apple-certs.sh`, `scripts/verify-windows-signatures.ps1` | None exist. What `scripts/` does hold for releases: `fetch-sumatrapdf.{ps1,sh}`, `build-shell-ext.ps1`, `bump-version.sh`, `licenses/generate-notices.sh` `release/release_tools.py` (the manifest and signature helper `release.yml` runs) and `site/apply_release.py` (fills the landing from the latest release for `pages.yml`). |
+| `scripts/sign-*.ps1`, `scripts/upload-to-r2.sh`, `scripts/update-manifest.sh`, `scripts/build-mac-universal.sh`, `scripts/setup-apple-certs.sh`, `scripts/verify-windows-signatures.ps1` | None exist. What `scripts/` does hold for releases: `fetch-sumatrapdf.{ps1,sh}`, `build-shell-ext.ps1`, `bump-version.sh`, `licenses/generate-notices.sh` and `release/release_tools.py` (the manifest and signature helper `release.yml` runs). |
 | Universal macOS binary | Not built: `release.yml` builds Apple silicon and Intel as separate downloads (Versorium's layout). |
 | Scheduled `cargo audit` / `pnpm audit` (NFR-065) | Both run on every pull request and push to `main` ([Dependency audits](#dependency-audits)), but nothing re-audits an unchanged tree when a new advisory is published. Dependabot (`.github/dependabot.yml`) opens the update PRs. |
 | `gitleaks` secret scanning (NFR-027) | Not configured. |
