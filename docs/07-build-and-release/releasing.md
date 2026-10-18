@@ -294,16 +294,20 @@ gh release edit vX.Y.Z --repo MAECLY/pluryprint --draft=false
 ```
 
 Publishing runs `release-channels.yml`, which points the beta channel at the
-release (section 3), and, for a stable release, `pages.yml`, which redeploys
-https://pluryprint.maecly.com with the new version, date, download links, file
-sizes, `SHA256SUMS` and release-notes links in both languages, `llms.txt` and
-`agents.txt`. **Nothing on the landing is edited by hand for a release**:
-`site/` holds `{{release.*}}` markers that `scripts/site/apply_release.py`
-fills from the latest published release
-([ci-cd.md](./ci-cd.md#the-landing-follows-the-release)). If that deploy fails,
-the release lacks one of the four installers or `SHA256SUMS`, and the landing
-keeps linking the previous release; fix the release and use **Run workflow**
-on Pages. A pre-release (beta) leaves the landing on the stable release.
+release (section 3), and `landing.yml`, which calls the Vercel Deploy Hook
+that redeploys https://pluryprint.maecly.com from
+[`MAECLY/pluryprint-landing`](https://github.com/MAECLY/pluryprint-landing)
+with the new version, date, download links, file sizes, `SHA256SUMS` and
+release-notes links in both languages, `llms.txt` and `agents.txt`.
+**Nothing on the landing is edited by hand for a release**: Vercel's build
+fills it in from the latest published release
+([ci-cd.md](./ci-cd.md#the-landing-follows-the-release)). If the **Landing**
+run fails, the hook was not called: check the `LANDING_DEPLOY_HOOK` secret.
+If the Vercel deployment fails (for instance because the release lacks one
+of the four installers or `SHA256SUMS`), its build log in the Vercel project
+says why, and the landing keeps serving the previous deployment; fix the
+release and use **Run workflow** on Landing. A pre-release (beta) leaves the
+landing on the stable release.
 
 ## 7. The install notices
 

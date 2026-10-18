@@ -34,7 +34,7 @@ Everything in this table is declared in `src-tauri/Cargo.toml`, `shell-ext-win/C
 | Update flow            | `tauri-plugin-updater`: check and install read the same `latest.json` per channel on GitHub Releases; minisign signatures; install only on request |
 | Tauri plugins in use   | `tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-updater` |
 | Tests                  | `vitest` + `@testing-library/react` (frontend), `cargo test` incl. `src-tauri/tests/*` (backend), **WebdriverIO** for e2e |
-| CI/CD                  | GitHub Actions: `ci.yml`, `release.yml` (draft releases on a tag), `release-channels.yml`, `pages.yml` |
+| CI/CD                  | GitHub Actions: `ci.yml`, `release.yml` (draft releases on a tag), `release-channels.yml`, `landing.yml` (redeploys the landing, a separate repository on Vercel) |
 | Code signing           | None for the OS (ADR-0011); updates signed with minisign |
 
 ## 2. Why Tauri 2
