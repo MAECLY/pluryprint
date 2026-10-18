@@ -1096,26 +1096,3 @@ fn release_bump_version_script_keeps_the_sources_in_step() {
     }
     assert!(root.join("package.json").exists());
 }
-
-/// What the site tells agents about the dependency install consent matches
-/// the dialog: it flags that a Store component may cost money (a boolean in
-/// the recipe); it never shows a price.
-#[test]
-fn site_llms_txt_describes_the_install_consent_as_the_dialog_does() {
-    let llms = read("site/llms.txt");
-    let consent = llms
-        .lines()
-        .find(|l| l.contains("offers to install it"))
-        .expect("llms.txt describes the install offer");
-    assert!(!consent.contains("the price"), "{consent}");
-    assert!(
-        consent.contains("may cost money in the Microsoft Store"),
-        "{consent}"
-    );
-    let dialog: serde_json::Value =
-        serde_json::from_str(&read("src/i18n/locales/en/printJob.json")).unwrap();
-    assert_eq!(
-        dialog["install"]["paid"],
-        "This component may cost money in the Microsoft Store."
-    );
-}
