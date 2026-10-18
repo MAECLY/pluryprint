@@ -1153,3 +1153,18 @@ fn release_bump_version_script_keeps_the_sources_in_step() {
     }
     assert!(root.join("package.json").exists());
 }
+
+/// The landing's `llms.txt` (in MAECLY/pluryprint-landing) tells agents that
+/// the dependency install consent flags a Store component that may cost money
+/// and never shows a price, quoting this dialog. The landing repository checks
+/// its own side; this keeps the dialog from drifting away from it unnoticed.
+/// Change both together.
+#[test]
+fn install_dialog_paid_notice_matches_what_the_landing_quotes() {
+    let dialog: serde_json::Value =
+        serde_json::from_str(&read("src/i18n/locales/en/printJob.json")).unwrap();
+    assert_eq!(
+        dialog["install"]["paid"],
+        "This component may cost money in the Microsoft Store."
+    );
+}

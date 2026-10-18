@@ -101,7 +101,7 @@ The landing page, https://pluryprint.maecly.com, is not in this repository. It l
 
 To redeploy the landing by hand, use **Run workflow** on **Landing** in this repository, or push to `main` of `MAECLY/pluryprint-landing`. If the hook is regenerated in Vercel (the project's Git settings, under Deploy Hooks), replace the `LANDING_DEPLOY_HOOK` secret with the new URL. Anyone holding that URL can start a deployment, so it is kept only in the secret.
 
-`src-tauri/tests/release_pipeline.rs` (`landing_redeploys_on_every_published_release`) pins the triggers, the empty permissions, the secret reaching the shell only through the environment, and the failing `curl`.
+`src-tauri/tests/release_pipeline.rs` (`landing_redeploys_on_every_published_release`) pins the triggers, the empty permissions, the secret reaching the shell only through the environment, and the failing `curl`. `install_dialog_paid_notice_matches_what_the_landing_quotes`, in the same file, keeps the install dialog's Microsoft Store cost notice equal to the wording the landing's `llms.txt` quotes, which the landing repository checks from its side.
 
 ## Caching
 
