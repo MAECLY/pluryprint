@@ -8,9 +8,10 @@
 #
 # Fixed rather than ignored (October 2026): RUSTSEC-2026-0187 (lopdf 0.39,
 # stack overflow on nested PDF objects: lopdf 0.44 + printpdf 0.12),
-# RUSTSEC-2026-0285 (rustls 0.23.45), RUSTSEC-2026-0194/0195 (quick-xml 0.42
-# through plist 1.10), RUSTSEC-2026-0190 (anyhow 1.0.104) and
-# RUSTSEC-2026-0221 (event-listener 5.4.2).
+# RUSTSEC-2026-0285 (rustls 0.23.45), RUSTSEC-2026-0346 to 0349 (rustls
+# 0.23.46), RUSTSEC-2026-0194/0195 (quick-xml 0.42 through plist 1.10),
+# RUSTSEC-2026-0190 (anyhow 1.0.104) and RUSTSEC-2026-0221 (event-listener
+# 5.4.2).
 
 [advisories]
 ignore = [
@@ -35,5 +36,21 @@ ignore = [
   # rustybuzz 0.20 — unmaintained (succeeded by harfrust). Text shaping inside
   # usvg, same path and same exit as ttf-parser above.
   "RUSTSEC-2026-0206",
+  # zip 4.6 — extraction keeps SUID/SGID bits. zip comes in only through
+  # tauri-plugin-updater, only on Windows, where it unpacks an update package
+  # that is a zip; ours are NSIS .exe installers, which never reach it. The
+  # package is extracted only after `Update::download` has checked its
+  # minisign signature against the key in tauri.conf.json (update/install.rs),
+  # so an archive we did not sign is refused before zip sees it, and SUID/SGID
+  # bits do not exist on Windows. Fixed in zip 9, which no
+  # tauri-plugin-updater 2.x uses yet (2.14 still requires zip ^4); drop the
+  # three zip entries when one does.
+  "RUSTSEC-2026-0367",
+  # zip 4.6 — extraction creates symlinks pointing outside the destination.
+  # Same path, same signature check and same exit as the entry above.
+  "RUSTSEC-2026-0368",
+  # zip 4.6 — extraction applies Unix permissions through those symlinks.
+  # Same path, same signature check and same exit as the entries above.
+  "RUSTSEC-2026-0369",
 ]
 informational_warnings = ["unmaintained", "unsound", "notice"]

@@ -76,7 +76,7 @@ Both jobs fail on a known vulnerability, and the only exceptions are written dow
 - **Rust (RustSec).** `cargo audit` fails on any vulnerability in `src-tauri/Cargo.lock` or `shell-ext-win/Cargo.lock`. Informational advisories (unmaintained, unsound) are reported but do not fail it. `src-tauri/.cargo/audit.toml` is the ignore list; `cargo audit` reads it from the directory it runs in, so run it from `src-tauri/` locally too. Ignores are by advisory ID, so a new advisory against the same crate still fails. `ci_is_the_lean_pull_request_gate` checks that every ignored ID has a comment above it.
 - **npm.** CI audits production dependencies at `high` and above. A full audit (`pnpm audit`, dev dependencies included) is clean apart from the advisories in `package.json` → `pnpm.auditConfig.ignoreGhsas`, listed below. Patched releases inside the major the tree already uses are forced with `pnpm.overrides`.
 
-Accepted advisories (2026-10-10):
+Accepted advisories (2026-10-18):
 
 | Advisory | Package | Why it is accepted | Exit |
 |---|---|---|---|
@@ -85,13 +85,14 @@ Accepted advisories (2026-10-10):
 | RUSTSEC-2024-0436 (unmaintained) | paste 1.0 | Build time only: proc-macro of specta, pinned by tauri-specta | specta without it |
 | RUSTSEC-2026-0192 (unmaintained) | ttf-parser 0.25 | Through usvg/fontdb for SVG text; reads the system's fonts, not the printed file. svg2pdf 0.13 is the latest | svg2pdf on a newer usvg |
 | RUSTSEC-2026-0206 (unmaintained) | rustybuzz 0.20 | Text shaping in usvg, same path as ttf-parser | Same |
+| RUSTSEC-2026-0367, 0368, 0369 (vulnerabilities) | zip 4.6 | Windows only, through tauri-plugin-updater, to unpack a zip update package; ours are NSIS `.exe` installers, and a package is unpacked only after its minisign signature has been checked. The flaws are SUID/SGID bits and Unix symlink targets, which do not apply on Windows. zip 9 has the fix; tauri-plugin-updater 2.14 still requires zip ^4 | A tauri-plugin-updater on zip 9 |
 | GHSA-5c6j-r48x-rmvq, GHSA-qj8w-gfj5-8c6v (high, moderate) | serialize-javascript 6.0.2 | Dev only: mocha 10, required by `@wdio/mocha-framework` 9, uses it only in its parallel mode (worker pool), to pass our own test results between processes. The fix is 7.x, a new major | A mocha on serialize-javascript 7 |
 | GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3 (high) | extract-zip 2.0.1 | Dev only: `@puppeteer/browsers` 2 in `@wdio/utils` 9 unpacks downloaded browsers and drivers, which the E2E suite never asks for (it drives the built app through tauri-driver). No patched release exists | WebdriverIO 10, whose `@puppeteer/browsers` 3 drops extract-zip |
 | GHSA-c475-qrg2-pj4r (high) | basic-ftp 5.3.1 | Dev only: `get-uri` in the proxy support of the same `@puppeteer/browsers` 2, reached only when it downloads a browser through an `ftp:` PAC URL. Fixed in 6.2.1, a new major that `get-uri` (latest included) does not accept | WebdriverIO 10 (`@puppeteer/browsers` 3 has no proxy-agent) |
 | GHSA-vfj7-8cjw-p6xm (high) | braces 3.0.3 | Dev only: micromatch/chokidar in Tailwind 3, lint-staged and mocha, matching our own glob patterns. No patched release exists | A patched braces |
 | GHSA-rj75-hqrm-r3gf (moderate) | postcss-selector-parser 6.1.4 | Dev only: Tailwind 3 parses our own stylesheets with it. The fix is 7.1.6, a major Tailwind 3 does not accept (Tailwind stays on 3.x, see `.github/dependabot.yml`) | Tailwind on postcss-selector-parser 7 |
 
-Fixed rather than accepted in October 2026: RUSTSEC-2026-0187 (lopdf 0.39, stack overflow on deeply nested PDF objects, which a user's PDF could trigger: lopdf 0.44 and printpdf 0.12, with a regression test in `engine/convert`), RUSTSEC-2026-0285 (rustls 0.23.45), RUSTSEC-2026-0194/0195 (quick-xml 0.42 through plist 1.10), RUSTSEC-2026-0190 (anyhow 1.0.104), RUSTSEC-2026-0221 (event-listener 5.4.2), and 73 npm advisories through WebdriverIO 9.32 and the overrides.
+Fixed rather than accepted in October 2026: RUSTSEC-2026-0187 (lopdf 0.39, stack overflow on deeply nested PDF objects, which a user's PDF could trigger: lopdf 0.44 and printpdf 0.12, with a regression test in `engine/convert`), RUSTSEC-2026-0285 (rustls 0.23.45), RUSTSEC-2026-0346 to 0349 (rustls 0.23.46), RUSTSEC-2026-0194/0195 (quick-xml 0.42 through plist 1.10), RUSTSEC-2026-0190 (anyhow 1.0.104), RUSTSEC-2026-0221 (event-listener 5.4.2), and 73 npm advisories through WebdriverIO 9.32 and the overrides.
 
 ## The landing follows the release
 

@@ -621,7 +621,7 @@ GPL-2.0-only, LGPL-only, EPL, CDDL, SSPL or proprietary.
 | `roxmltree`                         | 0.20.0           | MIT OR Apache-2.0                                   | Apache-2.0               | app                               |
 | `rustc-hash`                        | 2.1.2            | Apache-2.0 OR MIT                                   | Apache-2.0               | app                               |
 | `rustix`                            | 1.1.4            | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | Apache-2.0               | app                               |
-| `rustls`                            | 0.23.45          | Apache-2.0 OR ISC OR MIT                            | Apache-2.0               | app                               |
+| `rustls`                            | 0.23.46          | Apache-2.0 OR ISC OR MIT                            | Apache-2.0               | app                               |
 | `rustls-pki-types`                  | 1.15.0           | MIT OR Apache-2.0                                   | Apache-2.0               | app                               |
 | `rustls-platform-verifier`          | 0.7.1            | MIT OR Apache-2.0                                   | Apache-2.0               | app                               |
 | `rustls-webpki`                     | 0.103.15         | ISC                                                 | ISC                      | app                               |
@@ -1745,7 +1745,7 @@ Used by:
 - `ring` 0.17.14 (https://github.com/briansmith/ring)
 - `roxmltree` 0.20.0 (https://github.com/RazrFalcon/roxmltree), by Yevhenii Reizner
 - `rustix` 1.1.4 (https://github.com/bytecodealliance/rustix), by Dan Gohman, Jakub Konka
-- `rustls` 0.23.45 (https://github.com/rustls/rustls)
+- `rustls` 0.23.46 (https://github.com/rustls/rustls)
 - `scopeguard` 1.2.0 (https://github.com/bluss/scopeguard), by bluss
 - `security-framework` 3.7.0 (https://github.com/kornelski/rust-security-framework), by Steven Fackler, Kornel
 - `security-framework-sys` 2.17.0 (https://github.com/kornelski/rust-security-framework), by Steven Fackler, Kornel
