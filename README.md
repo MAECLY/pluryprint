@@ -6,6 +6,11 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 [![Stack](https://img.shields.io/badge/stack-Tauri%202%20%2B%20Rust%20%2B%20React-success)](./docs/04-architecture/tech-stack.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%E2%86%92%20macOS-lightgrey)](./docs/06-roadmap/milestones.md)
+[![Release](https://img.shields.io/github/v/release/MAECLY/pluryprint)](https://github.com/MAECLY/pluryprint/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/MAECLY/pluryprint/total)](https://github.com/MAECLY/pluryprint/releases)
+[![Stars](https://img.shields.io/github/stars/MAECLY/pluryprint)](https://github.com/MAECLY/pluryprint/stargazers)
+[![Views](https://hits.sh/github.com/MAECLY/pluryprint.svg?label=views)](https://hits.sh/github.com/MAECLY/pluryprint/)
+[![Last commit](https://img.shields.io/github/last-commit/MAECLY/pluryprint)](https://github.com/MAECLY/pluryprint/commits/main)
 
 ---
 
