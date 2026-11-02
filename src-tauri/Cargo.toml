@@ -144,11 +144,11 @@ tauri-plugin-single-instance = "2"
 # background. Driven Rust-side only (`ipc::notify`); no JS capability needed.
 # Held to the line built for the `tauri` minor we use (2.5 needs tauri 2.12),
 # so a plugin bump never drags tauri along on its own.
-tauri-plugin-notification = "~2.5"
+tauri-plugin-notification = "~2.7"
 # FR-082/083/087: download, verify (minisign, against the public key in
 # tauri.conf.json) and install signed updates. 2.13 is the line built for
 # tauri 2.12; held to it for the same reason as above. See ADR-0008.
-tauri-plugin-updater = "~2.13"
+tauri-plugin-updater = "~2.14"
 
 # --- Dev/test only ---
 # `test-util` unlocks tokio's virtual clock (`start_paused` / `time::advance`)
