@@ -496,6 +496,415 @@ mod ffi {
     }
 }
 
+/// One thread per printer that listens to the spooler's job notifications
+/// (`FindFirstPrinterChangeNotification`) and keeps a [`JobJournal`] of them,
+/// so a job's `PRINTED` bit is known after the spooler deleted the job.
+///
+/// The thread never talks to the device and wakes every [`watch::TICK_MS`]
+/// to see whether it is still wanted; it stops after [`watch::IDLE`] without
+/// anyone asking about the printer, and is started again on the next request.
+/// Its journal is handed over to the next thread, so nothing heard is lost.
+#[cfg(windows)]
+mod watch {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::Foundation::{GetLastError, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows::Win32::Graphics::Printing::{
+        ClosePrinter, FindClosePrinterChangeNotification, FindFirstPrinterChangeNotification,
+        FindNextPrinterChangeNotification, FreePrinterNotifyInfo, OpenPrinterW,
+        JOB_NOTIFY_FIELD_DOCUMENT, JOB_NOTIFY_FIELD_STATUS, JOB_NOTIFY_FIELD_SUBMITTED,
+        JOB_NOTIFY_FIELD_USER_NAME, JOB_NOTIFY_TYPE, PRINTER_CHANGE_JOB, PRINTER_HANDLE,
+        PRINTER_NOTIFY_INFO, PRINTER_NOTIFY_INFO_DATA, PRINTER_NOTIFY_INFO_DISCARDED,
+        PRINTER_NOTIFY_OPTIONS, PRINTER_NOTIFY_OPTIONS_REFRESH, PRINTER_NOTIFY_OPTIONS_TYPE,
+    };
+    use windows::Win32::System::Threading::WaitForSingleObject;
+
+    use super::{JobJournal, JobNote, SeenJob};
+
+    /// How long a watcher outlives the last question about its printer.
+    pub(super) const IDLE: Duration = Duration::from_secs(15 * 60);
+    /// How often the thread checks whether it is still wanted.
+    pub(super) const TICK_MS: u32 = 5_000;
+    /// How long [`ensure`] waits for a new thread to arm.
+    const ARM_TIMEOUT: Duration = Duration::from_secs(5);
+    /// After a printer could not be watched, how long [`ensure`] answers
+    /// `false` at once instead of trying (and possibly waiting) again: it is
+    /// called on every poll.
+    const RETRY_AFTER: Duration = Duration::from_secs(60);
+
+    fn failures() -> &'static Mutex<HashMap<String, Instant>> {
+        static FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+        FAILURES.get_or_init(Default::default)
+    }
+
+    struct Watch {
+        journal: Mutex<JobJournal>,
+        touched: Mutex<Instant>,
+        /// Cleared when the thread ends (or must end): the entry is then
+        /// replaced by the next [`ensure`].
+        alive: AtomicBool,
+    }
+
+    impl Watch {
+        fn touch(&self) {
+            *self.touched.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+        }
+
+        fn idle(&self) -> bool {
+            self.touched
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .elapsed()
+                >= IDLE
+        }
+    }
+
+    fn registry() -> &'static Mutex<HashMap<String, Arc<Watch>>> {
+        static REGISTRY: OnceLock<Mutex<HashMap<String, Arc<Watch>>>> = OnceLock::new();
+        REGISTRY.get_or_init(Default::default)
+    }
+
+    fn get(printer: &str) -> Option<Arc<Watch>> {
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(printer)
+            .cloned()
+    }
+
+    /// Make sure `printer` is being watched; `true` once it is. A new thread
+    /// is armed before this returns, so every job submitted afterwards is
+    /// heard from its first notification.
+    pub fn ensure(printer: &str) -> bool {
+        {
+            let mut failed = failures().lock().unwrap_or_else(|e| e.into_inner());
+            match failed.get(printer) {
+                Some(at) if at.elapsed() < RETRY_AFTER => return false,
+                Some(_) => {
+                    failed.remove(printer);
+                }
+                None => {}
+            }
+        }
+        let watch = {
+            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(w) = reg.get(printer) {
+                if w.alive.load(Ordering::Acquire) {
+                    w.touch();
+                    return true;
+                }
+            }
+            // Carry over what an ended watcher heard.
+            let journal = reg
+                .remove(printer)
+                .map(|old| {
+                    std::mem::take(&mut *old.journal.lock().unwrap_or_else(|e| e.into_inner()))
+                })
+                .unwrap_or_default();
+            let watch = Arc::new(Watch {
+                journal: Mutex::new(journal),
+                touched: Mutex::new(Instant::now()),
+                alive: AtomicBool::new(true),
+            });
+            reg.insert(printer.to_string(), Arc::clone(&watch));
+            watch
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let name = printer.to_string();
+        let thread_watch = Arc::clone(&watch);
+        let spawned = std::thread::Builder::new()
+            .name("pluryprint-spool-watch".into())
+            .spawn(move || run(&name, &thread_watch, &ready_tx));
+        let armed = match spawned {
+            Ok(_) => match ready_rx.recv_timeout(ARM_TIMEOUT) {
+                Ok(Ok(())) => true,
+                Ok(Err(e)) => {
+                    tracing::debug!(event = "os_job_watch_unavailable", printer = %printer, error = %e);
+                    false
+                }
+                Err(_) => false,
+            },
+            Err(e) => {
+                tracing::debug!(event = "os_job_watch_unavailable", printer = %printer, error = %e);
+                false
+            }
+        };
+        if !armed {
+            // A thread still arming sees this and leaves.
+            watch.alive.store(false, Ordering::Release);
+            failures()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(printer.to_string(), Instant::now());
+        }
+        armed
+    }
+
+    /// What the watcher heard about job `id` on `printer`.
+    pub fn seen(printer: &str, id: u32) -> Option<SeenJob> {
+        let watch = get(printer)?;
+        watch.touch();
+        let journal = watch.journal.lock().unwrap_or_else(|e| e.into_inner());
+        journal.get(id).cloned()
+    }
+
+    /// The journal's [`JobJournal::mark`] for `printer` (0 when unwatched).
+    pub fn mark(printer: &str) -> u64 {
+        get(printer).map_or(0, |w| {
+            w.journal.lock().unwrap_or_else(|e| e.into_inner()).mark()
+        })
+    }
+
+    /// Every job the watcher heard about on `printer`.
+    pub fn seen_jobs(printer: &str) -> Vec<SeenJob> {
+        let Some(watch) = get(printer) else {
+            return Vec::new();
+        };
+        watch.touch();
+        let journal = watch.journal.lock().unwrap_or_else(|e| e.into_inner());
+        journal.jobs().cloned().collect()
+    }
+
+    struct Printer(PRINTER_HANDLE);
+
+    impl Drop for Printer {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from a successful OpenPrinterW.
+            let _ = unsafe { ClosePrinter(self.0) };
+        }
+    }
+
+    struct Change(HANDLE);
+
+    impl Drop for Change {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from a successful
+            // FindFirstPrinterChangeNotification; its printer is still open
+            // (dropped after this, in reverse declaration order).
+            let _ = unsafe { FindClosePrinterChangeNotification(self.0) };
+        }
+    }
+
+    /// The watcher thread: arm, report, then apply notifications until the
+    /// handle fails or nobody has asked for [`IDLE`].
+    fn run(printer: &str, watch: &Watch, ready: &mpsc::Sender<Result<(), String>>) {
+        let result = listen(printer, watch, ready);
+        watch.alive.store(false, Ordering::Release);
+        if let Err(e) = result {
+            // Before arming, the error went to `ensure`; after, it ends the
+            // thread and the next `ensure` starts another.
+            let _ = ready.send(Err(e.clone()));
+            tracing::debug!(event = "os_job_watch_ended", printer = %printer, error = %e);
+        }
+    }
+
+    fn listen(
+        printer: &str,
+        watch: &Watch,
+        ready: &mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        let wide = HSTRING::from(printer);
+        let mut handle = PRINTER_HANDLE::default();
+        // SAFETY: `wide` outlives the call; `handle` is a valid out pointer.
+        unsafe { OpenPrinterW(PCWSTR(wide.as_ptr()), &mut handle, None) }
+            .map_err(|e| format!("OpenPrinter('{printer}') failed: {e}"))?;
+        let printer_handle = Printer(handle);
+
+        let mut fields = [
+            JOB_NOTIFY_FIELD_STATUS as u16,
+            JOB_NOTIFY_FIELD_DOCUMENT as u16,
+            JOB_NOTIFY_FIELD_USER_NAME as u16,
+            JOB_NOTIFY_FIELD_SUBMITTED as u16,
+        ];
+        let mut types = [PRINTER_NOTIFY_OPTIONS_TYPE {
+            Type: JOB_NOTIFY_TYPE as u16,
+            Count: fields.len() as u32,
+            pFields: fields.as_mut_ptr(),
+            ..Default::default()
+        }];
+        let mut options = PRINTER_NOTIFY_OPTIONS {
+            Version: 2,
+            Flags: 0,
+            Count: types.len() as u32,
+            pTypes: types.as_mut_ptr(),
+        };
+        // SAFETY: valid printer handle; `options` and the arrays it points to
+        // live for the whole function.
+        let change = unsafe {
+            FindFirstPrinterChangeNotification(
+                printer_handle.0,
+                PRINTER_CHANGE_JOB,
+                0,
+                Some(std::ptr::from_ref(&options).cast()),
+            )
+        };
+        if change.is_invalid() {
+            // SAFETY: plain thread-local read right after the failing call.
+            return Err(format!(
+                "FindFirstPrinterChangeNotification failed: {:?}",
+                unsafe { GetLastError() }
+            ));
+        }
+        let change = Change(change);
+        // The jobs already on the queue, with their submission stamps: a job
+        // read back from `queue.json` can be matched from its next change.
+        refresh(change.0, &mut options, watch);
+        let _ = ready.send(Ok(()));
+
+        loop {
+            if !watch.alive.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            if watch.idle() {
+                // Decided under the registry lock, which `ensure` holds while
+                // it reads `alive`: once this thread commits to leaving, no
+                // `ensure` can still count on it.
+                let _reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                if watch.idle() {
+                    watch.alive.store(false, Ordering::Release);
+                    return Ok(());
+                }
+            }
+            // SAFETY: valid change handle.
+            let waited = unsafe { WaitForSingleObject(change.0, TICK_MS) };
+            if waited == WAIT_TIMEOUT {
+                continue;
+            }
+            if waited != WAIT_OBJECT_0 {
+                return Err(format!("waiting on the spooler failed: {waited:?}"));
+            }
+            let mut what = 0u32;
+            let mut info: *mut PRINTER_NOTIFY_INFO = std::ptr::null_mut();
+            // SAFETY: valid change handle; out pointers live across the call;
+            // `options` is the set the handle was armed with.
+            let ok = unsafe {
+                FindNextPrinterChangeNotification(
+                    change.0,
+                    Some(&mut what),
+                    Some(std::ptr::from_ref(&options).cast()),
+                    Some(std::ptr::from_mut(&mut info).cast()),
+                )
+            };
+            if !ok.as_bool() {
+                return Err(format!(
+                    "FindNextPrinterChangeNotification failed: {:?}",
+                    // SAFETY: plain thread-local read right after the failing call.
+                    unsafe { GetLastError() }
+                ));
+            }
+            // Notifications were dropped (the spooler's buffer overflowed):
+            // ask for the whole state again so the stamps are complete. A
+            // job that ended in the lost part is simply not known — it stays
+            // unconfirmed, as it was before the watcher existed.
+            if apply(watch, info) {
+                refresh(change.0, &mut options, watch);
+            }
+        }
+    }
+
+    /// Ask the spooler for every job's current fields and apply them.
+    fn refresh(change: HANDLE, options: &mut PRINTER_NOTIFY_OPTIONS, watch: &Watch) {
+        options.Flags = PRINTER_NOTIFY_OPTIONS_REFRESH;
+        let mut info: *mut PRINTER_NOTIFY_INFO = std::ptr::null_mut();
+        // SAFETY: as in `listen`.
+        let ok = unsafe {
+            FindNextPrinterChangeNotification(
+                change,
+                None,
+                Some(std::ptr::from_ref(options).cast()),
+                Some(std::ptr::from_mut(&mut info).cast()),
+            )
+        };
+        options.Flags = 0;
+        if ok.as_bool() {
+            apply(watch, info);
+        }
+    }
+
+    /// Apply one notification to the journal and free it. Returns whether
+    /// the spooler says some notifications were discarded.
+    fn apply(watch: &Watch, info: *mut PRINTER_NOTIFY_INFO) -> bool {
+        if info.is_null() {
+            return false;
+        }
+        // SAFETY: the spooler returned a PRINTER_NOTIFY_INFO followed by
+        // `Count` PRINTER_NOTIFY_INFO_DATA entries (a C flexible array), all
+        // alive until FreePrinterNotifyInfo below.
+        let discarded = unsafe {
+            let header = &*info;
+            let data = std::slice::from_raw_parts(header.aData.as_ptr(), header.Count as usize);
+            let mut by_job: Vec<(u32, Vec<JobNote>)> = Vec::new();
+            for d in data {
+                if u32::from(d.Type) != JOB_NOTIFY_TYPE {
+                    continue;
+                }
+                let Some(note) = note_of(d) else {
+                    continue;
+                };
+                match by_job.iter_mut().find(|(id, _)| *id == d.Id) {
+                    Some((_, notes)) => notes.push(note),
+                    None => by_job.push((d.Id, vec![note])),
+                }
+            }
+            let mut journal = watch.journal.lock().unwrap_or_else(|e| e.into_inner());
+            for (id, notes) in &by_job {
+                journal.note(*id, notes);
+            }
+            header.Flags & PRINTER_NOTIFY_INFO_DISCARDED != 0
+        };
+        // SAFETY: `info` came from FindNextPrinterChangeNotification.
+        let _ = unsafe { FreePrinterNotifyInfo(info) };
+        discarded
+    }
+
+    /// Read one notification entry.
+    ///
+    /// # Safety
+    /// `d` must be an entry of a live PRINTER_NOTIFY_INFO.
+    unsafe fn note_of(d: &PRINTER_NOTIFY_INFO_DATA) -> Option<JobNote> {
+        let field = u32::from(d.Field);
+        // SAFETY (all arms): the union member read is the one the spooler
+        // fills for that field — a DWORD for the status, a buffer for the
+        // strings and the SYSTEMTIME.
+        unsafe {
+            if field == JOB_NOTIFY_FIELD_STATUS {
+                return Some(JobNote::Status(d.NotifyData.adwData[0]));
+            }
+            let (len, buf) = (d.NotifyData.Data.cbBuf as usize, d.NotifyData.Data.pBuf);
+            if buf.is_null() {
+                return None;
+            }
+            if field == JOB_NOTIFY_FIELD_SUBMITTED {
+                if len < 16 {
+                    return None;
+                }
+                // SYSTEMTIME: year, month, day of week, day, hour, minute,
+                // second, milliseconds.
+                let t = std::ptr::read_unaligned(buf.cast::<[u16; 8]>());
+                return Some(JobNote::Submitted(super::submitted_stamp([
+                    t[0], t[1], t[3], t[4], t[5], t[6], t[7],
+                ])));
+            }
+            let text = || {
+                let units = std::slice::from_raw_parts(buf.cast::<u16>(), len / 2);
+                let end = units.iter().position(|&c| c == 0).unwrap_or(units.len());
+                String::from_utf16_lossy(&units[..end])
+            };
+            if field == JOB_NOTIFY_FIELD_DOCUMENT {
+                Some(JobNote::Document(text()))
+            } else if field == JOB_NOTIFY_FIELD_USER_NAME {
+                Some(JobNote::User(text()))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// The ids of the jobs currently on `printer` (the "before" snapshot). An
 /// error means the snapshot is unknown, and the caller must not guess the new
 /// job from the "after" list alone.
@@ -512,10 +921,11 @@ pub fn job_ids(printer: &str) -> Result<Vec<u32>, super::TrackError> {
 /// reads it back later — the queue after a restart, the CLI's offline cancel —
 /// can tell this job from a later one the spooler gave the same id.
 #[cfg(windows)]
-pub fn find_spooled_job(printer: &str, before: &[u32], pdf: &str) -> Option<JobRef> {
+pub fn find_spooled_job(printer: &str, before: &[u32], mark: u64, pdf: &str) -> Option<JobRef> {
     let user = std::env::var("USERNAME").unwrap_or_default();
     match ffi::jobs(printer) {
         Ok(after) => {
+            let after = with_seen_jobs(&after, &watch::seen_jobs(printer), mark);
             let found = pick_new_job(before, &after, pdf, &user)
                 .and_then(|id| after.iter().find(|j| j.id == id))
                 .map(JobRef::of);
@@ -544,9 +954,9 @@ pub fn find_spooled_job(printer: &str, before: &[u32], pdf: &str) -> Option<JobR
 /// for `pdf` that was not on `printer` before, once it is there, with its
 /// submission stamp ([`JobRef`]) like [`find_spooled_job`]'s.
 #[cfg(windows)]
-pub fn new_job_of(printer: &str, before: &[u32], pdf: &str) -> Option<JobRef> {
+pub fn new_job_of(printer: &str, before: &[u32], mark: u64, pdf: &str) -> Option<JobRef> {
     let user = std::env::var("USERNAME").unwrap_or_default();
-    let after = ffi::jobs(printer).ok()?;
+    let after = with_seen_jobs(&ffi::jobs(printer).ok()?, &watch::seen_jobs(printer), mark);
     pick_new_job(before, &after, pdf, &user)
         .and_then(|id| after.iter().find(|j| j.id == id))
         .map(JobRef::of)
@@ -593,34 +1003,277 @@ pub fn job_document(printer: &str, os_job_id: &str) -> Option<String> {
     }
 }
 
+/// What the spooler announced about one job through its change notifications
+/// ([`watch_printer`]), remembered after the job left the queue.
+///
+/// Windows deletes a job the moment it has printed (unless *Keep printed
+/// documents* is on): the `PRINTED` bit lives for about a millisecond before
+/// the job is gone (`0x94` → `0x84` → `0x184`, observed on an Epson network
+/// queue), so polling `GetJob` never sees it and every print would end
+/// `unconfirmed`. The notifications do carry it, so the watcher keeps every
+/// status bit each job ever had, and a job that left the queue after the
+/// spooler marked it printed is reported printed ([`left_queue_state`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SeenJob {
+    /// The spooler's job id.
+    pub id: u32,
+    /// The submission stamp ([`submitted_stamp`]), empty until the spooler
+    /// sent it. Without it the record can never be matched to a [`JobRef`].
+    pub submitted: String,
+    /// The first document name the spooler reported: the full path SumatraPDF
+    /// printed, before [`retitle_job`] cut it down to the file name.
+    pub document: String,
+    /// Who submitted it.
+    pub user: String,
+    /// Every `JOB_STATUS_*` bit the job carried in any notification, OR-ed.
+    pub bits: u32,
+    /// Arrival order, for pruning the oldest record first.
+    seq: u64,
+}
+
+impl SeenJob {
+    /// The record as a queue entry, for [`pick_new_job`].
+    pub fn as_queued(&self) -> QueuedJob {
+        QueuedJob {
+            id: self.id,
+            document: self.document.clone(),
+            user: self.user.clone(),
+            submitted: self.submitted.clone(),
+        }
+    }
+
+    /// Whether the spooler first told the watcher about this job after
+    /// [`JobJournal::mark`] returned `mark`.
+    pub fn since(&self, mark: u64) -> bool {
+        self.seq > mark
+    }
+
+    /// Whether this record is the job `job` was taken from: same id and same
+    /// submission stamp. A bare reference matches nothing.
+    pub fn is(&self, job: &JobRef) -> bool {
+        !self.submitted.is_empty()
+            && self.id == job.id
+            && job.submitted.as_deref() == Some(self.submitted.as_str())
+    }
+}
+
+/// One field of one job notification, as the watcher reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobNote {
+    /// `JOB_NOTIFY_FIELD_STATUS`.
+    Status(u32),
+    /// `JOB_NOTIFY_FIELD_DOCUMENT`.
+    Document(String),
+    /// `JOB_NOTIFY_FIELD_USER_NAME`.
+    User(String),
+    /// `JOB_NOTIFY_FIELD_SUBMITTED`, as a [`submitted_stamp`].
+    Submitted(String),
+}
+
+/// The jobs a printer's watcher has heard about, by spooler id. Pure.
+#[derive(Debug, Default)]
+pub struct JobJournal {
+    jobs: std::collections::HashMap<u32, SeenJob>,
+    next: u64,
+}
+
+impl JobJournal {
+    /// How many records are kept; the oldest go first. A record is only
+    /// needed between a job's submission and the next poll after it left.
+    pub const CAP: usize = 256;
+
+    /// Apply the notes of one notification to job `id`. A submission stamp
+    /// that differs from the recorded one means the spooler reused the id for
+    /// another print (it numbers from low ids again after a restart): the old
+    /// record is dropped, so no bit of the earlier job is ever read as the new
+    /// one's. Stamps are applied first, because the spooler lists a new job's
+    /// status before its submission time.
+    pub fn note(&mut self, id: u32, notes: &[JobNote]) {
+        let stamps = notes.iter().filter(|n| matches!(n, JobNote::Submitted(_)));
+        let rest = notes.iter().filter(|n| !matches!(n, JobNote::Submitted(_)));
+        for note in stamps.chain(rest) {
+            self.apply(id, note);
+        }
+    }
+
+    fn apply(&mut self, id: u32, note: &JobNote) {
+        if let JobNote::Submitted(stamp) = note {
+            let reused = self
+                .jobs
+                .get(&id)
+                .is_some_and(|j| !j.submitted.is_empty() && j.submitted != *stamp);
+            if reused {
+                self.jobs.remove(&id);
+            }
+        }
+        if !self.jobs.contains_key(&id) {
+            self.prune();
+            self.next += 1;
+            self.jobs.insert(
+                id,
+                SeenJob {
+                    id,
+                    seq: self.next,
+                    ..SeenJob::default()
+                },
+            );
+        }
+        let Some(job) = self.jobs.get_mut(&id) else {
+            return;
+        };
+        match note {
+            JobNote::Status(bits) => job.bits |= bits,
+            JobNote::Document(d) if job.document.is_empty() => job.document = d.clone(),
+            JobNote::User(u) if job.user.is_empty() => job.user = u.clone(),
+            JobNote::Submitted(s) if job.submitted.is_empty() => job.submitted = s.clone(),
+            _ => {}
+        }
+    }
+
+    /// Make room for one more record.
+    fn prune(&mut self) {
+        while self.jobs.len() >= Self::CAP {
+            let Some(oldest) = self.jobs.values().min_by_key(|j| j.seq).map(|j| j.id) else {
+                return;
+            };
+            self.jobs.remove(&oldest);
+        }
+    }
+
+    /// The record for spooler id `id`.
+    pub fn get(&self, id: u32) -> Option<&SeenJob> {
+        self.jobs.get(&id)
+    }
+
+    /// Every record, in no particular order.
+    pub fn jobs(&self) -> impl Iterator<Item = &SeenJob> {
+        self.jobs.values()
+    }
+
+    /// A mark of how far the journal has got: records started after it are
+    /// those [`SeenJob::since`] calls newer. Taken before a job is spooled.
+    pub fn mark(&self) -> u64 {
+        self.next
+    }
+}
+
+/// How a job that is no longer on the queue ended, from what its
+/// notifications said ([`SeenJob`]). Pure.
+///
+/// Only positive evidence counts: `PRINTED` or `COMPLETE` seen at any point
+/// means the spooler finished sending it, so it is [`OsJobState::Completed`].
+/// Anything else — no record, a record that is not this job, or one that only
+/// shows the job being deleted — stays [`OsJobState::Gone`] (`unconfirmed`):
+/// a job deleted without the `PRINTED` bit may have been cancelled, but a
+/// driver that prints directly can also skip the bit, and calling a printed
+/// job cancelled would invite a duplicate.
+pub fn left_queue_state(job: &JobRef, seen: Option<&SeenJob>) -> OsJobState {
+    match seen {
+        Some(s) if s.is(job) && s.bits & (PRINTED | COMPLETE) != 0 => OsJobState::Completed,
+        _ => OsJobState::Gone,
+    }
+}
+
+/// The jobs on the queue now (`after`) plus those the watcher saw come and go
+/// meanwhile (`seen`), for [`pick_new_job`]: a short job can print and leave
+/// before SumatraPDF has even exited, and it is still ours to follow.
+///
+/// Only records started after `mark` ([`JobJournal::mark`], taken with the
+/// "before" snapshot) count: an earlier print of the same file has the same
+/// file name and has left the queue too, and adopting it would report the
+/// reprint printed on the strength of the old job's `PRINTED` bit. A record
+/// without a submission stamp is left out as well — it could not be told
+/// apart from a later job with its id. Pure.
+pub fn with_seen_jobs(after: &[QueuedJob], seen: &[SeenJob], mark: u64) -> Vec<QueuedJob> {
+    let mut all = after.to_vec();
+    all.extend(
+        seen.iter()
+            .filter(|s| {
+                s.since(mark) && !s.submitted.is_empty() && !after.iter().any(|j| j.id == s.id)
+            })
+            .map(SeenJob::as_queued),
+    );
+    all
+}
+
 /// What the job now carrying `job.id` says about `job`. Pure.
 ///
-/// - no job with that id: ours left the queue ([`OsJobState::Gone`]);
+/// - no job with that id: ours left the queue, and how it ended is read from
+///   its notifications ([`left_queue_state`]): printed, or
+///   [`OsJobState::Gone`] when nothing confirmed it;
 /// - a job with that id but another submission stamp: the spooler reused the
 ///   id for a different print, so ours is gone too, and the other job's state
 ///   is never reported as ours;
 /// - a bare reference ([`JobRef::verifiable`] is false) cannot be checked:
 ///   the job is followed by id, as only a reference taken in this process can
 ///   be (the queue does not adopt a bare one after a restart).
-pub fn tracked_state(job: &JobRef, now: Option<(u32, &QueuedJob)>) -> OsJobState {
+pub fn tracked_state(
+    job: &JobRef,
+    now: Option<(u32, &QueuedJob)>,
+    seen: Option<&SeenJob>,
+) -> OsJobState {
     match now {
-        None => OsJobState::Gone,
-        Some((_, current)) if job.verifiable() && !job.is(current) => OsJobState::Gone,
+        None => left_queue_state(job, seen),
+        Some((_, current)) if job.verifiable() && !job.is(current) => left_queue_state(job, seen),
         Some((bits, _)) => map_status(bits),
     }
 }
 
 /// Where the spooler job `os_job_id` ([`JobRef`]) stands on `printer`.
+///
+/// Once the job has left the queue, the printer's watcher ([`watch_printer`])
+/// says whether the spooler marked it printed on the way out. Its thread reads
+/// the notification a few milliseconds after the spooler sends it, so a job
+/// found gone without a verdict is asked about again for a short while
+/// ([`SEEN_GRACE`]) before it is called unconfirmed.
 #[cfg(windows)]
 pub fn job_state(printer: &str, os_job_id: &str) -> Result<OsJobState, super::TrackError> {
     let job = JobRef::parse(os_job_id).ok_or_else(|| {
         super::TrackError::Unavailable(format!("'{os_job_id}' is not a spooler job id"))
     })?;
+    // Armed here too, so a job read back from `queue.json` after a restart is
+    // followed by notifications from now on.
+    let watching = watch::ensure(printer);
     let now = ffi::status(printer, job.id)?;
-    Ok(tracked_state(
-        &job,
-        now.as_ref().map(|(bits, q)| (*bits, q)),
-    ))
+    let now = now.as_ref().map(|(bits, q)| (*bits, q));
+    let mut seen = watch::seen(printer, job.id);
+    let mut state = tracked_state(&job, now, seen.as_ref());
+    if state == OsJobState::Gone && watching && job.verifiable() {
+        let deadline = std::time::Instant::now() + SEEN_GRACE;
+        while state == OsJobState::Gone && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            seen = watch::seen(printer, job.id);
+            state = tracked_state(&job, now, seen.as_ref());
+        }
+    }
+    if state == OsJobState::Completed && now.is_none() {
+        tracing::debug!(
+            event = "os_job_printed_seen",
+            printer = %printer,
+            job = job.id,
+            bits = seen.as_ref().map_or(0, |s| s.bits),
+        );
+    }
+    Ok(state)
+}
+
+/// How long [`job_state`] waits for the watcher to catch up with a job that
+/// has already left the queue.
+#[cfg(windows)]
+const SEEN_GRACE: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// Start following `printer`'s job notifications ([`SeenJob`]) unless that is
+/// already being done. Called before a job is spooled, so its whole life is
+/// heard — including the `PRINTED` bit that polling cannot see. Best effort:
+/// when the spooler refuses, tracking works as before.
+///
+/// Returns the journal's [`JobJournal::mark`], to be passed with the "before"
+/// snapshot to [`find_spooled_job`] / [`new_job_of`], so only jobs heard of
+/// from now on can be adopted.
+#[cfg(windows)]
+pub fn watch_printer(printer: &str) -> u64 {
+    watch::ensure(printer);
+    watch::mark(printer)
 }
 
 /// What deleting the job `job` refers to would do. Pure.
@@ -858,13 +1511,13 @@ mod tests {
             "20261011T080000000",
         );
 
-        assert_eq!(tracked_state(&ours, None), OsJobState::Gone);
+        assert_eq!(tracked_state(&ours, None, None), OsJobState::Gone);
         assert_eq!(
-            tracked_state(&ours, Some((PRINTING, &same))),
+            tracked_state(&ours, Some((PRINTING, &same)), None),
             OsJobState::Processing
         );
         assert_eq!(
-            tracked_state(&ours, Some((PRINTING, &reused))),
+            tracked_state(&ours, Some((PRINTING, &reused)), None),
             OsJobState::Gone,
             "another print's state is never reported as ours"
         );
@@ -902,6 +1555,208 @@ mod tests {
         assert_eq!(
             cancel_verdict(&bare, Some(&same), &names, "me"),
             CancelVerdict::Unverifiable
+        );
+    }
+
+    /// The notifications of one print on an Epson L15160 network queue
+    /// (Windows 11, captured with `FindFirstPrinterChangeNotification`): the
+    /// `PRINTED` bit shows up together with `DELETING` and the job is gone a
+    /// millisecond later, so no poll can see it.
+    fn epson_print(journal: &mut JobJournal, id: u32, stamp: &str, path: &str) {
+        journal.note(
+            id,
+            &[
+                JobNote::Status(0x8),
+                JobNote::Document(path.to_string()),
+                JobNote::User("me".to_string()),
+                JobNote::Submitted(stamp.to_string()),
+            ],
+        );
+        for bits in [0x8, 0x18, 0x2018, 0x2010] {
+            journal.note(id, &[JobNote::Status(bits)]);
+        }
+        // Retitled by Pluryprint.
+        journal.note(id, &[JobNote::Document("report.pdf".to_string())]);
+        for bits in [0x2010, 0x10, 0x94, 0x84, 0x184] {
+            journal.note(id, &[JobNote::Status(bits)]);
+        }
+    }
+
+    /// FR-031: a job Windows printed and deleted between two polls is
+    /// reported printed, not `unconfirmed` — the user saw the paper come out
+    /// while the app said "not confirmed" for every job.
+    #[test]
+    fn fr_031_a_job_printed_and_deleted_between_polls_is_completed() {
+        let mut journal = JobJournal::default();
+        let path = r"C:\Users\me\AppData\Local\Temp\pluryprint-spool-l5NZGZ\report.pdf";
+        epson_print(&mut journal, 6, "20261105T043750227", path);
+        let ours = JobRef::parse("6@20261105T043750227").unwrap();
+        let seen = journal.get(6);
+        assert_eq!(seen.unwrap().document, path, "the first, full-path name");
+        assert_eq!(tracked_state(&ours, None, seen), OsJobState::Completed);
+        assert_eq!(left_queue_state(&ours, seen), OsJobState::Completed);
+        // Without the watcher it stays what it was: unconfirmed.
+        assert_eq!(tracked_state(&ours, None, None), OsJobState::Gone);
+        // While still on the queue, the live bits decide.
+        let live = stamped(6, "report.pdf", "20261105T043750227");
+        assert_eq!(
+            tracked_state(&ours, Some((0x2010, &live)), seen),
+            OsJobState::Processing
+        );
+    }
+
+    /// Only positive evidence counts: a job that left the queue without the
+    /// `PRINTED` bit — deleted in the Windows queue, or a record of another
+    /// print — is still `unconfirmed`, never printed and never cancelled.
+    #[test]
+    fn fr_031_a_job_deleted_without_printing_stays_unconfirmed() {
+        let mut journal = JobJournal::default();
+        journal.note(
+            7,
+            &[
+                JobNote::Status(0x8),
+                JobNote::Submitted("20261105T050000000".into()),
+            ],
+        );
+        journal.note(7, &[JobNote::Status(0x18)]);
+        journal.note(7, &[JobNote::Status(0x14)]); // DELETING while printing
+        journal.note(7, &[JobNote::Status(0x104)]);
+        let ours = JobRef::parse("7@20261105T050000000").unwrap();
+        assert_eq!(tracked_state(&ours, None, journal.get(7)), OsJobState::Gone);
+
+        // A printed record with another stamp, or a bare reference, is no
+        // evidence about our job.
+        let mut journal = JobJournal::default();
+        epson_print(&mut journal, 8, "20261105T060000000", r"C:\t\a.pdf");
+        let other = JobRef::parse("8@20261105T050000000").unwrap();
+        assert_eq!(
+            tracked_state(&other, None, journal.get(8)),
+            OsJobState::Gone
+        );
+        let bare = JobRef::parse("8").unwrap();
+        assert_eq!(tracked_state(&bare, None, journal.get(8)), OsJobState::Gone);
+        // A stampless record never matches.
+        let mut journal = JobJournal::default();
+        journal.note(9, &[JobNote::Status(0x94)]);
+        let r = JobRef::parse("9@20261105T060000000").unwrap();
+        assert_eq!(tracked_state(&r, None, journal.get(9)), OsJobState::Gone);
+    }
+
+    /// The spooler numbers jobs from low ids again after a restart: the new
+    /// job with an old id starts a fresh record, so the earlier job's
+    /// `PRINTED` bit is never read as the new one's — even though the spooler
+    /// lists the new job's status before its submission time.
+    #[test]
+    fn fr_031_a_reused_id_starts_a_fresh_record() {
+        let mut journal = JobJournal::default();
+        epson_print(&mut journal, 2, "20261105T010000000", r"C:\t\old.pdf");
+        journal.note(
+            2,
+            &[
+                JobNote::Status(0x8),
+                JobNote::Document(r"C:\t\new.pdf".into()),
+                JobNote::Submitted("20261105T020000000".into()),
+            ],
+        );
+        let seen = journal.get(2).unwrap();
+        assert_eq!(seen.bits, 0x8);
+        assert_eq!(seen.document, r"C:\t\new.pdf");
+        let new = JobRef::parse("2@20261105T020000000").unwrap();
+        assert_eq!(tracked_state(&new, None, Some(seen)), OsJobState::Gone);
+        // A job with a reused id still on the queue never borrows our record.
+        let old = JobRef::parse("2@20261105T010000000").unwrap();
+        let now = stamped(2, "new.pdf", "20261105T020000000");
+        assert_eq!(
+            tracked_state(&old, Some((0x10, &now)), Some(seen)),
+            OsJobState::Gone
+        );
+    }
+
+    /// The journal stays bounded: the oldest record goes first.
+    #[test]
+    fn the_job_journal_keeps_the_newest_records() {
+        let mut journal = JobJournal::default();
+        let total = JobJournal::CAP as u32 + 10;
+        for id in 1..=total {
+            journal.note(id, &[JobNote::Status(0x8)]);
+        }
+        assert_eq!(journal.jobs().count(), JobJournal::CAP);
+        assert!(journal.get(1).is_none());
+        assert!(journal.get(10).is_none());
+        assert!(journal.get(11).is_some());
+        assert!(journal.get(total).is_some());
+    }
+
+    /// FR-031: a one-page job can print and leave the queue before SumatraPDF
+    /// exits. The watcher's record still identifies it, so it is followed
+    /// (and reported printed) instead of ending untracked.
+    #[test]
+    fn fr_031_a_job_that_already_left_is_still_adopted() {
+        let staged = r"C:\Users\me\AppData\Local\Temp\pluryprint-spool-Ab1\report.pdf";
+        let mut journal = JobJournal::default();
+        epson_print(&mut journal, 12, "20261105T070000000", staged);
+        // Someone else's job, and a stampless record, are never adopted.
+        journal.note(
+            13,
+            &[
+                JobNote::Document(staged.into()),
+                JobNote::User("colleague".into()),
+                JobNote::Submitted("20261105T070000001".into()),
+            ],
+        );
+        journal.note(14, &[JobNote::Document(staged.into())]);
+        let seen: Vec<SeenJob> = journal.jobs().cloned().collect();
+        let after = vec![job(3, "old.pdf", "me")];
+        let all = with_seen_jobs(&after, &seen, 0);
+        assert_eq!(all.len(), 3, "the live job, ours and the colleague's");
+        assert_eq!(pick_new_job(&[3], &all, staged, "me"), Some(12));
+        let adopted = all.iter().find(|j| j.id == 12).map(JobRef::of).unwrap();
+        assert_eq!(adopted.to_string(), "12@20261105T070000000");
+        assert_eq!(
+            tracked_state(&adopted, None, journal.get(12)),
+            OsJobState::Completed
+        );
+        // A job both live and recorded is listed once, as the queue shows it.
+        let live = vec![stamped(12, "report.pdf", "20261105T070000000")];
+        assert_eq!(
+            with_seen_jobs(&live, &seen, 0)
+                .iter()
+                .filter(|j| j.id == 12)
+                .count(),
+            1
+        );
+    }
+
+    /// A reprint of the same file — the natural answer to an "unconfirmed"
+    /// row — must not adopt the earlier, already printed job: it has the same
+    /// file name and has left the queue too. Only records heard after the
+    /// "before" snapshot count, so the old one is never followed (and its
+    /// `PRINTED` bit never reported as the reprint's).
+    #[test]
+    fn fr_031_a_reprint_never_adopts_the_earlier_printed_job() {
+        let mut journal = JobJournal::default();
+        epson_print(
+            &mut journal,
+            20,
+            "20261105T080000000",
+            r"C:\t\pluryprint-spool-old\report.pdf",
+        );
+        let mark = journal.mark();
+        let staged = r"C:\t\pluryprint-spool-new\report.pdf";
+        let seen: Vec<SeenJob> = journal.jobs().cloned().collect();
+        // SumatraPDF has not spooled yet: nothing to adopt.
+        let all = with_seen_jobs(&[], &seen, mark);
+        assert!(all.is_empty());
+        assert_eq!(pick_new_job(&[], &all, staged, "me"), None);
+        // The reprint arrives and prints: only it is adopted.
+        epson_print(&mut journal, 21, "20261105T080100000", staged);
+        let seen: Vec<SeenJob> = journal.jobs().cloned().collect();
+        let all = with_seen_jobs(&[], &seen, mark);
+        assert_eq!(pick_new_job(&[], &all, staged, "me"), Some(21));
+        // Without the mark both would match and nothing could be adopted.
+        assert_eq!(
+            pick_new_job(&[], &with_seen_jobs(&[], &seen, 0), staged, "me"),
+            None
         );
     }
 

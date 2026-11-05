@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: a job that printed is now shown as printed instead of _Unconfirmed_. Windows removes a printed job from its queue about a millisecond after marking it printed, so checking the queue every few seconds never saw it; Pluryprint now listens to the print queue's change notifications and remembers that the job was printed. A job removed from the Windows queue without printing is still _Unconfirmed_.
+
 ## [0.0.3] - 2026-10-11
 
 Maintenance release: the Windows build compiles one copy of the Windows API bindings, the Explorer extension reports the right version, and the development tooling moves forward.
