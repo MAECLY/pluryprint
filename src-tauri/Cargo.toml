@@ -144,7 +144,7 @@ tauri-plugin-single-instance = "2"
 # background. Driven Rust-side only (`ipc::notify`); no JS capability needed.
 # Held to the line built for the `tauri` minor we use (2.5 needs tauri 2.12),
 # so a plugin bump never drags tauri along on its own.
-tauri-plugin-notification = "~2.5"
+tauri-plugin-notification = "~2.8"
 # FR-082/083/087: download, verify (minisign, against the public key in
 # tauri.conf.json) and install signed updates. 2.14 still requires tauri
 # 2.12 and moves its archive support to zip 9 (RUSTSEC-2026-0367/0368/0381/
