@@ -1,6 +1,6 @@
 # CI/CD
 
-> **TL;DR.** `ci.yml` is the lean pull-request gate: frontend lint, typecheck, format, tests and `pnpm audit` on ubuntu, and Rust fmt, clippy and the full test suite on Windows and macOS, plus `cargo audit` on macOS. It builds no bundle and reads no secret. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `pages.yml` redeploys the landing with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
+> **TL;DR.** `ci.yml` is the lean pull-request gate, with only the essential checks: frontend lint, typecheck, format and unit tests on ubuntu; Rust fmt, clippy and the full test suite on Windows; clippy and the unit tests on macOS. It builds no bundle and reads no secret. The dependency audits (`cargo audit`, `pnpm audit`) live in `audit.yml`, which runs weekly, on lockfile changes and by hand, and in the release guard; locally, `make check-full` runs everything. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `pages.yml` redeploys the landing with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
 
 This document specifies what CI does; [releasing.md](./releasing.md) covers the release workflows.
 
@@ -9,11 +9,12 @@ This document specifies what CI does; [releasing.md](./releasing.md) covers the 
 | Workflow | File | Trigger | Signs? | Publishes? |
 |---|---|---|---|---|
 | **CI** | `.github/workflows/ci.yml` | `pull_request`, `push` → `main`, `workflow_dispatch` | No | No |
+| **Audit** | `.github/workflows/audit.yml` | `schedule` (Mondays), `push` → `main` touching a lockfile, `package.json` or `audit.toml`; `workflow_dispatch` | No | No |
 | **release** | `.github/workflows/release.yml` | `push` of a `v*` tag; `workflow_dispatch` (build only) | Update artifacts (minisign); no OS code signing | A **draft** release, published by a person |
 | **release-channels** | `.github/workflows/release-channels.yml` | `release: published` | No | Overwrites `latest.json` on the `channel-beta` prerelease, forward only |
 | **Pages** | `.github/workflows/pages.yml` | `push` → `main` touching `site/`, `scripts/site/` or itself; `release: published`; `workflow_dispatch` | No | The landing page, filled with the latest published release ([below](#the-landing-follows-the-release)) |
 
-Only `ci.yml` runs on a pull request. There is no scheduled workflow.
+Only `ci.yml` runs on a pull request. `audit.yml` is the only scheduled workflow.
 
 ```yaml
 concurrency:
@@ -35,7 +36,6 @@ Two jobs, both blocking, and nothing else. `src-tauri/tests/release_pipeline.rs`
 2. `pnpm typecheck` (`tsc --noEmit`)
 3. `pnpm format:check` (Prettier)
 4. `pnpm test` (Vitest)
-5. `pnpm audit --prod --audit-level high`: a high or critical advisory in a production dependency fails the job (see [Dependency audits](#dependency-audits))
 
 > Note that `e2e/tsconfig.json` is standalone: `pnpm typecheck` does **not** type-check the E2E specs. They are checked when `pnpm test:e2e` compiles them, which CI does not run (see [testing-strategy.md](../08-development/testing-strategy.md)).
 
@@ -43,17 +43,16 @@ Two jobs, both blocking, and nothing else. `src-tauri/tests/release_pipeline.rs`
 
 The two platforms Pluryprint ships for. The Rust code is heavily `cfg`-gated — WinSpool, SumatraPDF and the Explorer handoff on Windows, the CUPS backend (`platform/cups.rs`, `engine/print/cups.rs`) on macOS — so each half only compiles, and its tests only run, on its own OS. `fail-fast: false` keeps one platform's failure from hiding the other's. `PLURYPRINT_SKIP_MIGRATION=1` is set for the job, so a test run never moves a MaeclyPrint-era data directory ([ADR-0009](../adr/0009-rename-to-pluryprint.md)).
 
-1. macOS only: `cargo audit` in `src-tauri/` and in `shell-ext-win/`, with cargo-audit 0.22.2 installed by `taiki-e/install-action` (see [Dependency audits](#dependency-audits)); the lockfiles do not depend on the runner
-2. `cargo fmt --check` for `src-tauri` and `shell-ext-win` — Windows only; formatting does not depend on the platform
-3. `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
-4. `cargo test --manifest-path src-tauri/Cargo.toml` — the full suite, never filtered
-5. Windows only: `cargo clippy` and `cargo test` for `shell-ext-win/`
+1. `cargo fmt --check` for `src-tauri` and `shell-ext-win` — Windows only; formatting does not depend on the platform
+2. `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+3. Windows: `cargo test --manifest-path src-tauri/Cargo.toml` — the full suite, never filtered. macOS: `cargo test --lib` — the unit tests, which hold its `cfg`-gated code; the integration tests do not depend on the platform
+4. Windows only: `cargo clippy` and `cargo test` for `shell-ext-win/`
 
-Step 4 is also the **bindings drift gate**: `tests/ipc_surface.rs` regenerates `src/ipc/bindings.ts` from the tauri-specta command surface and fails when the committed copy is stale. Its failure message says what to do (`UPDATE_BINDINGS=1 cargo test …` and commit the result). It only runs in a full test run, which is why the step takes no filter.
+Step 3 on Windows is also the **bindings drift gate**: `tests/ipc_surface.rs` regenerates `src/ipc/bindings.ts` from the tauri-specta command surface and fails when the committed copy is stale. Its failure message says what to do (`UPDATE_BINDINGS=1 cargo test …` and commit the result). It only runs in a full test run, which is why the step takes no filter.
 
 On Windows, `src-tauri/build.rs` links the Common-Controls v6 manifest into **every** artifact (`/MANIFEST:EMBED /MANIFESTINPUT:windows-app-manifest.xml`), test harnesses included. With Tauri's default (a manifest resource linked into `[[bin]]` targets only) the lib's test binary died with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) before running a test.
 
-The Explorer context-menu DLL is its own crate: `shell-ext-win/` is deliberately **not** a Cargo workspace member, because its release profile must keep `panic = "unwind"` (so `catch_unwind` at the COM boundary contains a panic instead of taking Explorer down), which `src-tauri`'s `panic = "abort"` would override. `--manifest-path src-tauri/Cargo.toml` never touches it, hence steps 1 and 5. Its COM layer only builds for Windows. No `src-tauri` test needs the built DLL: the installer-hook and bundle tests read the NSIS script and use a placeholder file.
+The Explorer context-menu DLL is its own crate: `shell-ext-win/` is deliberately **not** a Cargo workspace member, because its release profile must keep `panic = "unwind"` (so `catch_unwind` at the COM boundary contains a panic instead of taking Explorer down), which `src-tauri`'s `panic = "abort"` would override. `--manifest-path src-tauri/Cargo.toml` never touches it, hence steps 1 and 4. Its COM layer only builds for Windows. No `src-tauri` test needs the built DLL: the installer-hook and bundle tests read the NSIS script and use a placeholder file.
 
 ### What CI does not run, and where it went
 
@@ -62,6 +61,8 @@ The Explorer context-menu DLL is its own crate: `shell-ext-win/` is deliberately
 | Installers, the NFR-006 size budget, both Explorer DLLs in each bundle | `release.yml` `build` (every Windows target) |
 | COM exports of the shipped DLLs (`DllGetClassObject`, `DllCanUnloadNow`) | `release.yml` `build`, step *Explorer DLLs export the COM entry points* |
 | `THIRD-PARTY-NOTICES.md` is current (`scripts/licenses/generate-notices.sh --check`) | `release.yml` `guard`, so no release is built from stale notices; run it by hand after a dependency change |
+| Dependency audits (`cargo audit`, `pnpm audit`) | `audit.yml` (weekly, on lockfile changes, by hand) and `release.yml` `guard`; locally `make audit` ([below](#dependency-audits)) |
+| Integration tests on macOS | Windows runs them on every PR; locally `make test-rust` |
 | Coverage (Vitest V8, `cargo llvm-cov`) | Local only: `pnpm test:coverage`, `cargo llvm-cov` |
 | `#[ignore]`d tests (live update manifest, real CUPS queue) | Local only: `cargo test -- --ignored` |
 | E2E (WebdriverIO + tauri-driver) and smoke launches | Local only: `pnpm test:e2e` on Windows; the VM scripts under `scripts/vm/` |
@@ -71,10 +72,10 @@ The COM export check that an earlier `shell-ext-win` CI lane ran was itself brok
 
 ### Dependency audits
 
-Both jobs fail on a known vulnerability, and the only exceptions are written down with a reason, next to the configuration that applies them.
+`audit.yml` (jobs `rust` and `npm`) and the release `guard` fail on a known vulnerability; a pull request is never failed by an advisory published against a tree it does not change. The only exceptions are written down with a reason, next to the configuration that applies them.
 
-- **Rust (RustSec).** `cargo audit` fails on any vulnerability in `src-tauri/Cargo.lock` or `shell-ext-win/Cargo.lock`. Informational advisories (unmaintained, unsound) are reported but do not fail it. `src-tauri/.cargo/audit.toml` is the ignore list; `cargo audit` reads it from the directory it runs in, so run it from `src-tauri/` locally too. Ignores are by advisory ID, so a new advisory against the same crate still fails. `ci_is_the_lean_pull_request_gate` checks that every ignored ID has a comment above it.
-- **npm.** CI audits production dependencies at `high` and above. A full audit (`pnpm audit`, dev dependencies included) is clean apart from the advisories in `package.json` → `pnpm.auditConfig.ignoreGhsas`, listed below. Patched releases inside the major the tree already uses are forced with `pnpm.overrides`.
+- **Rust (RustSec).** `cargo audit` fails on any vulnerability in `src-tauri/Cargo.lock` or `shell-ext-win/Cargo.lock`. Informational advisories (unmaintained, unsound) are reported but do not fail it. `src-tauri/.cargo/audit.toml` is the ignore list; `cargo audit` reads it from the directory it runs in, so run it from `src-tauri/` locally too. Ignores are by advisory ID, so a new advisory against the same crate still fails. `ci_is_the_lean_pull_request_gate` checks that every ignored ID has a comment above it, and `audits_run_on_a_schedule_and_before_every_release` pins where the audits run.
+- **npm.** The audits cover production dependencies at `high` and above. A full audit (`pnpm audit`, dev dependencies included) is clean apart from the advisories in `package.json` → `pnpm.auditConfig.ignoreGhsas`, listed below. Patched releases inside the major the tree already uses are forced with `pnpm.overrides`.
 
 Accepted advisories (2026-10-10):
 
@@ -128,7 +129,6 @@ Everything in this section is **unimplemented**. It is recorded as design intent
 | `installers/windows/build.ps1`, `installers/macos/*.sh` | The `installers/` tree contains only `.gitkeep` files. |
 | `scripts/sign-*.ps1`, `scripts/upload-to-r2.sh`, `scripts/update-manifest.sh`, `scripts/build-mac-universal.sh`, `scripts/setup-apple-certs.sh`, `scripts/verify-windows-signatures.ps1` | None exist. What `scripts/` does hold for releases: `fetch-sumatrapdf.{ps1,sh}`, `build-shell-ext.ps1`, `bump-version.sh`, `licenses/generate-notices.sh` `release/release_tools.py` (the manifest and signature helper `release.yml` runs) and `site/apply_release.py` (fills the landing from the latest release for `pages.yml`). |
 | Universal macOS binary | Not built: `release.yml` builds Apple silicon and Intel as separate downloads (Versorium's layout). |
-| Scheduled `cargo audit` / `pnpm audit` (NFR-065) | Both run on every pull request and push to `main` ([Dependency audits](#dependency-audits)), but nothing re-audits an unchanged tree when a new advisory is published. Dependabot (`.github/dependabot.yml`) opens the update PRs. |
 | `gitleaks` secret scanning (NFR-027) | Not configured. |
 | Reproducible-build verification (NFR-064) | Not automated. |
 

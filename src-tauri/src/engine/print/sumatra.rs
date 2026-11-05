@@ -665,6 +665,11 @@ pub fn spool_with(
     // after: the new job carrying this file's path is the one to track. If the
     // "before" list cannot be read there is nothing to compare against, so the
     // job is not tracked at all rather than guessed.
+    //
+    // The printer's notifications are listened to first: Windows deletes a
+    // printed job about a millisecond after marking it printed, so only they
+    // can tell a print from a deletion once the job has left the queue.
+    let seen_mark = super::windows::watch_printer(printer);
     let before = match super::windows::job_ids(printer) {
         Ok(ids) => Some(ids),
         Err(e) => {
@@ -745,7 +750,7 @@ pub fn spool_with(
     if let Some(s) = quality_swap.as_mut() {
         loop {
             if let Some(before) = &before {
-                seen_job = super::windows::new_job_of(printer, before, &document);
+                seen_job = super::windows::new_job_of(printer, before, seen_mark, &document);
             }
             let exited = matches!(child.try_wait(), Ok(Some(_)) | Err(_));
             let late = timeout.is_some_and(|t| started.elapsed() >= t);
@@ -786,9 +791,9 @@ pub fn spool_with(
 
     let retitled = seen_job.is_some();
     let os_job_id = seen_job.or_else(|| {
-        before
-            .as_deref()
-            .and_then(|before| super::windows::find_spooled_job(printer, before, &document))
+        before.as_deref().and_then(|before| {
+            super::windows::find_spooled_job(printer, before, seen_mark, &document)
+        })
     });
     if let (Some(job), false) = (&os_job_id, retitled) {
         super::windows::retitle_job(printer, job);

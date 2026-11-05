@@ -146,9 +146,11 @@ tauri-plugin-single-instance = "2"
 # so a plugin bump never drags tauri along on its own.
 tauri-plugin-notification = "~2.5"
 # FR-082/083/087: download, verify (minisign, against the public key in
-# tauri.conf.json) and install signed updates. 2.13 is the line built for
-# tauri 2.12; held to it for the same reason as above. See ADR-0008.
-tauri-plugin-updater = "~2.13"
+# tauri.conf.json) and install signed updates. 2.14 still requires tauri
+# 2.12 and moves its archive support to zip 9 (RUSTSEC-2026-0367/0368/0381/
+# 0429 in zip 4); held to that line for the same reason as above. See
+# ADR-0008.
+tauri-plugin-updater = "~2.14"
 
 # --- Dev/test only ---
 # `test-util` unlocks tokio's virtual clock (`start_paused` / `time::advance`)

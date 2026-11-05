@@ -1,8 +1,12 @@
-# The checks a pull request must pass: lint, typecheck, format, tests and a
-# dependency audit for the frontend, and fmt, clippy, tests and a dependency
-# audit for the Rust backend on the two platforms Pluryprint ships for. Nothing here builds an installer or reads a
-# secret; release.yml builds, measures and signs the shipped artifacts (and
-# checks THIRD-PARTY-NOTICES.md before it does).
+# The essential checks a pull request must pass: lint, typecheck, format and
+# unit tests for the frontend; fmt, clippy and the full test suite for the
+# Rust backend on Windows, and clippy plus the unit tests on macOS (the
+# cfg-gated CUPS code). Dependency audits are not here: a new advisory must
+# not fail a pull request that changes no dependency, so audit.yml runs them
+# on a schedule, on lockfile changes and before every release. Nothing here
+# builds an installer or reads a secret; release.yml builds, measures and
+# signs the shipped artifacts (and checks THIRD-PARTY-NOTICES.md first).
+# `make check-full` runs everything, audits included, locally.
 name: CI
 
 on:
@@ -50,12 +54,6 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # Known vulnerabilities in what ships in the bundle. Dev-only
-      # advisories that cannot be fixed yet are listed, with reasons, in
-      # docs/07-build-and-release/ci-cd.md (package.json auditConfig).
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
-
   # The Rust code is heavily cfg-gated (WinSpool and the Explorer handler on
   # Windows, CUPS on macOS), so it is checked on both shipped platforms.
   backend:
@@ -96,25 +94,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # Known vulnerabilities (RustSec) in both locked trees. Fails on any
-      # advisory not ignored, with its reason, in src-tauri/.cargo/audit.toml.
-      # The lockfiles are the same on every runner: once is enough.
-      - name: Install cargo-audit
-        if: runner.os == 'macOS'
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
-        with:
-          tool: cargo-audit@0.22.2
-
-      - name: cargo audit
-        if: runner.os == 'macOS'
-        working-directory: src-tauri
-        run: cargo audit
-
-      - name: cargo audit (shell extension)
-        if: runner.os == 'macOS'
-        working-directory: shell-ext-win
-        run: cargo audit
-
       # Formatting does not depend on the platform: once is enough.
       - name: cargo fmt
         if: runner.os == 'Windows'
@@ -125,10 +104,17 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      # A full run, never filtered: tests/ipc_surface.rs regenerates
-      # src/ipc/bindings.ts and fails when the committed copy is stale.
+      # Windows: a full run, never filtered: tests/ipc_surface.rs regenerates
+      # src/ipc/bindings.ts and fails when the committed copy is stale. The
+      # integration tests do not depend on the platform, so macOS runs only
+      # the unit tests, which hold its cfg-gated code (CUPS, Finder).
       - name: cargo test
+        if: runner.os == 'Windows'
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: cargo test (unit)
+        if: runner.os == 'macOS'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       # The Explorer context-menu DLL is its own crate (own target dir, own
       # `panic = "unwind"` release profile), and its COM layer only builds

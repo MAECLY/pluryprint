@@ -129,6 +129,15 @@ cargo-fmt-check: ## Verify Rust formatting without writing.
 .PHONY: check
 check: lint format-check typecheck test cargo-fmt-check clippy test-rust ## Run every quality gate locally.
 
+.PHONY: audit
+audit: ## Audit Rust (cargo audit) and npm (pnpm audit) dependencies.
+	cd src-tauri && cargo audit
+	cd shell-ext-win && cargo audit
+	pnpm audit --prod --audit-level high
+
+.PHONY: check-full
+check-full: check audit ## Every gate CI runs, plus the dependency audits audit.yml runs.
+
 # ───────────────────────────────────────────────────────────────────────
 # Maintenance
 # ───────────────────────────────────────────────────────────────────────

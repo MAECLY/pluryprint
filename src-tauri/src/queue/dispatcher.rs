@@ -2109,8 +2109,10 @@ fn settle_tracked(
             true
         }
         // It left the queue without the spooler saying it printed: deleted in
-        // the system queue, purged, or printed and removed before a poll saw
-        // it (Windows removes printed jobs). Not evidence of a print.
+        // the system queue, purged, or printed with nothing to show for it
+        // (on Windows the printer's notification watcher turns a job deleted
+        // after `PRINTED` into `Completed`, so this is what remains). Not
+        // evidence of a print.
         Ok(OsJobState::Gone) => {
             mark_unconfirmed(job, "left_queue", post);
             true
