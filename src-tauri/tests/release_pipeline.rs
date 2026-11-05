@@ -683,7 +683,6 @@ fn ci_is_the_lean_pull_request_gate() {
         "pnpm typecheck",
         "pnpm format:check",
         "pnpm test",
-        "pnpm audit --prod --audit-level high",
     ] {
         assert!(frontend.contains(cmd), "frontend does not run {cmd}");
     }
@@ -699,22 +698,21 @@ fn ci_is_the_lean_pull_request_gate() {
     ] {
         assert!(backend.contains(cmd), "backend does not run {cmd}");
     }
-    // The full run is what keeps src/ipc/bindings.ts in sync: no filter.
-    assert!(backend.contains("run: cargo test --manifest-path src-tauri/Cargo.toml\n"));
+    // The full run on Windows is what keeps src/ipc/bindings.ts in sync: no
+    // filter. macOS runs the unit tests, which hold its cfg-gated code.
+    assert!(backend.contains(
+        "if: runner.os == 'Windows'\n        run: cargo test --manifest-path src-tauri/Cargo.toml\n"
+    ));
+    assert!(backend.contains(
+        "if: runner.os == 'macOS'\n        run: cargo test --manifest-path src-tauri/Cargo.toml --lib\n"
+    ));
 
-    // Both locked Rust trees are audited, with a pinned cargo-audit, and
-    // only the ignores documented in src-tauri/.cargo/audit.toml apply (no
-    // `--ignore` on the command line, no warnings turned off).
-    assert!(backend.contains("tool: cargo-audit@0.22.2"), "{backend}");
-    for dir in ["src-tauri", "shell-ext-win"] {
-        assert!(
-            backend.contains(&format!(
-                "working-directory: {dir}\n        run: cargo audit\n"
-            )),
-            "backend does not audit {dir}"
-        );
-    }
-    assert!(!ci.contains("cargo audit --ignore") && !ci.contains("cargo audit -i"));
+    // Audits are not part of the pull-request gate (audit.yml runs them): a
+    // new advisory must not fail a pull request that changes no dependency.
+    assert!(
+        !ci.contains("cargo audit") && !ci.contains("pnpm audit"),
+        "{ci}"
+    );
     let audit = read("src-tauri/.cargo/audit.toml");
     let ignored: Vec<&str> = audit
         .lines()
@@ -732,6 +730,44 @@ fn ci_is_the_lean_pull_request_gate() {
     for gone in ["llvm-cov", "--ignored", "tauri build", "generate-notices"] {
         assert!(!ci.contains(gone), "ci.yml still runs {gone}");
     }
+}
+
+/// The dependency audits run on a schedule, on lockfile changes, by hand and
+/// before every release: never on a pull request.
+#[test]
+fn audits_run_on_a_schedule_and_before_every_release() {
+    let audit_yml = read(".github/workflows/audit.yml");
+    assert_eq!(job_names(&audit_yml), ["rust", "npm"]);
+    assert!(audit_yml.contains("\non:\n  schedule:\n"), "{audit_yml}");
+    assert!(audit_yml.contains("  push:\n    branches: [main]\n"));
+    assert!(audit_yml.contains("  workflow_dispatch:\n"));
+    assert!(
+        !audit_yml.contains("pull_request"),
+        "audits gate pull requests"
+    );
+    assert!(audit_yml.contains("permissions:\n  contents: read\n"));
+
+    // Both locked Rust trees are audited, with a pinned cargo-audit, and
+    // only the ignores documented in src-tauri/.cargo/audit.toml apply (no
+    // `--ignore` on the command line, no warnings turned off).
+    let guard = job(&release_yml(), "guard");
+    for (name, body) in [
+        ("audit.yml", job(&audit_yml, "rust")),
+        ("guard", guard.clone()),
+    ] {
+        assert!(body.contains("cargo-audit@0.22.2"), "{name}: {body}");
+        for dir in ["src-tauri", "shell-ext-win"] {
+            assert!(
+                body.contains(&format!(
+                    "working-directory: {dir}\n        run: cargo audit\n"
+                )),
+                "{name} does not audit {dir}"
+            );
+        }
+        assert!(!body.contains("cargo audit --ignore") && !body.contains("cargo audit -i"));
+    }
+    assert!(job(&audit_yml, "npm").contains("pnpm audit --prod --audit-level high"));
+    assert!(guard.contains("pnpm audit --prod --audit-level high"));
 }
 
 /// THIRD-PARTY-NOTICES.md ships in every bundle, so a release cannot be built

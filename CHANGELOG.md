@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Dependencies: `tauri-plugin-updater` 2.14 (still on Tauri 2.12) moves its archive support to `zip` 9, fixing RUSTSEC-2026-0367, -0368, -0381 and -0429 in `zip` 4. `rustls` 0.23.46, `rustls-webpki` 0.103.16, `webpki-roots` / `webpki-root-certs` 1.0.11, `tokio` 1.54 and `pulldown-cmark` 0.13.6 fix the other advisories published in October 2026.
+
+### Changed
+
+- CI: pull requests run only the essential checks (lint, typecheck, format and unit tests for the frontend; fmt, clippy and the full suite on Windows; clippy and the unit tests on macOS). Dependency audits moved to a weekly `audit.yml` that also runs on lockfile changes, and to the release guard, so an advisory published against an unchanged tree no longer fails an unrelated pull request. `make check-full` runs everything locally.
+
 ### Fixed
 
 - Windows: a job that printed is now shown as printed instead of _Unconfirmed_. Windows removes a printed job from its queue about a millisecond after marking it printed, so checking the queue every few seconds never saw it; Pluryprint now listens to the print queue's change notifications and remembers that the job was printed. A job removed from the Windows queue without printing is still _Unconfirmed_.
