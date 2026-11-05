@@ -1,6 +1,6 @@
 [package]
 name = "pluryprint"
-version = "0.0.3"
+version = "0.0.4"
 description = "Open source batch file printing for Windows and macOS."
 authors = ["Maecly maintainers"]
 license = "AGPL-3.0-only"

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-05
+
+Windows prints are confirmed again: a job that printed is shown as printed instead of _Unconfirmed_. Also dependency security updates and a leaner CI.
+
 ### Security
 
 - Dependencies: `tauri-plugin-updater` 2.14 (still on Tauri 2.12) moves its archive support to `zip` 9, fixing RUSTSEC-2026-0367, -0368, -0381 and -0429 in `zip` 4. `rustls` 0.23.46, `rustls-webpki` 0.103.16, `webpki-roots` / `webpki-root-certs` 1.0.11, `tokio` 1.54 and `pulldown-cmark` 0.13.6 fix the other advisories published in October 2026.

@@ -1,6 +1,6 @@
 [package]
 name = "pluryprint-shellext"
-version = "0.0.3"
+version = "0.0.4"
 description = "Windows Explorer context-menu handler for Pluryprint (IExplorerCommand)."
 authors = ["Maecly maintainers"]
 license = "AGPL-3.0-only"
