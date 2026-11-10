@@ -988,10 +988,16 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
     'Chromium / Edge',
     'Chromium / Microsoft Edge',
     'CUPS lp',
+    // The Linux web view stack, one combined row (system libraries, bundled
+    // only inside the AppImage), and the HEIC decoders run as subprocesses.
+    'GLib',
+    'GTK 3',
     'ImageMagick',
     'Inno Setup',
     'JetBrains Mono',
     'LibreOffice',
+    'libheif tools / ImageMagick',
+    'libsoup 3 and their dependencies',
     'NSIS',
     'Pandoc',
     'Rust standard library',
@@ -1000,6 +1006,7 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
     'TypeScript runtime helpers',
     'WKWebView',
     'WebKit / WKWebView (macOS)',
+    'WebKitGTK 4.1',
     'WebView2 (loader stub)',
     'WebView2 loader',
     'create-dmg',
@@ -1066,6 +1073,9 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
       ...tomlKeys(tomlSection(cargo, "[target.'cfg(unix)'.dependencies]")),
       ...tomlKeys(
         tomlSection(cargo, `[target.'cfg(target_os = "macos")'.dependencies]`),
+      ),
+      ...tomlKeys(
+        tomlSection(cargo, `[target.'cfg(target_os = "linux")'.dependencies]`),
       ),
       ...tomlKeys(tomlSection(shellExt, '[dependencies]')),
       ...Object.keys(pkg.dependencies),
@@ -1140,6 +1150,12 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
           tomlSection(
             cargo,
             `[target.'cfg(target_os = "macos")'.dependencies]`,
+          ),
+        ),
+        ...tomlKeys(
+          tomlSection(
+            cargo,
+            `[target.'cfg(target_os = "linux")'.dependencies]`,
           ),
         ),
         ...tomlKeys(tomlSection(cargo, '[build-dependencies]')),

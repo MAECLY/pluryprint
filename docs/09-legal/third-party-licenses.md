@@ -58,6 +58,9 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `objc2-app-kit`, `objc2-foundation` *(macOS only)* | 0.3 | MIT | AppKit/Foundation bindings (feature-narrowed) | Yes |
 | `objc2-web-kit` *(macOS only)* | 0.3 | Zlib / Apache-2.0 / MIT | WKWebView printing in the render worker (FR-055) | Yes |
 | `block2` *(macOS only)* | 0.6 | MIT | Objective-C blocks for WebKit's completion handlers in the render worker (FR-055) | Yes |
+| `webkit2gtk` *(Linux only)* | 2.0 | MIT | WebKitGTK bindings: printing HTML, Markdown and text in the render worker (FR-055) | Yes (the bindings; WebKitGTK itself is a system library, see below) |
+| `gtk` *(Linux only)* | 0.18 | MIT | GTK 3 bindings: the render worker's offscreen window and print operation | Yes (the bindings) |
+| `soup` (the `soup3` crate) *(Linux only)* | 0.5 | MIT | libsoup 3 bindings: the response headers the worker's scheme handler serves | Yes (the bindings) |
 
 ### Rust — `shell-ext-win` (the Windows Explorer handler, a separate `cdylib`)
 
