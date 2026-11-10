@@ -1253,8 +1253,11 @@ mod tests {
         assert_eq!(policy.min, Duration::ZERO);
         assert_eq!(policy.max, LINGER_MAX);
         assert_eq!(alive(), Some(true), "the helper still runs");
+        // `--` first: procps-ng 3.3.17 (Ubuntu 22.04) reads `-<pgid>` right
+        // after a signal option as a second option and kills the caller's
+        // own group, the test runner included.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pgid}")])
+            .args(["-KILL", "--", &format!("-{pgid}")])
             .status();
         let deadline = Instant::now() + Duration::from_secs(5);
         while alive() != Some(false) {
