@@ -811,11 +811,14 @@ arch: string;
  * mount. The probe is mostly `is_file` calls (see [`deps::report_all`]).
  * The one exception is a `convert` met while looking for the Linux HEIF
  * decoder: it is run (`convert -version`, up to five seconds) to tell
- * ImageMagick's from GraphicsMagick's, once per program file for the
- * life of the process ([`deps::is_heif_decoder`]). So the first call on
- * such a machine can take that long; every later one costs a few
- * `stat`s, and a replaced program is asked again, so the list is never
- * stale.
+ * ImageMagick's from GraphicsMagick's ([`deps::is_heif_decoder`]). Its
+ * answer is kept per program file for the life of the process; no
+ * answer (it hung past five seconds or could not start) counts as
+ * "not ImageMagick" for a minute and is then asked again. So the
+ * first call on such a machine can take five seconds, and with a
+ * `convert` that hangs one call a minute does; every other costs a few
+ * `stat`s, and a program replaced or changed is asked again, so the
+ * list is never stale.
  * 
  * `#[serde(default)]` — as on `AppSettings::meta`, and for the same
  * reason: the server always sends it, but a test building an `AppInfo` by

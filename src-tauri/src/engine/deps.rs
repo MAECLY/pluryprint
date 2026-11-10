@@ -588,15 +588,41 @@ const VERSION_PROBE_CAP: u64 = 4096;
 /// as its answer ([`identifies_as_imagemagick`]).
 const VERSION_PROBE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// What identifies one program file for [`is_heif_decoder`]'s cache: its
-/// canonical path, size, modification time and inode. A package upgrade
-/// that replaces the file changes at least the inode or the time.
-type ProgramKey = (PathBuf, u64, Option<std::time::SystemTime>, u64);
+/// How long [`is_heif_decoder`] keeps a probe that gave no answer (it timed
+/// out or the program could not be started) before running it again: long
+/// enough that a `convert` that hangs does not hold every `app_info` call
+/// for [`VERSION_PROBE_TIMEOUT`], short enough that a busy moment does not
+/// rule ImageMagick out for the rest of the session.
+const NO_ANSWER_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// The verdicts [`is_heif_decoder`] reached by running a program, for the
-/// life of the process.
+/// What identifies one program file for [`is_heif_decoder`]'s cache: its
+/// canonical path, size, modification time, inode and status-change time
+/// (`st_ctime` and its nanoseconds, Unix). A package upgrade that replaces
+/// the file changes at least the inode or a time; one that rewrites it in
+/// place and restores its modification time (`touch -r`, `cp -p`, a
+/// tarball's timestamps) still changes the status-change time, which no
+/// one can set back.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ProgramKey {
+    canonical: PathBuf,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    inode: u64,
+    changed: (i64, i64),
+}
+
+/// What [`is_heif_decoder`] learnt by running a program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// It answered: ImageMagick or not. Kept for the life of the process.
+    Known(bool),
+    /// It did not answer, at this time; trusted for [`NO_ANSWER_TTL`].
+    NoAnswer(std::time::Instant),
+}
+
+/// The verdicts [`is_heif_decoder`] reached by running a program.
 static HEIF_DECODER_VERDICTS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<ProgramKey, bool>>,
+    std::sync::Mutex<std::collections::HashMap<ProgramKey, Verdict>>,
 > = std::sync::LazyLock::new(Default::default);
 
 /// The [`ProgramKey`] of the file at `path`; `None` when it cannot be read.
@@ -604,10 +630,19 @@ fn program_key(path: &Path) -> Option<ProgramKey> {
     let canonical = path.canonicalize().ok()?;
     let meta = std::fs::metadata(&canonical).ok()?;
     #[cfg(unix)]
-    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    let (inode, changed) = {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ino(), (meta.ctime(), meta.ctime_nsec()))
+    };
     #[cfg(not(unix))]
-    let inode = 0;
-    Some((canonical, meta.len(), meta.modified().ok(), inode))
+    let (inode, changed) = (0, (0, 0));
+    Some(ProgramKey {
+        canonical,
+        len: meta.len(),
+        modified: meta.modified().ok(),
+        inode,
+        changed,
+    })
 }
 
 /// The [`Probe::exists`] for [`Dependency::HeifDecoder`]: a file, and for
@@ -626,9 +661,16 @@ fn program_key(path: &Path) -> Option<ProgramKey> {
 /// and every HEIF job run this search, so the answer is kept per program
 /// file ([`ProgramKey`]) for the life of the process: each `convert` is run
 /// once, and again only once it has been replaced. A probe that timed out
-/// or could not start the program is not kept, so a busy moment does not
-/// rule ImageMagick out for good.
+/// or could not start the program is a "no" kept for [`NO_ANSWER_TTL`]
+/// only: a `convert` that hangs costs one [`VERSION_PROBE_TIMEOUT`] a
+/// minute, not one per call, and a busy moment does not rule ImageMagick
+/// out for good.
 pub fn is_heif_decoder(path: &Path) -> bool {
+    heif_decoder_verdict(path, VERSION_PROBE_TIMEOUT)
+}
+
+/// [`is_heif_decoder`], probing for at most `timeout`.
+fn heif_decoder_verdict(path: &Path, timeout: std::time::Duration) -> bool {
     if !path.is_file() {
         return false;
     }
@@ -643,18 +685,19 @@ pub fn is_heif_decoder(path: &Path) -> bool {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     };
-    if let Some(&verdict) = verdicts().get(&key) {
-        return verdict;
+    match verdicts().get(&key) {
+        Some(Verdict::Known(verdict)) => return *verdict,
+        Some(Verdict::NoAnswer(at)) if at.elapsed() < NO_ANSWER_TTL => return false,
+        _ => {}
     }
-    // Not under the lock: a probe can take VERSION_PROBE_TIMEOUT, and two
-    // threads probing the same program at once agree anyway.
-    match imagemagick_probe(path, VERSION_PROBE_TIMEOUT) {
-        Some(verdict) => {
-            verdicts().insert(key, verdict);
-            verdict
-        }
-        None => false,
-    }
+    // Not under the lock: a probe can take `timeout`, and two threads
+    // probing the same program at once agree anyway.
+    let verdict = match imagemagick_probe(path, timeout) {
+        Some(answer) => Verdict::Known(answer),
+        None => Verdict::NoAnswer(std::time::Instant::now()),
+    };
+    verdicts().insert(key, verdict);
+    verdict == Verdict::Known(true)
 }
 
 /// Whether `program -version` prints `ImageMagick` within `timeout`. A
@@ -1493,8 +1536,8 @@ mod tests {
 
     /// The `convert` verdict is kept per program file: the dependency report
     /// (asked on the UI thread) runs `convert -version` once, not on every
-    /// call, and again once the file is replaced. A probe that timed out is
-    /// not kept.
+    /// call, and again once the file is replaced or its status changes. A
+    /// probe that timed out is a "no" kept for [`NO_ANSWER_TTL`] only.
     #[cfg(unix)]
     #[test]
     fn nfr_perf_a_convert_is_asked_what_it_is_once_per_binary() {
@@ -1522,22 +1565,57 @@ mod tests {
         assert!(is_heif_decoder(&link.join("convert")));
         assert_eq!(count(), 1, "convert was run more than once");
 
+        // Same size, time and inode, but its status changed (a chmod; a
+        // rewrite whose modification time was put back): asked again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mode = std::fs::metadata(&convert).unwrap().permissions();
+        std::fs::set_permissions(&convert, mode).unwrap();
+        assert!(is_heif_decoder(&convert));
+        assert_eq!(count(), 2, "a changed ctime was not asked again");
+
         // Replaced (another size and time): asked again.
         std::thread::sleep(std::time::Duration::from_millis(20));
         let convert = script(dir.path(), "convert", &body("GraphicsMagick"));
         assert!(!is_heif_decoder(&convert));
         assert!(!is_heif_decoder(&convert));
-        assert_eq!(count(), 2);
+        assert_eq!(count(), 3);
 
-        // No answer is not a "no" to keep.
+        // No answer is a "no" kept for a while, not for good: a convert
+        // that hangs is run once a minute, not on every call.
         let slow = tempfile::tempdir().unwrap();
-        let hangs = script(slow.path(), "convert", "sleep 30");
-        assert_eq!(
-            imagemagick_probe(&hangs, std::time::Duration::from_millis(200)),
-            None
+        let hung = slow.path().join("runs");
+        let hangs = script(
+            slow.path(),
+            "convert",
+            &format!("echo run >> '{}'\nsleep 30", hung.display()),
         );
-        assert!(program_key(&hangs)
-            .is_some_and(|key| !HEIF_DECODER_VERDICTS.lock().unwrap().contains_key(&key)));
+        let hung_runs = || {
+            std::fs::read_to_string(&hung)
+                .map(|r| r.lines().count())
+                .unwrap_or(0)
+        };
+        let before = hung_runs();
+        let quick = std::time::Duration::from_secs(1);
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        let started = std::time::Instant::now();
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        assert!(started.elapsed() < quick, "the second call probed again");
+        assert_eq!(hung_runs(), before + 1);
+        let key = program_key(&hangs).unwrap();
+        assert!(matches!(
+            HEIF_DECODER_VERDICTS.lock().unwrap().get(&key),
+            Some(Verdict::NoAnswer(_))
+        ));
+        // Once it is older than the TTL, it is asked again.
+        let stale = std::time::Instant::now()
+            .checked_sub(NO_ANSWER_TTL + std::time::Duration::from_secs(1))
+            .unwrap();
+        HEIF_DECODER_VERDICTS
+            .lock()
+            .unwrap()
+            .insert(key, Verdict::NoAnswer(stale));
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        assert_eq!(hung_runs(), before + 2);
     }
 
     #[test]
