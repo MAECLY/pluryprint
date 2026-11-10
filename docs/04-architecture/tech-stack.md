@@ -31,7 +31,7 @@ Everything in this table is declared in `src-tauri/Cargo.toml`, `shell-ext-win/C
 | Shell extension (Mac)  | NSServices provider declared in `Info.plist`, backed by `objc2` |
 | Installer (Win)        | Tauri's **NSIS** target, `installMode: currentUser`, English and Spanish, registering the Explorer command per user (no sparse package yet, ADR-0013) |
 | Installer (Mac)        | `.dmg` per architecture, `.app` signed ad hoc, not notarized (ADR-0011) |
-| Packages (Linux)       | AppImage and `.deb` per architecture (x86_64, ARM64), built on Ubuntu 22.04 (glibc 2.35, WebKitGTK 4.1 2.40 or later); no GPG or distribution signature (ADR-0015) |
+| Packages (Linux)       | AppImage and `.deb` per architecture (x86_64, ARM64), built on Ubuntu 22.04 (glibc 2.35, WebKitGTK 4.1 2.42 or later); no GPG or distribution signature (ADR-0015) |
 | File manager (Linux)   | A `.desktop` entry with `MimeType=` ("Open with"); the `.deb` adds a Dolphin service menu and Nemo actions (ADR-0015) |
 | Update flow            | `tauri-plugin-updater`: check and install read the same `latest.json` per channel on GitHub Releases; minisign signatures; install only on request |
 | Tauri plugins in use   | `tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-updater` |

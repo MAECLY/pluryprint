@@ -202,7 +202,7 @@ jobs:
           # Linux builds natively on both architectures: WebKitGTK and GTK
           # cannot be cross-compiled sensibly, and the AppImage carries the
           # build host's libraries. Ubuntu 22.04 sets the floor every Linux
-          # user gets (glibc 2.35, WebKitGTK 4.1 >= 2.40): Ubuntu 22.04,
+          # user gets (glibc 2.35, WebKitGTK 4.1 >= 2.42): Ubuntu 22.04,
           # Debian 12 and Fedora 38 or later (installer-linux.md).
           - name: Linux (x64)
             platform: ubuntu-22.04
@@ -427,6 +427,9 @@ jobs:
           echo "Depends: $depends"
           grep -Eq '(^|, )cups-client(,|$| )' <<<"$depends" \
             || { echo "::error::$deb does not depend on cups-client"; exit 1; }
+          # The binary binds every symbol at start and needs WebKitGTK 2.42.
+          grep -Eq '(^|, )libwebkit2gtk-4\.1-0 \(>= 2\.42\)' <<<"$depends" \
+            || { echo "::error::$deb does not require WebKitGTK 2.42"; exit 1; }
           rm -rf "$RUNNER_TEMP/deb" "$RUNNER_TEMP/squashfs-root"
           dpkg-deb -x "$deb" "$RUNNER_TEMP/deb"
           dpkg-deb -c "$deb"

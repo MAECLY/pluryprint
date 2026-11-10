@@ -13,7 +13,7 @@ Download the file for your computer from the assets below. `SHA256SUMS` lists th
 
 Windows on ARM: use the ARM64 file. The x64 file also works there, emulated.
 
-Linux is a preview: it is built and tested in CI, not yet on real hardware. It needs Ubuntu 22.04, Debian 12, Fedora 38 or later (or another distribution with glibc 2.35 and WebKitGTK 2.40 or later).
+Linux is a preview: it is built and tested in CI, not yet on real hardware. It needs Ubuntu 22.04, Debian 12, Fedora 38 or later (or another distribution with glibc 2.35 and WebKitGTK 2.42 or later).
 
 ### Check the download first.
 
@@ -78,7 +78,7 @@ Descarga el archivo de tu equipo desde la lista de abajo. `SHA256SUMS` recoge la
 
 Windows en ARM: usa el archivo ARM64. El x64 también funciona, emulado.
 
-Linux es una versión previa: se compila y se prueba en CI, pero aún no en equipos reales. Necesita Ubuntu 22.04, Debian 12, Fedora 38 o posteriores (u otra distribución con glibc 2.35 y WebKitGTK 2.40 o posteriores).
+Linux es una versión previa: se compila y se prueba en CI, pero aún no en equipos reales. Necesita Ubuntu 22.04, Debian 12, Fedora 38 o posteriores (u otra distribución con glibc 2.35 y WebKitGTK 2.42 o posteriores).
 
 ### Comprueba antes la descarga.
 

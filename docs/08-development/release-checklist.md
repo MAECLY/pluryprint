@@ -116,7 +116,7 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 - [ ] Each macOS artifact passes `codesign --verify --deep --strict --verbose=2 <artifact>`.
 - [ ] Each macOS `.pkg` and `.dmg` passes `spctl --assess --verbose <artifact>`.
 - [ ] Each macOS artifact passes `stapler validate <artifact>`.
-- [ ] Linux has no OS signature to check. Each `.deb` lists the expected contents and dependencies (`dpkg-deb --info` / `--contents`: `Depends: cups-client`, `Recommends: cups-ipp-utils, libheif-examples`, `Suggests: libreoffice`, the `.desktop` entry, the Dolphin and Nemo entries), and each AppImage starts with `--version` on its own architecture.
+- [ ] Linux has no OS signature to check. Each `.deb` lists the expected contents and dependencies (`dpkg-deb --info` / `--contents`: `Depends: cups-client, libc6 (>= 2.35), libwebkit2gtk-4.1-0 (>= 2.42)` plus the unversioned WebKitGTK and GTK entries Tauri adds, `Recommends: cups-ipp-utils, libheif-examples`, no `Suggests` (Tauri cannot set one), the `.desktop` entry, the Dolphin and Nemo entries), and each AppImage starts with `--version` on its own architecture.
 
 ## Release day (T-0)
 

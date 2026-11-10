@@ -190,7 +190,7 @@ default (`permissions: {}`); each job asks for what it needs:
 
    The Linux jobs build natively on Ubuntu 22.04 (x64 and ARM64 runners; the
    repository is public, so the ARM64 one is free), which sets the floor every
-   Linux user gets: glibc 2.35 and WebKitGTK 2.40. They install the
+   Linux user gets: glibc 2.35 and WebKitGTK 2.42. They install the
    development packages first (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
    `libdbus-1-dev`, `librsvg2-dev`, `patchelf`, `file`,
    `desktop-file-utils`) and run linuxdeploy unpacked

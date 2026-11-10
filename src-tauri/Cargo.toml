@@ -239,11 +239,13 @@ objc2-web-kit = { version = "0.3", default-features = false, features = [
 # HTML -> PDF through WebKitGTK in the hidden render worker (render::linux):
 # a web view in an off-screen GTK window printed to GTK's print-to-file
 # printer. Every crate is pinned to the line wry and tao already use (tauri
-# 2.12 / wry 0.57: webkit2gtk 2.0 with WebKitGTK 2.40 as the floor, gtk-rs
-# 0.18, libsoup 3), so the tree keeps one copy of each binding and the
-# system libraries the app already links are the only ones loaded. All MIT.
-# `v2_40` is what wry turns on too; nothing newer is needed, so the floor
-# stays WebKitGTK 2.40 (Ubuntu 22.04, Debian 12, Fedora 38).
+# 2.12 / wry 0.57: webkit2gtk 2.0, gtk-rs 0.18, libsoup 3), so the tree keeps
+# one copy of each binding and the system libraries the app already links
+# are the only ones loaded. All MIT. `v2_40` is the feature wry turns on, but
+# the run-time floor is WebKitGTK 2.42: wry itself imports
+# `webkit_cookie_manager_get_all_cookies` (2.41.90), and the binary binds
+# every symbol at start. Ubuntu 22.04, Debian 12 and Fedora 38 have 2.42 or
+# later through their updates; the .deb's Depends says so.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
 gtk = "0.18"

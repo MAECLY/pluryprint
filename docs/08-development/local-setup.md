@@ -72,7 +72,7 @@ sudo apt install -y cups cups-client cups-bsd cups-ipp-utils \
 | Node.js | 24 LTS | [nodejs.org](https://nodejs.org/) (the distribution's `nodejs` on 22.04 is too old) |
 | pnpm | 9.x | `corepack enable` |
 
-`libwebkit2gtk-4.1-dev` must be **2.40 or later** (wry 0.57 enables WebKitGTK's `v2_40` API); Ubuntu 22.04 has it from `jammy-updates`, so run `apt update` first. Neither `libssl-dev` nor `libxdo-dev` is needed: nothing in `Cargo.lock` links OpenSSL or libxdo. `libayatana-appindicator3-dev`, which Tauri's generic prerequisites list, is not needed either: the app does not enable Tauri's tray icon. On Fedora the matching packages are `webkit2gtk4.1-devel`, `gtk3-devel`, `dbus-devel` and `librsvg2-devel` (not tried; only Ubuntu is).
+`libwebkit2gtk-4.1-dev` must be **2.42 or later** (wry 0.57 enables WebKitGTK's `v2_40` API but also calls a 2.41.90 function); Ubuntu 22.04 has it from `jammy-updates`, so run `apt update` first. Neither `libssl-dev` nor `libxdo-dev` is needed: nothing in `Cargo.lock` links OpenSSL or libxdo. `libayatana-appindicator3-dev`, which Tauri's generic prerequisites list, is not needed either: the app does not enable Tauri's tray icon. On Fedora the matching packages are `webkit2gtk4.1-devel`, `gtk3-devel`, `dbus-devel` and `librsvg2-devel` (not tried; only Ubuntu is).
 
 On Ubuntu 22.04 `libheif-examples` is libheif 1.12, which provides `heif-convert` but not `heif-dec` (added in libheif 1.17); either is enough for HEIC. ImageMagick 6 reads HEIC through the same libheif.
 

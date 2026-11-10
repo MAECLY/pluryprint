@@ -50,12 +50,24 @@ fn nfr_070_bundle_targets_cover_every_shipped_platform() {
 /// `lpstat`, `lpoptions`, `cancel`), so it depends on cups-client; the IPP
 /// tools (`ipptool`, `ippfind`) and the HEIC decoder (`heif-convert`) are
 /// recommended, which apt installs by default and a user may skip. tauri
-/// adds the WebKitGTK and GTK libraries to Depends on its own.
+/// adds the WebKitGTK and GTK libraries to Depends on its own, without a
+/// version; the binary needs glibc 2.35 (what it is built against) and
+/// WebKitGTK 2.42 (wry imports `webkit_cookie_manager_get_all_cookies`, new
+/// in 2.41.90, and the binary binds every symbol at start), so Depends says
+/// so: an un-updated Ubuntu 22.04 with WebKitGTK 2.36 must not install a
+/// package that cannot start.
 #[test]
 fn nfr_070_deb_depends_on_the_cups_client_tools() {
     let conf = conf();
     let deb = &conf["bundle"]["linux"]["deb"];
-    assert_eq!(deb["depends"], serde_json::json!(["cups-client"]));
+    assert_eq!(
+        deb["depends"],
+        serde_json::json!([
+            "cups-client",
+            "libc6 (>= 2.35)",
+            "libwebkit2gtk-4.1-0 (>= 2.42)"
+        ])
+    );
     assert_eq!(
         deb["recommends"],
         serde_json::json!(["cups-ipp-utils", "libheif-examples"])

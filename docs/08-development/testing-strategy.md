@@ -328,7 +328,7 @@ Not in the pull-request gate: `ci.yml` stays lean, because driving a real GUI on
 | `frontend` | ubuntu | `pnpm lint`, `typecheck`, `format:check`, `test` |
 | `backend` | matrix `windows-latest`, `macos-latest`, `ubuntu-22.04` | `cargo fmt --check` (Windows only, both crates) and `cargo clippy --all-targets -- -D warnings` everywhere; on Windows the full `cargo test` (which is also the `src/ipc/bindings.ts` drift gate) and clippy + `cargo test` for `shell-ext-win/`; on macOS and Linux `cargo test --lib`, the unit tests that hold their cfg-gated code (CUPS, Finder, `/proc`). Linux first installs `libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file` |
 
-Both are blocking. Triggers: `pull_request`, `push` to `main`, `workflow_dispatch`. The Linux leg runs on `ubuntu-22.04`, the image the Linux packages are built on (glibc 2.35, WebKitGTK 2.40 or later from `jammy-updates`), x64 only; its unit tests need no display. The cargo cache is keyed on `runner.os` and `runner.arch`.
+Both are blocking. Triggers: `pull_request`, `push` to `main`, `workflow_dispatch`. The Linux leg runs on `ubuntu-22.04`, the image the Linux packages are built on (glibc 2.35, WebKitGTK 2.42 or later from `jammy-updates`), x64 only; its unit tests need no display. The cargo cache is keyed on `runner.os` and `runner.arch`.
 
 ### `linux.yml`: the full Linux run
 

@@ -394,7 +394,7 @@ The CUPS backend is shared with macOS and already compiled for Linux. The work f
 ### Scope
 
 - **Packages:** an AppImage and a `.deb` per architecture (`Pluryprint_<version>_linux_x64.AppImage`, `…_linux_x64.deb`, `…_linux_arm64.AppImage`, `…_linux_arm64.deb`), built on `ubuntu-22.04` and `ubuntu-22.04-arm`. No `.rpm`, no repository, Flatpak or Snap.
-- **Minimum:** Ubuntu 22.04, Debian 12 or Fedora 38, or later (glibc 2.35, WebKitGTK 4.1 2.40 or later), with CUPS; X11 or Wayland.
+- **Minimum:** Ubuntu 22.04, Debian 12 or Fedora 38, or later (glibc 2.35, WebKitGTK 4.1 2.42 or later), with CUPS; X11 or Wayland.
 - **Format parity:** a WebKitGTK backend for the render worker (HTML, Markdown, text); HEIC/HEIF through `heif-dec` / `heif-convert` or ImageMagick, found at run time and reported as a dependency; RTF through LibreOffice.
 - **Shell integration:** "Open with" through the `.desktop` file's `MimeType=`; Dolphin and Nemo entries (**Print now**, **Configure print job**, **Add to print queue**) installed by the `.deb`.
 - **Updates:** the AppImage updates itself (`linux-x86_64`, `linux-aarch64`); a `.deb` install updates in the app through `pkexec dpkg -i` (`linux-x86_64-deb`, `linux-aarch64-deb`).

@@ -65,7 +65,11 @@
     "linux": {
       "deb": {
         "section": "utils",
-        "depends": ["cups-client"],
+        "depends": [
+          "cups-client",
+          "libc6 (>= 2.35)",
+          "libwebkit2gtk-4.1-0 (>= 2.42)"
+        ],
         "recommends": ["cups-ipp-utils", "libheif-examples"],
         "desktopTemplate": "linux/pluryprint.desktop.hbs",
         "files": {

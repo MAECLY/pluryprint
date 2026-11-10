@@ -1,6 +1,6 @@
 # Installer (Linux)
 
-> **TL;DR.** From 0.0.5, every release ships Linux x64 and ARM64 as a **preview**: an AppImage and a `.deb` per architecture (`Pluryprint_X.Y.Z_linux_x64.AppImage`, `…_linux_x64.deb`, `…_linux_arm64.AppImage`, `…_linux_arm64.deb`), built natively on GitHub's Ubuntu 22.04 runners. They run on Ubuntu 22.04, Debian 12, Fedora 38 or later (glibc 2.35 and WebKitGTK 2.40 or later). The `.deb` depends on the CUPS client tools and installs **Open with Pluryprint** plus the Dolphin and Nemo actions; the AppImage runs anywhere without installing. Both update in the app: the AppImage replaces its own file, the `.deb` runs `pkexec dpkg -i`. No `.rpm`, no apt repository, no Flatpak or Snap. "Preview" means built and checked in CI, not yet tested on real hardware.
+> **TL;DR.** From 0.0.5, every release ships Linux x64 and ARM64 as a **preview**: an AppImage and a `.deb` per architecture (`Pluryprint_X.Y.Z_linux_x64.AppImage`, `…_linux_x64.deb`, `…_linux_arm64.AppImage`, `…_linux_arm64.deb`), built natively on GitHub's Ubuntu 22.04 runners. They run on Ubuntu 22.04, Debian 12, Fedora 38 or later (glibc 2.35 and WebKitGTK 2.42 or later). The `.deb` depends on the CUPS client tools and installs **Open with Pluryprint** plus the Dolphin and Nemo actions; the AppImage runs anywhere without installing. Both update in the app: the AppImage replaces its own file, the `.deb` runs `pkexec dpkg -i`. No `.rpm`, no apt repository, no Flatpak or Snap. "Preview" means built and checked in CI, not yet tested on real hardware.
 
 This is the Linux counterpart of [installer-windows.md](./installer-windows.md) and [installer-macos.md](./installer-macos.md). The release runbook is [releasing.md](./releasing.md); the decision to ship Linux at all is the ADR that supersedes decision D20.
 
@@ -16,7 +16,7 @@ This is the Linux counterpart of [installer-windows.md](./installer-windows.md) 
 The floor comes from the build machine, not from a setting:
 
 - **glibc 2.35.** The binaries are linked on Ubuntu 22.04, so they need its glibc or a newer one. Building on 24.04 would raise the floor to 2.39 (and make linuxdeploy's `strip` fail on its `.relr.dyn` sections).
-- **WebKitGTK 2.40.** wry 0.57 enables the `webkit2gtk/v2_40` feature; Ubuntu 22.04 has 2.40 or later through `jammy-updates` (the runner image had 2.50.4 in November 2026), Debian 12 and Fedora 38 ship it.
+- **WebKitGTK 2.42.** wry 0.57 enables the `webkit2gtk/v2_40` feature, but it also imports `webkit_cookie_manager_get_all_cookies`, new in 2.41.90, and the binary binds every symbol at start, so 2.42 is the real floor: an older WebKitGTK stops the app before it opens a window. Ubuntu 22.04 has 2.42 or later through `jammy-updates` (the runner image had 2.50.4 in November 2026), and so do Debian 12 and Fedora 38 through their updates. The `.deb` says so: `Depends: cups-client, libc6 (>= 2.35), libwebkit2gtk-4.1-0 (>= 2.42)` (tauri adds the unversioned WebKitGTK and GTK entries too).
 - **WebKitGTK 4.1 API** (`libwebkit2gtk-4.1-0`, the libsoup 3 build), the one Tauri 2 uses.
 
 ## What ships
