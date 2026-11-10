@@ -17,16 +17,17 @@ Subcommands:
                [--product NAME]
       Copy what one `tauri build` produced into OUT under the name the
       release gives it, <product>_<version>_<label><ext>: the .dmg and the
-      .app.tar.gz of a macOS build, the NSIS -setup.exe of a Windows one.
-      Signature files stay behind: the build signs with a throwaway key, and
-      the sign job signs the staged files with the real one. Fails unless the
-      update artifact is there and no kind of file appears twice.
+      .app.tar.gz of a macOS build, the NSIS -setup.exe of a Windows one, the
+      .AppImage and the .deb of a Linux one. Signature files stay behind: the
+      build signs with a throwaway key, and the sign job signs the staged
+      files with the real one. Fails unless every update artifact of the
+      label is there and no kind of file appears twice.
 
   make-manifest --dir DIR --version V --assets F --repo OWNER/NAME
                 [--body-file F] [--pub-date D] [--product NAME]
                 [--require KEY ...] --out F
       Write the latest.json the updater reads from the staged files and their
-      .sig files in DIR: for every platform whose update artifact is there,
+      .sig files in DIR: for every manifest key whose update artifact is there,
       the signature (the .sig contents) and the URL in the GitHub API asset
       form (https://api.github.com/repos/<repo>/releases/assets/<id>; --assets
       is the JSON of GET /repos/<repo>/releases/<id>/assets). Fails when a
@@ -91,24 +92,47 @@ def semver_gt(candidate: str, current: str) -> bool:
 
 API_ASSET = "https://api.github.com/repos/{repo}/releases/assets/"
 
-# The label a release file carries, the latest.json key it serves and the
-# extension of its update artifact. The labels name the computer, so a
-# download says which one it is for; the keys are the ones the updater looks
-# up ({os}-{arch}, tauri-plugin-updater).
+# Every latest.json key the release serves, with the label of the build that
+# makes its update artifact and that artifact's extension. The labels name
+# the computer, so a download says which one it is for; the keys are the ones
+# the updater looks up. tauri-plugin-updater tries {os}-{arch}-{bundle} first
+# and then {os}-{arch}, with the bundle type compiled into each binary: a
+# Linux build makes two update artifacts, the AppImage (which replaces
+# itself, served by the plain key) and the .deb (installed with
+# `pkexec dpkg -i`, served by the -deb key). Without the -deb key a .deb
+# install would fall back to the AppImage URL and refuse it. Every other
+# build makes one, and its plain key serves it.
 PLATFORMS = {
-    "apple_silicon": ("darwin-aarch64", ".app.tar.gz"),
-    "apple_intel": ("darwin-x86_64", ".app.tar.gz"),
-    "windows_x64": ("windows-x86_64", ".exe"),
-    "windows_arm64": ("windows-aarch64", ".exe"),
+    "darwin-aarch64": ("apple_silicon", ".app.tar.gz"),
+    "darwin-x86_64": ("apple_intel", ".app.tar.gz"),
+    "windows-x86_64": ("windows_x64", ".exe"),
+    "windows-aarch64": ("windows_arm64", ".exe"),
+    "linux-x86_64": ("linux_x64", ".AppImage"),
+    "linux-x86_64-deb": ("linux_x64", ".deb"),
+    "linux-aarch64": ("linux_arm64", ".AppImage"),
+    "linux-aarch64-deb": ("linux_arm64", ".deb"),
 }
 
+# The build labels, in the order above.
+LABELS = list(dict.fromkeys(label for label, _ in PLATFORMS.values()))
+
 # What one build leaves under target/<triple>/release/bundle/: the folder,
-# the end of tauri's own file name, and the extension in the release.
+# the end of tauri's own file name, and the extension in the release. The
+# appimage/ folder also holds the .AppDir it was made from and the .deb
+# folder its unpacked tree; neither ends with the suffix, so neither is
+# staged.
 BUNDLE_KINDS = [
     ("dmg", ".dmg", ".dmg"),
     ("macos", ".app.tar.gz", ".app.tar.gz"),
     ("nsis", "-setup.exe", ".exe"),
+    ("appimage", ".AppImage", ".AppImage"),
+    ("deb", ".deb", ".deb"),
 ]
+
+
+def update_exts(label: str) -> list[str]:
+    """The extensions of the update artifacts the build `label` makes."""
+    return [ext for lab, ext in PLATFORMS.values() if lab == label]
 
 
 def release_name(product: str, version: str, label: str, ext: str) -> str:
@@ -118,8 +142,8 @@ def release_name(product: str, version: str, label: str, ext: str) -> str:
 def stage_bundle(bundle_dir: str, label: str, version: str, out: str,
                  product: str = "Pluryprint") -> list[str]:
     """Copy one build's release files into `out`. Returns their names."""
-    if label not in PLATFORMS:
-        raise ValueError(f"unknown label {label!r}; one of {sorted(PLATFORMS)}")
+    if label not in LABELS:
+        raise ValueError(f"unknown label {label!r}; one of {sorted(LABELS)}")
     if os.path.isdir(out) and os.listdir(out):
         # A shared folder (Vite's dist/ cost the first 0.0.1 draft) would
         # carry foreign files into the artifact and the release.
@@ -130,7 +154,10 @@ def stage_bundle(bundle_dir: str, label: str, version: str, out: str,
         folder = os.path.join(bundle_dir, sub)
         if not os.path.isdir(folder):
             continue
-        found = sorted(f for f in os.listdir(folder) if f.endswith(suffix))
+        found = sorted(
+            f for f in os.listdir(folder)
+            if f.endswith(suffix) and os.path.isfile(os.path.join(folder, f))
+        )
         if len(found) > 1:
             raise ValueError(
                 f"{folder} holds {len(found)} *{suffix} files ({', '.join(found)}); "
@@ -141,9 +168,12 @@ def stage_bundle(bundle_dir: str, label: str, version: str, out: str,
         name = release_name(product, version, label, ext)
         shutil.copyfile(os.path.join(folder, found[0]), os.path.join(out, name))
         staged.append(name)
-    update = release_name(product, version, label, PLATFORMS[label][1])
-    if update not in staged:
-        raise ValueError(f"{bundle_dir} has no update artifact for {label} ({update})")
+    for ext in update_exts(label):
+        update = release_name(product, version, label, ext)
+        if update not in staged:
+            raise ValueError(
+                f"{bundle_dir} has no update artifact for {label} ({update})"
+            )
     return staged
 
 
@@ -155,7 +185,7 @@ def make_manifest(directory: str, version: str, assets: list, repo: str,
     ids = {a["name"]: a["id"] for a in assets}
     prefix = API_ASSET.format(repo=repo)
     platforms = {}
-    for label, (key, ext) in PLATFORMS.items():
+    for key, (label, ext) in PLATFORMS.items():
         name = release_name(product, version, label, ext)
         path = os.path.join(directory, name)
         if not os.path.isfile(path):
@@ -173,9 +203,8 @@ def make_manifest(directory: str, version: str, assets: list, repo: str,
             errors.append(f"{name} is not an asset of this release; upload it first")
             continue
         platforms[key] = {"signature": signature, "url": f"{prefix}{ids[name]}"}
-    known = {key for key, _ in PLATFORMS.values()}
     for key in required:
-        if key not in known:
+        if key not in PLATFORMS:
             errors.append(f"{key} is not a platform this release builds")
         elif key not in platforms:
             errors.append(

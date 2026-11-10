@@ -15,9 +15,10 @@
 # (decision D2, as in Versorium): macOS bundles are signed ad hoc
 # (tauri.conf.json `signingIdentity: "-"`), the installers are not
 # Authenticode-signed, and the release notes say how to get past Gatekeeper and
-# SmartScreen. Every UPDATE artifact is signed with the project's own minisign
-# key, which the app verifies before installing, and SHA256SUMS covers every
-# asset.
+# SmartScreen. The Linux AppImage and .deb carry no GPG signature either: no
+# apt repository serves them, so one would check nothing. Every UPDATE
+# artifact is signed with the project's own minisign key, which the app
+# verifies before installing, and SHA256SUMS covers every asset.
 #
 # Who holds what (least privilege):
 #
@@ -57,7 +58,7 @@ env:
   REPO: ${{ github.repository }}
 
 jobs:
-  # Refuse to build before spending four runners on artifacts the updater
+  # Refuse to build before spending six runners on artifacts the updater
   # would reject. An unsigned release is worse than no release: it installs,
   # and then no installed copy can ever verify an update from it.
   guard:
@@ -198,6 +199,25 @@ jobs:
             label: windows_arm64
             arch: arm64
             python: python
+          # Linux builds natively on both architectures: WebKitGTK and GTK
+          # cannot be cross-compiled sensibly, and the AppImage carries the
+          # build host's libraries. Ubuntu 22.04 sets the floor every Linux
+          # user gets (glibc 2.35, WebKitGTK 4.1 >= 2.40): Ubuntu 22.04,
+          # Debian 12 and Fedora 38 or later (installer-linux.md).
+          - name: Linux (x64)
+            platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: '--target x86_64-unknown-linux-gnu --bundles appimage,deb'
+            label: linux_x64
+            machine: Advanced Micro Devices X86-64
+            python: python3
+          - name: Linux (ARM64)
+            platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            args: '--target aarch64-unknown-linux-gnu --bundles appimage,deb'
+            label: linux_arm64
+            machine: AArch64
+            python: python3
     runs-on: ${{ matrix.platform }}
     env:
       # Must equal bundle.macOS.minimumSystemVersion in tauri.conf.json.
@@ -207,6 +227,9 @@ jobs:
       # ("mis-aligned LINKEDIT string pool"). Build scripts and proc macros
       # never ship, so they are left unstripped.
       CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_STRIP: 'false'
+      # linuxdeploy, which makes the AppImage, is itself an AppImage: this
+      # runs it unpacked, so the runner needs no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -235,6 +258,21 @@ jobs:
           rustup default stable
           for t in $TARGETS; do rustup target add --toolchain stable "$t"; done
           rustc --version
+
+      # What the Linux build links against (pkg-config finds them):
+      # WebKitGTK 4.1 and GTK 3 for the window and the render worker, D-Bus
+      # (tauri's default `dbus` feature), librsvg for the AppImage's GTK
+      # plugin, patchelf and file for linuxdeploy. desktop-file-utils checks
+      # the .desktop entries below. Printing needs no development package: it
+      # runs the CUPS command-line tools.
+      - name: System libraries (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev \
+            patchelf file desktop-file-utils
 
       # --ignore-scripts: no package's install script runs. None is needed to
       # build: esbuild and the tauri CLI ship their binaries as platform
@@ -368,6 +406,76 @@ jobs:
             "$app/Contents/MacOS/pluryprint" --version
           fi
 
+      # Each Linux build is the architecture its name says, the CLI
+      # included, in both packages; the .deb asks for the CUPS client tools
+      # every print runs; every .desktop entry it installs is valid; nothing
+      # Windows-only rides along; and the app answers --version (handled
+      # before any window or GTK starts, so the runner needs no display).
+      - name: Architecture and package checks (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          set -euo pipefail
+          bundle="src-tauri/target/$TARGET/release/bundle"
+          deb=$(ls "$bundle"/deb/*.deb)
+          appimage=$(ls "$bundle"/appimage/*.AppImage)
+          dpkg-deb -I "$deb"
+          depends=$(dpkg-deb -f "$deb" Depends)
+          echo "Depends: $depends"
+          grep -Eq '(^|, )cups-client(,|$| )' <<<"$depends" \
+            || { echo "::error::$deb does not depend on cups-client"; exit 1; }
+          rm -rf "$RUNNER_TEMP/deb" "$RUNNER_TEMP/squashfs-root"
+          dpkg-deb -x "$deb" "$RUNNER_TEMP/deb"
+          dpkg-deb -c "$deb"
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
+          for root in "$RUNNER_TEMP/deb" "$RUNNER_TEMP/squashfs-root"; do
+            for b in "$root"/usr/bin/*; do
+              got=$(readelf -h "$b" | sed -n 's/^ *Machine: *//p')
+              echo "$b: $got"
+              [ "$got" = "$MACHINE" ] || { echo "::error::$b is $got, expected $MACHINE"; exit 1; }
+            done
+            for f in usr/bin/pluryprint usr/bin/pluryprint-cli; do
+              test -x "$root/$f" || { echo "::error::$root has no $f"; exit 1; }
+            done
+            # The licence texts and notices ship with the binary
+            # (bundle.resources lands in usr/lib/<productName>/).
+            for f in LICENSE THIRD-PARTY-NOTICES.md LICENSES/GPL-3.0.txt; do
+              test -s "$root/usr/lib/Pluryprint/$f" \
+                || { echo "::error::$root does not carry usr/lib/Pluryprint/$f"; exit 1; }
+            done
+            # SumatraPDF and the Explorer DLL are Windows programs.
+            if find "$root" \( -name SumatraPDF.exe -o -name shell_ext_win.dll \) | grep -q .; then
+              echo "::error::$root carries a Windows program"; exit 1
+            fi
+          done
+          # The application entries (Open with: MimeType, Exec with %F). The
+          # Dolphin service menu is Type=Service, which desktop-file-validate
+          # does not know, so it and the Nemo actions are only checked to be
+          # there.
+          for f in "$RUNNER_TEMP"/deb/usr/share/applications/*.desktop "$RUNNER_TEMP"/squashfs-root/*.desktop; do
+            echo "desktop-file-validate $f"
+            desktop-file-validate "$f"
+            grep -q '^MimeType=' "$f" || { echo "::error::$f has no MimeType"; exit 1; }
+          done
+          for f in usr/share/kio/servicemenus/pluryprint.desktop \
+                   usr/share/nemo/actions/pluryprint-print.nemo_action \
+                   usr/share/nemo/actions/pluryprint-configure.nemo_action \
+                   usr/share/nemo/actions/pluryprint-queue.nemo_action; do
+            test -s "$RUNNER_TEMP/deb/$f" || { echo "::error::the .deb does not install /$f"; exit 1; }
+          done
+          "$RUNNER_TEMP/deb/usr/bin/pluryprint" --version
+          "$RUNNER_TEMP/squashfs-root/AppRun" --version
+          {
+            echo "| Package | Size |"
+            echo "|---|---|"
+            for f in "$deb" "$appimage"; do
+              echo "| $(basename "$f") | $(du -m "$f" | cut -f1) MiB ($(stat -c %s "$f") bytes) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # The release names, and no throwaway signature among them. Not `dist/`:
       # that is Vite's output (index.html, assets/), which would ride along into
       # the artifact and the release.
@@ -384,6 +492,22 @@ jobs:
             --bundle-dir "src-tauri/target/$TARGET/release/bundle" \
             --label "$LABEL" --version "$version" --out release-staging
           ls -la release-staging
+
+      # LGPL-2.1 section 6: the AppImage carries WebKitGTK, GTK, GLib, libsoup
+      # and the rest of their tree, copied unmodified from this runner's
+      # Ubuntu packages. The release attaches, per architecture, the list of
+      # those packages with their exact source versions, which is where
+      # THIRD-PARTY-NOTICES.md sends anyone who wants that source.
+      - name: Record the AppImage's system libraries (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
+          scripts/release/appimage-sources.sh "$RUNNER_TEMP/squashfs-root" \
+            "release-staging/Pluryprint_${version}_${LABEL}_appimage-sources.txt"
 
       - name: Upload the unsigned files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -442,13 +566,13 @@ jobs:
           # version number with another release's files.
           version="${GITHUB_REF_NAME#v}"
           n=0
-          for f in unsigned/*.app.tar.gz unsigned/*.exe; do
+          for f in unsigned/*.app.tar.gz unsigned/*.exe unsigned/*.AppImage unsigned/*.deb; do
             pnpm --silent tauri signer sign --app-version "$version" "$f"
             mv "$f.sig" signatures/
             n=$((n + 1))
           done
-          if [ "$n" -ne 4 ]; then
-            echo "::error::signed $n update artifacts, expected 4 (two .app.tar.gz, two .exe)"
+          if [ "$n" -ne 8 ]; then
+            echo "::error::signed $n update artifacts, expected 8 (two .app.tar.gz, two .exe, two .AppImage, two .deb)"
             exit 1
           fi
           ls -la signatures
@@ -529,12 +653,16 @@ jobs:
             --assets release-assets.json --repo "$REPO" \
             --body-file release-body.md --out latest.json \
             --require darwin-aarch64 --require darwin-x86_64 \
-            --require windows-x86_64 --require windows-aarch64
+            --require windows-x86_64 --require windows-aarch64 \
+            --require linux-x86_64 --require linux-x86_64-deb \
+            --require linux-aarch64 --require linux-aarch64-deb
           python3 -I scripts/release/release_tools.py check-manifest \
             --manifest latest.json --version "${GITHUB_REF_NAME#v}" \
             --signed-version "${GITHUB_REF_NAME#v}" \
             --require darwin-aarch64 --require darwin-x86_64 \
-            --require windows-x86_64 --require windows-aarch64
+            --require windows-x86_64 --require windows-aarch64 \
+            --require linux-x86_64 --require linux-x86_64-deb \
+            --require linux-aarch64 --require linux-aarch64-deb
           cat latest.json
 
       # NFR-022: every update artifact verifies against the public key the app
@@ -550,7 +678,9 @@ jobs:
           python3 -I scripts/release/release_tools.py extract-signatures \
             --manifest latest.json --assets release-assets.json --out sigcheck \
             --require darwin-aarch64 --require darwin-x86_64 \
-            --require windows-x86_64 --require windows-aarch64 > sigcheck.txt
+            --require windows-x86_64 --require windows-aarch64 \
+            --require linux-x86_64 --require linux-x86_64-deb \
+            --require linux-aarch64 --require linux-aarch64-deb > sigcheck.txt
           while read -r p name; do
             test -f "assets/$name" || { echo "::error::$p names $name, which was not downloaded"; exit 1; }
             echo "$p: $name"

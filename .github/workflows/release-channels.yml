@@ -60,7 +60,9 @@ jobs:
           python3 -I scripts/release/release_tools.py check-manifest \
             --manifest new/latest.json --version "$new_version" \
             --require darwin-aarch64 --require darwin-x86_64 \
-            --require windows-x86_64 --require windows-aarch64
+            --require windows-x86_64 --require windows-aarch64 \
+            --require linux-x86_64 --require linux-x86_64-deb \
+            --require linux-aarch64 --require linux-aarch64-deb
 
           if ! gh release view "$BETA_TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$BETA_TAG" --repo "$REPO" --prerelease --latest=false \

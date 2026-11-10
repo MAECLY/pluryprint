@@ -28,13 +28,17 @@ accepted = [
     "AGPL-3.0-only",
 ]
 
-# The four release targets. A crate pulled in only for another platform
-# (Linux, iOS, Android) is not in any shipped binary.
+# The six release targets. A crate pulled in only for another platform
+# (iOS, Android) is not in any shipped binary. The Explorer extension is
+# Windows-only, but the same list applies to it: what it would pull in on
+# another target is listed too, which errs on the side of more notices.
 targets = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "x86_64-pc-windows-msvc",
     "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
 ]
 
 # Build scripts, procedural macros run by them, and test-only crates run on
