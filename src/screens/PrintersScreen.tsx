@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useLatest } from '@/lib/useLatest';
 
+import { toOsId, type OsId as HostOs } from '@/lib/platform';
 import { CenteredNotice } from '@/components/CenteredNotice';
 import { ConfirmDialog, type ConfirmState } from '@/components/ConfirmDialog';
 import { ModalOverlay } from '@/components/Modal';
@@ -123,28 +124,23 @@ function normalizeExt(raw: string): string | null {
 
 /**
  * The host OS, as reported by the backend (`app_info.os` = Rust's
- * `std::env::consts::OS`).
+ * `std::env::consts::OS`, read with `lib/platform`'s `toOsId`), or `null`
+ * while unknown.
  *
  * This is deliberately NOT `navigator.platform`: that API is deprecated and
  * frozen, describes the webview rather than the host, and silently defaulted
  * every unrecognized value to macOS — which decided a real business rule (which
  * protocols the add-by-IP form offers). It was also evaluated at module scope,
- * so tests could never reach the Windows branch.
+ * so tests could never reach the Windows branch. Copy that only words a hint
+ * may use `useHostPlatform`'s guess; this screen waits for the backend.
  */
-type OsId = 'windows' | 'macos' | 'linux' | null;
+type OsId = HostOs | null;
 
-const OS_LABEL: Record<Exclude<OsId, null>, string> = {
+const OS_LABEL: Record<HostOs, string> = {
   windows: 'Windows',
   macos: 'macOS',
   linux: 'Linux',
 };
-
-function toOsId(os: string | undefined): OsId {
-  const value = os?.toLowerCase();
-  return value === 'windows' || value === 'macos' || value === 'linux'
-    ? value
-    : null;
-}
 
 /**
  * Render a translated template carrying `{{slot}}` placeholders, substituting

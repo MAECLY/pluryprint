@@ -11,6 +11,7 @@
 import { CATALOGS, getActiveLocale, translate } from '@/i18n';
 import { IpcFailure, type IpcErrorPayload } from '@/lib/ipcError';
 import { localizeJobError } from '@/lib/jobError';
+import { rememberHostInfo } from '@/lib/platform';
 
 import {
   commands,
@@ -184,10 +185,16 @@ export async function notifyNative(
   return unwrap(commands.notifyNative(title, body));
 }
 
-/** Returns the live AppInfo from Rust, or rejects in non-Tauri contexts. */
+/**
+ * Returns the live AppInfo from Rust, or rejects in non-Tauri contexts. Every
+ * answer also updates the remembered host platform (`lib/platform`), so copy
+ * that differs per OS follows the backend's word wherever it was asked.
+ */
 export async function fetchAppInfo(): Promise<AppInfo> {
   if (!isTauri()) throw noHost();
-  return unwrap(commands.appInfo());
+  const info = await unwrap(commands.appInfo());
+  rememberHostInfo(info);
+  return info;
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { Icon, type IconName } from '@/components/Icon';
 import {
   APP_SHORTCUTS,
-  isMacPlatform,
   shortcutLabel,
   type ShortcutId,
 } from '@/components/AppShell/MPAppShell';
@@ -20,11 +19,18 @@ import {
 import { useLocale, useT } from '@/i18n/I18nProvider';
 import {
   cliCommandForDisplay,
+  cliExecutable,
   cliPrintCommand,
   cliProgram,
   formatFinished,
 } from '@/lib/format';
 import { fetchAppInfo, isTauri, openLogsFolder } from '@/lib/ipc';
+import {
+  appImageFileName,
+  linuxMenuKey,
+  rememberedHostInfo,
+  useHostPlatform,
+} from '@/lib/platform';
 import { findProfileIn } from '@/lib/profiles';
 import { useProfilesStore } from '@/stores/profilesStore';
 import { useQueueStore } from '@/stores/queueStore';
@@ -163,16 +169,33 @@ export function HomeScreen({ onAction }: HomeScreenProps) {
     };
   }, []);
   const defaultProfile = findProfileIn(profiles, null);
-  // The backend's answer when there is one; the browser's platform until then
-  // (or in the web preview). Off macOS that means Windows (Linux is out of
-  // scope), where the command-line program is the console `pluryprint-cli`.
-  const cliOs = exe.os ?? (isMacPlatform() ? 'macos' : 'windows');
+  // The backend's answer when there is one; the webview's platform until then
+  // (or in the web preview). On Windows the command-line program is the
+  // console `pluryprint-cli`; on Linux it depends on the package (the .deb
+  // puts `pluryprint` on PATH, an AppImage runs by its own file name).
+  const host = useHostPlatform();
+  const cliOs = exe.os ?? host.os;
+  const hostInfo = rememberedHostInfo();
+  const cliLinux = {
+    linuxPackage: host.linuxPackage,
+    appImage: appImageFileName(hostInfo?.version, hostInfo?.arch),
+  };
   const cliCommand = cliPrintCommand({
     executable: exe.path,
     os: cliOs,
     profile: defaultProfile.name,
+    ...cliLinux,
   });
-  const cliCommandShown = cliCommandForDisplay(cliCommand, exe.path);
+  // The path the command really names: none for the .deb (on PATH) or for an
+  // AppImage's temporary mount, which the command must not point at.
+  const cliPath = cliExecutable({
+    executable: exe.path,
+    os: cliOs,
+    linuxPackage: host.linuxPackage,
+  });
+  const onPath = cliOs === 'linux' && host.linuxPackage === 'deb';
+  const appImage = cliOs === 'linux' && host.linuxPackage === 'appimage';
+  const cliCommandShown = cliCommandForDisplay(cliCommand, cliPath);
 
   // Twenty-five extensions do not fit on a drop zone; the copy names the
   // families instead (pinned against `PRINTABLE_EXTENSIONS` by the tests).
@@ -520,9 +543,17 @@ export function HomeScreen({ onAction }: HomeScreenProps) {
                     marginTop: 4,
                   }}
                 >
-                  {exe.path
-                    ? t('cli.pathNote')
-                    : t('cli.noPathNote', { program: cliProgram(cliOs) })}
+                  {onPath
+                    ? t('cli.onPathNote')
+                    : cliPath
+                      ? t('cli.pathNote')
+                      : appImage
+                        ? t('cli.noPathNoteAppImage', {
+                            program: cliProgram(cliOs, cliLinux),
+                          })
+                        : t('cli.noPathNote', {
+                            program: cliProgram(cliOs, cliLinux),
+                          })}
                 </div>
               )}
             </CardButton>
@@ -615,13 +646,29 @@ export function HomeScreen({ onAction }: HomeScreenProps) {
             <strong>{t('tip.label')} · </strong>
             {/* FR-001: the Finder Services entry ships on macOS; on Windows
                 the installer registers the Explorer entry (classic menu, so
-                "Show more options" on Windows 11). */}
-            {t(isMacPlatform() ? 'tip.bodyMac' : 'tip.body', {
-              command: `${cliProgram(cliOs)} print --files`,
-              // Same condition as the card's own note: only claim the card
-              // copies the full path when it actually knows it.
-              path: exe.path ? t('tip.pathCopied') : t('tip.pathManual'),
-            })}
+                "Show more options" on Windows 11); on Linux the .deb adds
+                "Open with" and the Dolphin/Nemo actions, while an AppImage
+                adds nothing until the user integrates it. */}
+            {t(
+              cliOs === 'linux'
+                ? 'tip.bodyLinux'
+                : cliOs === 'macos'
+                  ? 'tip.bodyMac'
+                  : 'tip.body',
+              {
+                command: `${cliProgram(cliOs, cliLinux)} print --files`,
+                // Same condition as the card's own note: only claim the card
+                // copies the full path when it actually knows it.
+                path: onPath
+                  ? t('tip.pathOnPath')
+                  : cliPath
+                    ? t('tip.pathCopied')
+                    : appImage
+                      ? t('tip.pathAppImage')
+                      : t('tip.pathManual'),
+                menu: t(linuxMenuKey(host.linuxPackage)),
+              },
+            )}
           </div>
         </div>
       </div>

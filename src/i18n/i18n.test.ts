@@ -158,3 +158,37 @@ function withCommon(
 ): LocaleCatalog {
   return { ...base, common: bundle as LocaleCatalog['common'] };
 }
+
+describe('per-platform variants', () => {
+  // `lib/platform`'s `platformKeyVariant` looks for `<key>Mac` / `<key>Linux`
+  // and falls back to `<key>`: a variant without its plain sentence would be
+  // the only copy for that platform and silently missing on Windows.
+  it('every …Mac / …Linux sentence has the plain sentence it varies', () => {
+    for (const ns of NAMESPACES) {
+      const keys = flatten(CATALOGS['en-US'][ns]);
+      for (const key of Object.keys(keys)) {
+        const base = /^(.+?)(Mac|Linux)$/.exec(key)?.[1];
+        if (!base) continue;
+        expect(
+          base in keys,
+          `${ns}:${key} has no plain "${base}" to fall back to`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('the Linux copy never sends a Linux user to Explorer or Finder', () => {
+    for (const locale of SUPPORTED_LOCALES) {
+      for (const ns of NAMESPACES) {
+        for (const [key, value] of Object.entries(
+          flatten(CATALOGS[locale][ns]),
+        )) {
+          if (!/Linux|linuxMenu/.test(key)) continue;
+          expect(value, `${locale} ${ns}:${key}`).not.toMatch(
+            /Explor|Finder|winget|Microsoft Store|pluryprint-cli/,
+          );
+        }
+      }
+    }
+  });
+});

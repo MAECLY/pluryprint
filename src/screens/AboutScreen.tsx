@@ -40,6 +40,7 @@ import {
   UNKNOWN_VERSION,
 } from '@/lib/repo';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useHostPlatform, type HostPlatform } from '@/lib/platform';
 
 const TAURI_VERSION = tauriPkg.version;
 
@@ -155,8 +156,32 @@ function errText(e: unknown): string {
  */
 const DEV_BRIDGE_COMMAND = 'pnpm tauri dev';
 
+/**
+ * FR-082/FR-083: what installing an update asks of the user. Windows and
+ * macOS install per user, with no administrator rights. On Linux it depends
+ * on the package: an AppImage replaces its own file in place, while the .deb
+ * goes through the package manager, so the system asks for an administrator
+ * password (`pkexec`). An unknown package gets the sentence naming both.
+ */
+function verifiedNoteKey(
+  host: HostPlatform,
+):
+  | 'updates.available.verifiedNote'
+  | 'updates.available.verifiedNoteLinux'
+  | 'updates.available.verifiedNoteLinuxAppImage'
+  | 'updates.available.verifiedNoteLinuxDeb' {
+  if (host.os !== 'linux') return 'updates.available.verifiedNote';
+  if (host.linuxPackage === 'appimage') {
+    return 'updates.available.verifiedNoteLinuxAppImage';
+  }
+  if (host.linuxPackage === 'deb')
+    return 'updates.available.verifiedNoteLinuxDeb';
+  return 'updates.available.verifiedNoteLinux';
+}
+
 export function AboutScreen() {
   const t = useT('about');
+  const host = useHostPlatform();
   const tauri = isTauri();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
@@ -647,8 +672,9 @@ export function AboutScreen() {
                       {t('updates.available.detail', {
                         current: update.check.current,
                       })}{' '}
-                      {/* FR-082/FR-083: signature-checked, per-user install. */}
-                      {t('updates.available.verifiedNote')}
+                      {/* FR-082/FR-083: signature-checked, per-user install
+                          (on Linux, per package: see verifiedNoteKey). */}
+                      {t(verifiedNoteKey(host))}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -881,7 +907,16 @@ export function AboutScreen() {
           >
             {t('components.platform')}{' '}
             <span className="mp-mono">
-              {info ? `${info.os} · ${info.arch}` : '—'}
+              {info
+                ? [
+                    info.os,
+                    info.arch,
+                    host.linuxPackage &&
+                      t(`components.packages.${host.linuxPackage}`),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
+                : '—'}
             </span>
           </div>
         </MPCard>

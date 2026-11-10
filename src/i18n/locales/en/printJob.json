@@ -32,6 +32,7 @@
   },
   "empty": {
     "desktop": "No files yet. Drag files or folders from Explorer or Finder, or use Add files.",
+    "desktopLinux": "No files yet. Drag files or folders from your file manager, or use Add files.",
     "web": "Adding files requires the desktop app."
   },
   "dependencies": {

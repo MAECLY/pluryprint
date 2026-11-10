@@ -2,15 +2,17 @@
  * Which `common:deps.<id>.*` sentence describes a missing dependency on this
  * platform (FR-058, FR-092).
  *
- * A dependency can block different files per OS — LibreOffice is RTF's route
- * on Windows, while macOS prints RTF through `textutil` — so a dependency may
- * carry a `remediationMac` variant next to its `remediation`. Every surface
- * that names a missing dependency (Print Job's card, the install dialog, a
- * paused job's error) goes through here so they all say the same thing.
+ * A dependency can block different files, and be installed differently, per
+ * OS — LibreOffice is RTF's route on Windows and Linux, while macOS prints
+ * RTF through `textutil`; on Linux it comes from the distribution's packages
+ * rather than an installer — so a dependency may carry a `remediationMac` or
+ * `remediationLinux` variant next to its `remediation`. Every surface that
+ * names a missing dependency (Print Job's card, the install dialog, a paused
+ * job's error) goes through here so they all say the same thing.
  */
 
-import { isMacPlatform } from '@/components/AppShell/MPAppShell';
 import type { UiQueueJobView } from '@/lib/ipc';
+import { hostOs, platformKeyVariant, type OsId } from '@/lib/platform';
 import {
   CATALOGS,
   getActiveLocale,
@@ -19,18 +21,25 @@ import {
   type TranslationKey,
 } from '@/i18n';
 
-/** The `common` key of `id`'s remediation sentence on this platform. */
+/**
+ * The `common` key of `id`'s remediation sentence on this platform: the
+ * host's ({@link hostOs}) unless `os` says otherwise. `mac` is the older
+ * two-way switch, kept for callers that only distinguish macOS.
+ */
 export function remediationKey(
   id: string,
-  opts: { mac?: boolean; locale?: Locale } = {},
+  opts: { os?: OsId; mac?: boolean; locale?: Locale } = {},
 ): TranslationKey<'common'> {
-  const mac = opts.mac ?? isMacPlatform();
+  const os =
+    opts.os ??
+    (opts.mac === undefined ? hostOs() : opts.mac ? 'macos' : 'windows');
   const catalog = CATALOGS[opts.locale ?? getActiveLocale()];
-  const macKey = `deps.${id}.remediationMac`;
-  if (mac && hasTranslation(catalog, 'common', macKey)) {
-    return macKey as TranslationKey<'common'>;
+  const base = `deps.${id}.remediation`;
+  const variant = platformKeyVariant(base, os);
+  if (variant !== base && hasTranslation(catalog, 'common', variant)) {
+    return variant as TranslationKey<'common'>;
   }
-  return `deps.${id}.remediation` as TranslationKey<'common'>;
+  return base as TranslationKey<'common'>;
 }
 
 /**
