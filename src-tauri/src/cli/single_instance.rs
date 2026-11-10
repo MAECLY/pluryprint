@@ -21,9 +21,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::args::Cli;
-use crate::cli::{handoff, selection_from_at, Selection};
-
-use clap::Parser;
+use crate::cli::{handoff, selection_from_at_cwd, Selection};
 
 /// A forwarded launch this instance accepted.
 ///
@@ -37,8 +35,9 @@ use clap::Parser;
 pub struct Forwarded {
     /// The selection to merge into the running instance.
     pub selection: Selection,
-    /// The handoff file it came out of — `None` for an "open with" launch,
-    /// whose paths travel on the command line itself.
+    /// The handoff file it came out of — `None` for an "open with" launch or
+    /// a Linux file-manager action, whose paths travel on the command line
+    /// itself.
     pub handoff: Option<PathBuf>,
 }
 
@@ -63,7 +62,8 @@ pub fn interpret<S: AsRef<str>>(argv: &[S], cwd: &str) -> Option<Forwarded> {
 pub fn interpret_at<S: AsRef<str>>(dir: &Path, argv: &[S], cwd: &str) -> Option<Forwarded> {
     let argv: Vec<String> = argv.iter().map(|a| a.as_ref().to_string()).collect();
 
-    // A context-menu invocation carries a selection in its handoff file; an
+    // A context-menu invocation carries a selection in its handoff file (or,
+    // on Linux, in the paths after `--`); an
     // "open with" launch carries absolute paths on the command line (the same
     // rule `startup` applies to a first launch, so a file opened while the app
     // is already running is not silently dropped); anything else is a plain
@@ -86,19 +86,23 @@ pub fn interpret_at<S: AsRef<str>>(dir: &Path, argv: &[S], cwd: &str) -> Option<
         super::Intent::Headless => return None,
     }
 
-    let Some(cli) = Cli::try_parse_from(&argv).ok() else {
+    // The raw argv, not `tail`: anchoring there skips flag-looking
+    // arguments, which is right before `classify` but would leave a file
+    // named `-a.pdf` after `--` relative. The paths after `--` are anchored
+    // against `cwd` by `argv_selection` itself.
+    let Some(cli) = Cli::parse_context_menu(&argv).ok() else {
         tracing::warn!(
             event = "second_instance_argv_unparsed",
             "a forwarded launch had an unparseable command line"
         );
         return None;
     };
-    match selection_from_at(dir, &cli) {
-        // `selection_from_at` refuses a context-menu invocation without
-        // `--files-from`, so an accepted selection always names its file.
-        Ok(selection) => cli.files_from.map(|handoff| Forwarded {
+    match selection_from_at_cwd(dir, &cli, cwd) {
+        // A selection read from a handoff file names it, so the caller can
+        // retire it; one taken from the paths after `--` (Linux) has none.
+        Ok(selection) => Some(Forwarded {
             selection,
-            handoff: Some(handoff),
+            handoff: cli.files_from,
         }),
         Err(err) => {
             tracing::warn!(
@@ -265,6 +269,46 @@ mod tests {
         ];
         assert!(interpret(&argv, "").is_none());
         assert!(path.exists(), "a refused payload is not consumed");
+    }
+
+    /// A Dolphin or Nemo action run while the app is open reaches the running
+    /// window with its action, relative paths anchored at the launching
+    /// folder, and no handoff file to retire. Linux only: elsewhere the same
+    /// argv is refused, as it always was.
+    #[test]
+    fn fr_004_a_forwarded_file_manager_action_carries_its_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("report.pdf"), b"%PDF-1.4\n").unwrap();
+        let argv = [
+            "pluryprint",
+            "--invoke=context-menu",
+            "--action=print-default",
+            "--",
+            "report.pdf",
+        ];
+
+        let forwarded = interpret_at(dir.path(), &argv, &dir.path().to_string_lossy());
+        if !crate::cli::ARGV_SELECTION {
+            assert!(forwarded.is_none());
+            return;
+        }
+        let forwarded = forwarded.expect("the running instance honours it");
+        assert_eq!(
+            forwarded.selection.paths,
+            vec![crate::util::paths::canonical_input(
+                &dir.path().join("report.pdf").to_string_lossy()
+            )
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()]
+        );
+        assert_eq!(
+            forwarded.selection.action,
+            crate::cli::args::ContextAction::PrintDefault
+        );
+        assert!(forwarded.handoff.is_none());
+        // Without the caller's folder the relative path is never guessed.
+        assert!(interpret_at(dir.path(), &argv, "").is_none());
     }
 
     /// FR-008: `cd C:\docs && pluryprint-cli report.pdf` while the app is

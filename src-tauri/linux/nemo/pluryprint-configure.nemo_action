@@ -1,0 +1,23 @@
+# Nemo (Cinnamon) action: opens the selection on the Print Job screen.
+# Installed by the .deb at
+# /usr/share/nemo/actions/pluryprint-configure.nemo_action. Nemo has no
+# system-wide submenus, so the three actions sit at the top level and name
+# Pluryprint themselves.
+#
+# Extensions= rather than Mimetypes=: Nemo matches a MIME type together with
+# its subclasses, and text/plain would then offer the action on every source
+# file and log. Entries keep their leading dot because Nemo compares them as a
+# plain suffix ("md" would match "cmd"). Every selected item must match, and
+# "dir" lets folders through. `shell_menu::linux_files` tests keep the list in
+# step with the engine.
+
+[Nemo Action]
+Name=Configure print job in Pluryprint…
+Name[es]=Configurar el trabajo de impresión en Pluryprint…
+Comment=Open the selected files in Pluryprint to choose the print settings
+Comment[es]=Abre los archivos seleccionados en Pluryprint para elegir los ajustes de impresión
+Exec=pluryprint --invoke=context-menu --action=configure -- %F
+Icon-Name=pluryprint
+Selection=notnone
+Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;
+Dependencies=pluryprint;

@@ -17,6 +17,12 @@
 //! writing it are portable and tested everywhere. The shape is pinned against
 //! the reader by `shell-ext-win/tests/fixtures/shell-menu.es.json`, which both
 //! crates' tests read.
+//!
+//! Linux has no cache to write: its file-manager menus are static files in
+//! `src-tauri/linux/` (the app's desktop entry, a Dolphin service menu and
+//! three Nemo actions), each label written out in English and Spanish. The
+//! `linux_files` tests keep them honest against the same catalogs, the
+//! engine's format list and the command line they run.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -321,5 +327,328 @@ mod tests {
             .filter(|e| e.file_name() != CACHE_FILE)
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+}
+
+/// The Linux file-manager integration files (`src-tauri/linux/`), checked
+/// against what they promise: every printable format and nothing else, the
+/// catalog's labels, and Exec lines the command line actually accepts.
+///
+/// The files are static because the .deb installs them as they are; these
+/// tests are what stops them drifting when a format or a label changes.
+#[cfg(test)]
+mod linux_files {
+    use std::path::{Path, PathBuf};
+
+    use super::{EN_COMMON, ES_COMMON};
+    use crate::cli::args::{Cli, ContextAction, InvokeSource};
+
+    const DESKTOP_TEMPLATE: &str = include_str!("../linux/pluryprint.desktop.hbs");
+    const KIO_SERVICE_MENU: &str = include_str!("../linux/kio-servicemenu.desktop");
+    const NEMO_ACTIONS: &[(&str, &str, ContextAction)] = &[
+        (
+            "pluryprint-print-now.nemo_action",
+            include_str!("../linux/nemo/pluryprint-print-now.nemo_action"),
+            ContextAction::PrintDefault,
+        ),
+        (
+            "pluryprint-configure.nemo_action",
+            include_str!("../linux/nemo/pluryprint-configure.nemo_action"),
+            ContextAction::Configure,
+        ),
+        (
+            "pluryprint-queue.nemo_action",
+            include_str!("../linux/nemo/pluryprint-queue.nemo_action"),
+            ContextAction::Queue,
+        ),
+    ];
+
+    /// Each printable extension and the shared-mime-info types a file manager
+    /// reports for it, aliases included (image/heic is image/heif's alias,
+    /// text/x-markdown text/markdown's) so an older or newer MIME database
+    /// still matches. Every type here exists in Ubuntu 22.04's
+    /// shared-mime-info 2.1.
+    const EXT_MIME: &[(&str, &[&str])] = &[
+        ("pdf", &["application/pdf"]),
+        ("jpg", &["image/jpeg"]),
+        ("jpeg", &["image/jpeg"]),
+        ("png", &["image/png"]),
+        ("tif", &["image/tiff"]),
+        ("tiff", &["image/tiff"]),
+        ("bmp", &["image/bmp"]),
+        ("webp", &["image/webp"]),
+        ("heic", &["image/heif", "image/heic"]),
+        ("heif", &["image/heif", "image/heic"]),
+        ("svg", &["image/svg+xml"]),
+        ("svgz", &["image/svg+xml-compressed"]),
+        (
+            "docx",
+            &["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+        ),
+        ("doc", &["application/msword"]),
+        (
+            "xlsx",
+            &["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        ),
+        ("xls", &["application/vnd.ms-excel"]),
+        (
+            "pptx",
+            &["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+        ),
+        ("ppt", &["application/vnd.ms-powerpoint"]),
+        ("odt", &["application/vnd.oasis.opendocument.text"]),
+        ("ods", &["application/vnd.oasis.opendocument.spreadsheet"]),
+        ("odp", &["application/vnd.oasis.opendocument.presentation"]),
+        ("rtf", &["application/rtf", "text/rtf"]),
+        ("txt", &["text/plain"]),
+        ("html", &["text/html"]),
+        ("htm", &["text/html"]),
+        ("md", &["text/markdown", "text/x-markdown"]),
+        ("markdown", &["text/markdown", "text/x-markdown"]),
+    ];
+
+    /// One `[group]` of a key file and its `key=value` lines, in file order.
+    type Group<'a> = (&'a str, Vec<(&'a str, &'a str)>);
+
+    /// A deliberately small key-file reader: groups, `key=value` lines,
+    /// comments and blank lines, plus the template's Handlebars block lines.
+    /// Anything else, and a key repeated within a group, fails the test.
+    fn groups(text: &str) -> Vec<Group<'_>> {
+        let mut out: Vec<Group<'_>> = Vec::new();
+        for line in text.lines() {
+            let line = line.trim_end();
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with("{{#")
+                || line.starts_with("{{/")
+            {
+                continue;
+            }
+            if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                out.push((name, Vec::new()));
+                continue;
+            }
+            let (key, value) = line
+                .split_once('=')
+                .unwrap_or_else(|| panic!("not a key=value line: {line:?}"));
+            let (_, entries) = out.last_mut().expect("a key before any group");
+            assert!(
+                entries.iter().all(|(k, _)| *k != key),
+                "{key} appears twice in one group"
+            );
+            entries.push((key, value));
+        }
+        out
+    }
+
+    fn get<'a>(group: &Group<'a>, key: &str) -> &'a str {
+        group
+            .1
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| *v)
+            .unwrap_or_else(|| panic!("[{}] has no {key}", group.0))
+    }
+
+    fn list(value: &str) -> Vec<&str> {
+        assert!(value.ends_with(';'), "a list ends with ';': {value}");
+        value.trim_end_matches(';').split(';').collect()
+    }
+
+    /// The MIME types every printable format needs, deduplicated in
+    /// [`crate::engine::SUPPORTED_EXTS`] order.
+    fn printable_mime_types() -> Vec<&'static str> {
+        let mut out: Vec<&str> = Vec::new();
+        for ext in crate::engine::SUPPORTED_EXTS {
+            let (_, mimes) = EXT_MIME
+                .iter()
+                .find(|(e, _)| e == ext)
+                .unwrap_or_else(|| panic!("{ext} is printable but has no MIME type here"));
+            for mime in *mimes {
+                if !out.contains(mime) {
+                    out.push(mime);
+                }
+            }
+        }
+        out
+    }
+
+    /// `%F` expanded the way a file manager expands it: one argument per
+    /// selected path.
+    fn expand(exec: &str, files: &[PathBuf]) -> Vec<String> {
+        exec.split_whitespace()
+            .flat_map(|arg| match arg {
+                "%F" => files
+                    .iter()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .collect(),
+                "{{exec}}" => vec!["pluryprint".to_string()],
+                other => vec![other.to_string()],
+            })
+            .collect()
+    }
+
+    /// The catalog's `shellMenu.<key>` in `catalog`.
+    fn catalog_label(catalog: &str, key: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(catalog).unwrap();
+        v["shellMenu"][key].as_str().unwrap().to_string()
+    }
+
+    fn two_files(dir: &Path) -> Vec<PathBuf> {
+        let files = vec![dir.join("a report.pdf"), dir.join("photo.heic")];
+        for f in &files {
+            std::fs::write(f, b"x").unwrap();
+        }
+        files
+    }
+
+    #[test]
+    fn fr_004_every_printable_format_has_a_mime_type_and_no_more() {
+        for (ext, _) in EXT_MIME {
+            assert!(
+                crate::engine::SUPPORTED_EXTS.contains(ext),
+                "{ext} is not printable, so no menu may offer it"
+            );
+        }
+        // Panics on a printable extension the table above does not know.
+        assert!(!printable_mime_types().is_empty());
+    }
+
+    /// "Open with" lists Pluryprint for exactly the printable formats, and
+    /// never for folders.
+    #[test]
+    fn fr_004_the_desktop_entry_opens_every_printable_format() {
+        let groups = groups(DESKTOP_TEMPLATE);
+        assert_eq!(groups.len(), 1, "one [Desktop Entry], no actions");
+        let entry = &groups[0];
+        assert_eq!(entry.0, "Desktop Entry");
+        assert_eq!(get(entry, "Type"), "Application");
+        assert_eq!(list(get(entry, "MimeType")), printable_mime_types());
+        assert_eq!(get(entry, "Exec"), "{{exec}} %F");
+        // The dock matches the window to this entry through its WM class,
+        // which GTK takes from the binary's name.
+        assert_eq!(get(entry, "StartupWMClass"), "{{exec}}");
+    }
+
+    /// `pluryprint <files>` is an "open with" launch: the GUI opens on the
+    /// Print Job screen with the files loaded (FR-008).
+    #[test]
+    fn fr_008_the_desktop_entry_exec_is_an_open_with_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = two_files(dir.path());
+        let entry = &groups(DESKTOP_TEMPLATE)[0];
+        let argv = expand(get(entry, "Exec"), &files);
+        assert_eq!(
+            crate::cli::classify(&argv[1..]),
+            crate::cli::Intent::Gui,
+            "{argv:?}"
+        );
+        let selection = crate::cli::open_with_selection(&argv[1..]).expect("files are loaded");
+        assert_eq!(selection.paths.len(), 2);
+        assert_eq!(selection.action, ContextAction::Configure);
+    }
+
+    /// The Dolphin submenu: the three Explorer actions, on every printable
+    /// format and on folders, with the catalog's labels.
+    #[test]
+    fn fr_004_the_dolphin_service_menu_mirrors_the_explorer_menu() {
+        let groups = groups(KIO_SERVICE_MENU);
+        let entry = &groups[0];
+        assert_eq!(entry.0, "Desktop Entry");
+        assert_eq!(get(entry, "Type"), "Service");
+        assert_eq!(get(entry, "X-KDE-ServiceTypes"), "KonqPopupMenu/Plugin");
+        assert_eq!(get(entry, "X-KDE-Submenu"), "Pluryprint");
+        let mut expected = printable_mime_types();
+        expected.push("inode/directory");
+        assert_eq!(list(get(entry, "MimeType")), expected);
+        assert_eq!(
+            list(get(entry, "Actions")),
+            ["printNow", "configure", "queue"]
+        );
+        assert_eq!(groups.len(), 4, "the entry and its three actions");
+
+        for (id, label) in [("configure", "configure"), ("queue", "queue")] {
+            let action = groups
+                .iter()
+                .find(|g| g.0 == format!("Desktop Action {id}"))
+                .unwrap();
+            assert_eq!(get(action, "Name"), catalog_label(EN_COMMON, label));
+            assert_eq!(get(action, "Name[es]"), catalog_label(ES_COMMON, label));
+        }
+    }
+
+    /// Every Nemo action offers itself on the printable extensions and on
+    /// folders, only when something is selected, and only while the
+    /// `pluryprint` command exists.
+    #[test]
+    fn fr_004_the_nemo_actions_cover_every_printable_format() {
+        let mut expected = vec!["dir".to_string()];
+        expected.extend(
+            crate::engine::SUPPORTED_EXTS
+                .iter()
+                .map(|e| format!(".{e}")),
+        );
+        for (name, text, _) in NEMO_ACTIONS {
+            let groups = groups(text);
+            assert_eq!(groups.len(), 1, "{name}");
+            let action = &groups[0];
+            assert_eq!(action.0, "Nemo Action", "{name}");
+            assert_eq!(list(get(action, "Extensions")), expected, "{name}");
+            assert_eq!(get(action, "Selection"), "notnone", "{name}");
+            assert_eq!(get(action, "Dependencies"), "pluryprint;", "{name}");
+            assert!(!get(action, "Name[es]").is_empty(), "{name}");
+        }
+    }
+
+    /// Every menu line parses as the context-menu invocation it means, with
+    /// the selected files after `--`, and (on Linux) resolves to a selection
+    /// carrying the right action.
+    #[test]
+    fn fr_004_every_menu_exec_line_is_a_context_menu_invocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = two_files(dir.path());
+
+        let kio = groups(KIO_SERVICE_MENU);
+        let mut lines: Vec<(String, &str, ContextAction)> = [
+            ("printNow", ContextAction::PrintDefault),
+            ("configure", ContextAction::Configure),
+            ("queue", ContextAction::Queue),
+        ]
+        .into_iter()
+        .map(|(id, action)| {
+            let group = kio
+                .iter()
+                .find(|g| g.0 == format!("Desktop Action {id}"))
+                .unwrap();
+            (format!("dolphin {id}"), get(group, "Exec"), action)
+        })
+        .collect();
+        for (name, text, action) in NEMO_ACTIONS {
+            lines.push((name.to_string(), get(&groups(text)[0], "Exec"), *action));
+        }
+
+        for (name, exec, action) in lines {
+            let argv = expand(exec, &files);
+            assert_eq!(argv[0], "pluryprint", "{name}");
+            assert_eq!(
+                crate::cli::classify(&argv[1..]),
+                crate::cli::Intent::ContextMenu,
+                "{name}"
+            );
+            let cli = Cli::parse_context_menu(&argv).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(cli.invoke, Some(InvokeSource::ContextMenu), "{name}");
+            assert_eq!(cli.action, action, "{name}");
+            assert_eq!(cli.paths, files, "{name}");
+            assert!(cli.files_from.is_none() && cli.command.is_none(), "{name}");
+
+            let resolved = crate::cli::selection_from_at_cwd(dir.path(), &cli, None);
+            if crate::cli::ARGV_SELECTION {
+                let selection = resolved.unwrap_or_else(|e| panic!("{name}: {:?}", e.error));
+                assert_eq!(selection.action, action, "{name}");
+                assert_eq!(selection.paths.len(), 2, "{name}");
+            } else {
+                assert!(resolved.is_err(), "{name}: argv selections are Linux-only");
+            }
+        }
     }
 }
