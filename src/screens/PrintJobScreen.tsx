@@ -59,6 +59,7 @@ import type { DependencyReport } from '@/ipc/bindings';
 import { isMacPlatform } from '@/components/AppShell/MPAppShell';
 import { DependencyInstallDialog } from '@/components/DependencyInstallDialog';
 import { remediationKey } from '@/lib/deps';
+import { useHostPlatform } from '@/lib/platform';
 import { Icon } from '@/components/Icon';
 import { useLocale, useT } from '@/i18n/I18nProvider';
 import { useProfilesStore } from '@/stores/profilesStore';
@@ -175,6 +176,9 @@ export function PrintJobScreen({
   const t = useT('printJob');
   // macOS labels the modifier Option (⌥), everywhere else it is Alt.
   const mac = isMacPlatform();
+  // The empty list names the file manager files come from: Explorer or
+  // Finder, or on Linux whichever one the desktop uses.
+  const host = useHostPlatform();
   const tCommon = useT('common');
 
   // The copies draft lives with the caller when it passes one (App does);
@@ -1016,7 +1020,13 @@ export function PrintJobScreen({
                   fontSize: 12.5,
                 }}
               >
-                {tauri ? t('empty.desktop') : t('empty.web')}
+                {tauri
+                  ? t(
+                      host.os === 'linux'
+                        ? 'empty.desktopLinux'
+                        : 'empty.desktop',
+                    )
+                  : t('empty.web')}
               </div>
             )}
           </MPCard>

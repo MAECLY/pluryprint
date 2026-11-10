@@ -1,5 +1,6 @@
 //! HTML → PDF through the operating system's own web view (FR-055, D15):
-//! WebView2 `PrintToPdf` on Windows, `WKWebView` printing on macOS. Runs only
+//! WebView2 `PrintToPdf` on Windows, `WKWebView` printing on macOS, WebKitGTK
+//! printing to a file on Linux ([`linux`]). Runs only
 //! inside the render worker ([`crate::worker::render`]), never in the app or
 //! the CLI process itself, so a hostile page that crashes or wedges the web
 //! view takes the worker down, not Pluryprint.
@@ -30,7 +31,10 @@
 //!   ([`resolve`], [`open_in_folder`]), and a `WKContentRuleList`
 //!   ([`webkit_rule_list`]) blocks every other load: every `file:` URL and
 //!   every network scheme; only that origin, `data:`, `blob:` and
-//!   `about:blank` pass;
+//!   `about:blank` pass. Linux does the same with WebKitGTK's own pieces: a
+//!   URI scheme registered on the web context answers the private scheme,
+//!   and a `WebKitUserContentFilter` compiled from the same rule list blocks
+//!   the rest;
 //! - **no navigation**: every navigation other than the worker's own load of
 //!   the page (a `<meta http-equiv=refresh>`, a frame, a link target, a new
 //!   window) is cancelled, and refused ones are logged;
@@ -42,18 +46,19 @@
 //!   from which Chromium refuses every `file:` sub-resource, and a
 //!   protocol-relative reference resolves to `https:`, which the filter
 //!   refuses. Every path it serves is checked by the shared share predicate
-//!   ([`crate::engine::convert::local_ref`]). On macOS the page is not
-//!   loaded from `file:` either, and the rule list refuses every `file:` URL.
+//!   ([`crate::engine::convert::local_ref`]). On macOS and Linux the page is
+//!   not loaded from `file:` either, and the rule list refuses every `file:`
+//!   URL.
 //! - **one origin**: the staged page and the document's folder share that
 //!   origin, so same-folder web fonts (CORS-mode requests) and external SVG
 //!   `<use>` (same-origin only) load as they do from the user's folder.
 //! - **only the page's folder readable**: the worker serves the staged page
 //!   and files inside the document's folder, nothing else, and checks each
 //!   file on the handle it reads from: on Windows its final path
-//!   (`GetFinalPathNameByHandleW`) must lie inside the folder; on macOS
-//!   [`open_in_folder`] opens it component by component without following a
-//!   link out of the folder, then checks its `F_GETPATH`. Neither web view
-//!   reads a document file by itself. (Round 6 confined WebKit with a
+//!   (`GetFinalPathNameByHandleW`) must lie inside the folder; on macOS and
+//!   Linux [`open_in_folder`] opens it component by component without
+//!   following a link out of the folder (macOS then also checks its
+//!   `F_GETPATH`). No web view reads a document file by itself. (Round 6 confined WebKit with a
 //!   `file:` URL prefix only; round 7 showed a symbolic link inside the
 //!   folder passed that prefix and WebKit followed it anywhere.)
 //! - **bounded**: the worker gives up by itself after the job's conversion
@@ -63,12 +68,22 @@
 //!
 //! The page size comes from the job ([`RenderRequest::paper_in`]) and is set
 //! natively on the print settings, so it does not depend on the page's CSS.
+//!
+//! **Linux needs a display.** WebKitGTK is a GTK widget: without an X11 or
+//! Wayland session (a headless `pluryprint print` over SSH, a service) the
+//! worker cannot start it. It then fails at once with [`NO_DISPLAY_MARKER`]
+//! on stderr instead of a GTK error; [`display_available`] tells the caller
+//! beforehand.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
+pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod webkit;
 #[cfg(windows)]
 pub mod windows;
 
@@ -82,15 +97,19 @@ pub const DOC_HOST: &str = "doc.pluryprint.example";
 /// document folder is expected to have; the page wins over a file there.
 pub const STAGE_PATH: &str = "/.pluryprint-stage/";
 
-/// The private URL scheme the macOS worker serves the staged page and the
-/// document's folder on (`pluryprint-doc://`[`DOC_HOST`]`/…`), through its
-/// own `WKURLSchemeHandler` (round 7; module docs). WebKit hands every
-/// request on it to the worker and never reads a `file:` URL for the page.
+/// The private URL scheme the WebKit workers (macOS and Linux) serve the
+/// staged page and the document's folder on
+/// (`pluryprint-doc://`[`DOC_HOST`]`/…`), through their own scheme handler
+/// (round 7; module docs). WebKit hands every request on it to the worker
+/// and never reads a `file:` URL for the page. Named for the platform that
+/// had it first; Linux uses the same scheme, so the page's policy
+/// ([`crate::engine::convert::html::page_csp`]) names one scheme for both.
 pub const MAC_DOC_SCHEME: &str = "pluryprint-doc";
 
 /// The scheme the staged page and its document's folder are served on by
 /// this platform's worker: `https` on Windows (WebView2's request filter),
-/// [`MAC_DOC_SCHEME`] elsewhere (WebKit's scheme handler).
+/// [`MAC_DOC_SCHEME`] elsewhere (WebKit's scheme handler, on macOS and
+/// Linux).
 pub const fn doc_scheme() -> &'static str {
     if cfg!(windows) {
         "https"
@@ -102,6 +121,55 @@ pub const fn doc_scheme() -> &'static str {
 /// The line a render worker prints on stderr when it gave up because the
 /// conversion timeout passed, so the engine reports a timeout.
 pub const TIMEOUT_MARKER: &str = "pluryprint-render-timeout";
+
+/// The line a render worker prints on stderr when it cannot start its web
+/// view because there is no graphical session to start it in (Linux without
+/// `DISPLAY` or `WAYLAND_DISPLAY`, or with one it cannot open). Retrying
+/// does not help, so the engine can report it as its own terminal reason.
+pub const NO_DISPLAY_MARKER: &str = "pluryprint-render-no-display";
+
+/// What the render worker puts before the message it fails with
+/// ([`crate::worker::render`]).
+pub const WORKER_ERROR_PREFIX: &str = "pluryprint worker render-pdf: ";
+
+/// Whether the worker's log `log` says it stopped with `marker`
+/// ([`TIMEOUT_MARKER`], [`NO_DISPLAY_MARKER`]): a line that starts with it
+/// (the watchdog) or with [`WORKER_ERROR_PREFIX`] and then it (the error the
+/// worker returns). Anywhere else on a line does not count: the same log
+/// records URLs the page itself chose (a refused navigation), and a page
+/// must not be able to turn its own failure into a terminal timeout or
+/// "no display" by naming a marker in a link. Pure.
+pub fn log_reports(log: &str, marker: &str) -> bool {
+    log.lines().any(|line| {
+        line.strip_prefix(WORKER_ERROR_PREFIX)
+            .unwrap_or(line)
+            .starts_with(marker)
+    })
+}
+
+/// Whether this process can start the render worker's web view: always on
+/// Windows and macOS; on Linux only inside an X11 or Wayland session
+/// (`DISPLAY` or `WAYLAND_DISPLAY` set and not empty). The worker inherits
+/// this process' environment, so the answer holds for it too. It says
+/// nothing about whether that display can actually be opened; the worker
+/// reports that one itself ([`NO_DISPLAY_MARKER`]).
+pub fn display_available() -> bool {
+    if cfg!(target_os = "linux") {
+        display_in(
+            std::env::var_os("DISPLAY").as_deref(),
+            std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+        )
+    } else {
+        true
+    }
+}
+
+/// [`display_available`] for given values of `DISPLAY` and
+/// `WAYLAND_DISPLAY` (Linux rules). Pure.
+pub fn display_in(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
+    let set = |v: Option<&OsStr>| v.is_some_and(|v| !v.is_empty());
+    set(display) || set(wayland)
+}
 
 /// What one render worker run does: print `page` to `output`.
 #[derive(Debug, Clone, PartialEq)]
@@ -221,6 +289,16 @@ pub fn start_watchdog(limit: Option<std::time::Duration>) {
             "{TIMEOUT_MARKER}: the render did not finish within {}s",
             limit.as_secs()
         );
+        // `_exit`, not `exit`: the main thread may still be inside GTK or
+        // WebKit, and running their exit handlers and C++ static destructors
+        // under it can crash or hang the worker instead of ending it.
+        // `eprintln!` is unbuffered, so the marker is already written.
+        #[cfg(unix)]
+        // SAFETY: `_exit` has no preconditions; it never returns.
+        unsafe {
+            libc::_exit(crate::worker::EXIT_FAILED)
+        };
+        #[cfg(not(unix))]
         std::process::exit(crate::worker::EXIT_FAILED);
     });
 }
@@ -437,8 +515,8 @@ pub fn serve(uri: &str, page: &Path, base_dir: &Path) -> Served {
 const MAX_LINK_HOPS: usize = 32;
 
 /// Open the file at `segments` (a [`Resolved::InFolder`] path) inside the
-/// folder `root` without ever touching anything outside it (round 7,
-/// macOS). Each component is opened relative to the directory before it
+/// folder `root` without ever touching anything outside it (round 7; the
+/// macOS and Linux workers). Each component is opened relative to the directory before it
 /// (`openat` with `O_NOFOLLOW`), so no symbolic link is followed by the
 /// kernel. A link found on the way is read (`readlinkat`) and followed by
 /// hand only while its target stays inside `root`: a relative target that
@@ -668,8 +746,8 @@ fn webkit_regex_escape(text: &str) -> String {
 }
 
 /// The text encoding a staged page is declared in, named in the
-/// `Content-Type` the macOS scheme handler serves the page with
-/// (`render/macos.rs`): a byte-order mark first, then a
+/// `Content-Type` the WebKit scheme handlers serve the page with
+/// (`render/webkit.rs`): a byte-order mark first, then a
 /// `charset` in the first kilobyte, then UTF-8 when the bytes are valid
 /// UTF-8, else Windows-1252 (what a browser assumes for Western text). Pure.
 pub fn sniff_charset(html: &[u8]) -> String {
@@ -702,7 +780,7 @@ pub fn sniff_charset(html: &[u8]) -> String {
 }
 
 /// Render `request` with this platform's web view. Must run on the process'
-/// main thread (both web views need it). `Err` carries a technical message
+/// main thread (every web view needs it). `Err` carries a technical message
 /// for the worker's stderr.
 pub fn render(request: &RenderRequest) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -713,10 +791,14 @@ pub fn render(request: &RenderRequest) -> Result<(), String> {
     {
         windows::render(request)
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::render(request)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = request;
-        Err("rendering HTML is supported on Windows and macOS only".into())
+        Err("rendering HTML is supported on Windows, macOS and Linux only".into())
     }
 }
 
@@ -1124,6 +1206,37 @@ mod tests {
         } else {
             assert_eq!(href, "pluryprint-doc://doc.pluryprint.example/");
         }
+    }
+
+    /// Linux: a display is either X11 or Wayland; an empty variable is
+    /// none (a session that unset it).
+    #[test]
+    fn fr_055_a_display_is_x11_or_wayland() {
+        let s = |v: &'static str| Some(OsStr::new(v));
+        assert!(display_in(s(":0"), None));
+        assert!(display_in(None, s("wayland-0")));
+        assert!(display_in(s(":99"), s("wayland-1")));
+        assert!(!display_in(None, None));
+        assert!(!display_in(s(""), s("")));
+        if !cfg!(target_os = "linux") {
+            assert!(display_available());
+        }
+    }
+
+    #[test]
+    fn fr_055_only_the_worker_itself_can_report_a_marker() {
+        let worker = format!("{WORKER_ERROR_PREFIX}{NO_DISPLAY_MARKER}: GTK could not open");
+        assert!(log_reports(&worker, NO_DISPLAY_MARKER));
+        let watchdog = format!("x\n{TIMEOUT_MARKER}: the render did not finish within 7s\n");
+        assert!(log_reports(&watchdog, TIMEOUT_MARKER));
+        // A URL the page chose, logged by the worker, is not the worker
+        // saying it stopped.
+        let page = format!(
+            "pluryprint render: navigation refused: http://x/{NO_DISPLAY_MARKER}\n\
+             {WORKER_ERROR_PREFIX}the web view crashed"
+        );
+        assert!(!log_reports(&page, NO_DISPLAY_MARKER));
+        assert!(!log_reports(&page, TIMEOUT_MARKER));
     }
 
     #[test]

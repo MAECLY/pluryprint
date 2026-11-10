@@ -82,7 +82,7 @@ The roadmap past v1.0 is additive, not directional. The core product stays the s
 - **Scheduling.** Time-based and trigger-based jobs (e.g., print every invoice landing in `Inbox\Invoices\` after 6 PM).
 - **Profiles.** Saved combinations of printer + duplex + watermark + page range, invokable from the context menu (`Print all with Pluryprint → "Letterhead Duplex"`).
 - **CLI parity.** `pluryprint --src "C:\Invoices\*.pdf" --printer "HP M404" --duplex long --copies 2` for scripting and CI use, modeled after 2Printer's flag style.
-- **Cross-platform.** macOS 13+ on Apple Silicon and Intel, using CUPS and a Finder Quick Action / Services menu integration.
+- **Cross-platform.** macOS 13+ on Apple Silicon and Intel, using CUPS and a Finder Quick Action / Services menu integration. Linux x86_64 and ARM64 (Ubuntu 22.04+, Debian 12+, Fedora 38+) through the same CUPS backend, as AppImage and `.deb`, with "Open with" and Dolphin / Nemo actions ([ADR-0015](../adr/0015-linux-support.md); a preview from 0.0.5).
 - **Optional cloud features.** Strictly opt-in; for example, a shared profile sync via Git or WebDAV. Never by default, never required.
 
 Each of those is a discrete chunk of work documented separately under `../06-roadmap/`. The vision above is the rope they all hang from: **eliminate the friction between selecting files and getting paper out of a printer, for free, with no strings attached**.

@@ -6,6 +6,7 @@
 //! | argv                                        | mode         | window? |
 //! | ------------------------------------------- | ------------ | ------- |
 //! | `--invoke=context-menu --files-from <PATH>`  | context menu | yes, pre-loaded |
+//! | `--invoke=context-menu … -- <PATHS>` (Linux) | context menu | yes, pre-loaded |
 //! | `print …` / `printers …` / … / `--cli` / `--help` | headless | **no** |
 //! | anything else                                | GUI          | yes     |
 //!
@@ -206,7 +207,7 @@ where
             // path typed in a terminal can be anchored here. A launch forwarded
             // to an already running instance is anchored there instead, against
             // the cwd the single-instance plugin reports for it.
-            let cwd = std::env::current_dir().ok();
+            let cwd = caller_dir();
             Startup::Gui {
                 selection: open_with_selection(&anchor_relative(&tail, cwd.as_deref())),
                 handoff: None,
@@ -217,11 +218,15 @@ where
             // A malformed shell-extension invocation must not leave the user
             // staring at nothing: report it and open the app empty, which is
             // still a usable outcome (they can pick files themselves).
-            let parsed = Cli::try_parse_from(&argv)
+            // Paths after `--` (Linux) are anchored like an "open with"
+            // launch's: against this process' working directory, which at
+            // launch is the caller's.
+            let cwd = caller_dir();
+            let parsed = Cli::parse_context_menu(&argv)
                 .map_err(context_menu_parse_error)
                 .and_then(|cli| {
                     let handoff = cli.files_from.clone();
-                    selection_from(&cli)
+                    selection_from(&cli, cwd.as_deref())
                         .map(|selection| (selection, handoff))
                         .map_err(|e| e.error.to_string())
                 });
@@ -261,6 +266,53 @@ where
                 }
             }
         }
+    }
+}
+
+/// The folder the user ran this command from, which anchors every relative
+/// path on the command line: this process' working directory, except inside
+/// a Linux AppImage. Its `AppRun` changes into `$APPDIR/usr` before starting
+/// the app (WebKitGTK's helpers resolve from there, see
+/// [`crate::engine::convert::html`]), so `./Pluryprint.AppImage print --files
+/// a.pdf` would otherwise look for `a.pdf` inside the image. The runtime keeps
+/// the caller's folder in `OWD` when it mounts the image; run unpacked
+/// (`--appimage-extract-and-run`, or without FUSE) it sets no `OWD`, and the
+/// caller's `PWD`, which `AppRun` does not touch, says the same. The process
+/// never changes folder back: the GUI's own web view needs `$APPDIR/usr` too.
+pub fn caller_dir() -> Option<PathBuf> {
+    caller_dir_from(
+        cfg!(target_os = "linux"),
+        std::env::var_os("APPIMAGE").as_deref(),
+        std::env::var_os("OWD")
+            .or_else(|| std::env::var_os("PWD"))
+            .as_deref(),
+        std::env::current_dir().ok(),
+    )
+}
+
+/// [`caller_dir`] as a pure function: `linux` whether this is Linux,
+/// `appimage` the variable the AppImage runtime sets, `owd` the caller's
+/// folder (`OWD`, else `PWD`), `cwd` the working directory. `owd` counts only
+/// inside an AppImage and only when it is an absolute path.
+pub fn caller_dir_from(
+    linux: bool,
+    appimage: Option<&std::ffi::OsStr>,
+    owd: Option<&std::ffi::OsStr>,
+    cwd: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let in_appimage = linux && appimage.is_some_and(|a| !a.is_empty());
+    match owd.map(Path::new) {
+        Some(owd) if in_appimage && owd.is_absolute() => Some(owd.to_path_buf()),
+        _ => cwd,
+    }
+}
+
+/// `path` made absolute against [`caller_dir`] when it is relative (and left
+/// as typed when there is no such folder).
+pub fn from_caller(path: &Path) -> PathBuf {
+    match caller_dir() {
+        Some(dir) if path.is_relative() => dir.join(path),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -400,10 +452,26 @@ fn command_name(cmd: &Command) -> &'static str {
 }
 
 /// Build the [`Selection`] a context-menu invocation carries, reading the
-/// handoff file from the real handoff directory.
-pub fn selection_from(cli: &Cli) -> Result<Selection, CliError> {
-    selection_from_at(&handoff::handoff_dir(), cli)
+/// handoff file from the real handoff directory. `cwd` is the launching
+/// process' working directory, which anchors relative paths given after `--`
+/// (see [`argv_selection`]).
+pub fn selection_from(cli: &Cli, cwd: Option<&Path>) -> Result<Selection, CliError> {
+    selection_from_at_cwd(&handoff::handoff_dir(), cli, cwd)
 }
+
+/// Whether this build honours a context-menu selection given as paths after
+/// `--`. Only Linux does: its file-manager actions are static `.desktop` and
+/// `.nemo_action` lines (`src-tauri/linux/`) that can expand `%F` but cannot
+/// write a handoff file. The Windows and macOS integrations keep the handoff
+/// file as their only transport, so their contract is unchanged.
+///
+/// Taking the selection from argv opens no new door: whoever can run
+/// `pluryprint --invoke=context-menu --action print-default -- a.pdf` can run
+/// `pluryprint print --files a.pdf` just as well. The handoff file's
+/// containment and freshness checks exist because *its path* is the input,
+/// and a stale or planted file must not be replayed; a path on the command
+/// line is checked like every other input path ([`argv_selection`]).
+pub const ARGV_SELECTION: bool = cfg!(target_os = "linux");
 
 /// Build the [`Selection`] a context-menu invocation carries, out of a handoff
 /// file that must live inside `dir`.
@@ -424,13 +492,41 @@ pub fn selection_from(cli: &Cli) -> Result<Selection, CliError> {
 /// `dir` is injected so the whole gate can be exercised against a tempdir
 /// instead of the developer's real data directory.
 pub fn selection_from_at(dir: &Path, cli: &Cli) -> Result<Selection, CliError> {
+    selection_from_at_cwd(dir, cli, None)
+}
+
+/// [`selection_from_at`], with the launching process' working directory to
+/// anchor relative paths given after `--` (Linux, [`ARGV_SELECTION`]). A
+/// selection read from a handoff file ignores `cwd`: its paths are absolute
+/// by contract.
+pub fn selection_from_at_cwd(
+    dir: &Path,
+    cli: &Cli,
+    cwd: Option<&Path>,
+) -> Result<Selection, CliError> {
     if cli.invoke != Some(InvokeSource::ContextMenu) {
         return Err(CliError::usage("not a context-menu invocation"));
     }
-    let path = cli
-        .files_from
-        .as_ref()
-        .ok_or_else(|| CliError::usage("--invoke=context-menu requires --files-from <PATH>"))?;
+    // `Cli::parse_context_menu` refuses `--files-from` with paths after `--`, so
+    // at most one of the two transports is present here.
+    if !cli.paths.is_empty() {
+        if !ARGV_SELECTION {
+            return Err(CliError::usage(
+                "--invoke=context-menu requires --files-from <PATH>; \
+                 paths after -- are only accepted on Linux",
+            ));
+        }
+        return argv_selection(&cli.paths, cli.action, cli.profile.clone(), cwd).ok_or_else(|| {
+            CliError::usage("none of the paths after -- names an existing file or folder")
+        });
+    }
+    let path = cli.files_from.as_ref().ok_or_else(|| {
+        CliError::usage(if ARGV_SELECTION {
+            "--invoke=context-menu requires --files-from <PATH> or paths after --"
+        } else {
+            "--invoke=context-menu requires --files-from <PATH>"
+        })
+    })?;
 
     if !handoff::is_within_dir(dir, path) {
         return Err(CliError::usage(format!(
@@ -455,6 +551,56 @@ pub fn selection_from_at(dir: &Path, cli: &Cli) -> Result<Selection, CliError> {
         cli.action,
         cli.profile.clone(),
     ))
+}
+
+/// The selection a Linux file-manager action carries on its command line
+/// (`pluryprint --invoke=context-menu --action print-default -- %F`): the
+/// paths after `--`, with the action and profile from the flags.
+///
+/// Every path goes through [`crate::util::paths::canonical_input`] like an
+/// "open with" launch's ([`open_with_selection`]): a relative one is first
+/// anchored against `cwd` (the *launching* process' folder, never this
+/// one's), and one that does not exist is dropped. Unlike an open-with
+/// argument, nothing after `--` is a flag, so a file named `-notes.txt` is
+/// still a file. Folders pass, as they do in the Windows menu; the app
+/// expands them the same way.
+///
+/// Portable on purpose, so every platform's tests exercise it; whether a
+/// command line may use it is [`ARGV_SELECTION`]'s call. `None` when no path
+/// survives: a menu entry that resolves to nothing is refused, not turned
+/// into an empty dialog.
+pub fn argv_selection(
+    paths: &[PathBuf],
+    action: ContextAction,
+    profile: Option<String>,
+    cwd: Option<&Path>,
+) -> Option<Selection> {
+    let given = paths.len();
+    let paths: Vec<String> = paths
+        .iter()
+        .map(|p| match cwd {
+            Some(cwd) if p.is_relative() => cwd.join(p),
+            _ => p.clone(),
+        })
+        .filter_map(|p| crate::util::paths::canonical_input(&p.to_string_lossy()).ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    if paths.len() < given {
+        // The count, never the paths: NFR-082 keeps them out of WARN records.
+        tracing::warn!(
+            event = "context_menu_paths_dropped",
+            dropped = given - paths.len(),
+            kept = paths.len(),
+        );
+    }
+    (!paths.is_empty()).then_some(Selection {
+        paths,
+        action,
+        profile_id: profile,
+        // Argv is not capped on Linux the way it is on Windows, so the whole
+        // selection always arrives.
+        truncated_from: None,
+    })
 }
 
 /// Fold a validated handoff payload and the argv fallbacks into a [`Selection`].
@@ -535,6 +681,37 @@ fn clap_exit_code(kind: clap::error::ErrorKind) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inside a Linux AppImage, relative CLI paths are anchored at `OWD`
+    /// (the folder the user ran it from), not at `$APPDIR/usr`, where
+    /// `AppRun` leaves the process. A review found `print --files rel.png`
+    /// looking for the file inside the mounted image.
+    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+    /// (on Windows `/tmp/...` is not even absolute).
+    #[cfg(unix)]
+    #[test]
+    fn fr_008_an_appimage_anchors_relative_paths_at_owd() {
+        use std::ffi::OsStr;
+        let usr = Some(PathBuf::from("/tmp/.mount_PluryX/usr"));
+        let image = Some(OsStr::new("/home/u/Pluryprint.AppImage"));
+        let owd = Some(OsStr::new("/home/u/docs"));
+        assert_eq!(
+            caller_dir_from(true, image, owd, usr.clone()),
+            Some(PathBuf::from("/home/u/docs"))
+        );
+        // Not an AppImage, not Linux, or an unusable OWD: the working folder.
+        assert_eq!(caller_dir_from(true, None, owd, usr.clone()), usr);
+        assert_eq!(
+            caller_dir_from(true, Some(OsStr::new("")), owd, usr.clone()),
+            usr
+        );
+        assert_eq!(caller_dir_from(false, image, owd, usr.clone()), usr);
+        assert_eq!(
+            caller_dir_from(true, image, Some(OsStr::new("docs")), usr.clone()),
+            usr
+        );
+        assert_eq!(caller_dir_from(true, image, None, usr.clone()), usr);
+    }
 
     /// ipc-and-cli.md §3.3: `--json` turns errors into JSON on stderr — usage
     /// errors included. An unknown flag or a bad value used to come back as
@@ -745,6 +922,107 @@ mod tests {
             other => panic!("a context-menu launch always opens the GUI, got {other:?}"),
         }
         assert!(path.exists());
+    }
+
+    /// A Linux file-manager action's selection: existing paths, relative
+    /// ones anchored at the caller's folder, missing ones dropped, and a file
+    /// whose name starts with `-` still a file.
+    #[test]
+    fn fr_004_argv_selection_resolves_paths_like_an_open_with_launch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = |name: &str| {
+            crate::util::paths::canonical_input(&dir.path().join(name).to_string_lossy())
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        std::fs::write(dir.path().join("a report.pdf"), b"%PDF-1.4\n").unwrap();
+        std::fs::write(dir.path().join("-notes.txt"), b"hi").unwrap();
+        std::fs::create_dir(dir.path().join("scans")).unwrap();
+
+        let selection = argv_selection(
+            &[
+                dir.path().join("a report.pdf"),
+                PathBuf::from("-notes.txt"),
+                PathBuf::from("scans"),
+                dir.path().join("gone.pdf"),
+            ],
+            ContextAction::PrintDefault,
+            Some("Quick".into()),
+            Some(dir.path()),
+        )
+        .expect("three of the four exist");
+        assert_eq!(
+            selection.paths,
+            [
+                canonical("a report.pdf"),
+                canonical("-notes.txt"),
+                canonical("scans")
+            ]
+        );
+        assert_eq!(selection.action, ContextAction::PrintDefault);
+        assert_eq!(selection.profile_id.as_deref(), Some("Quick"));
+        assert_eq!(selection.truncated_from, None);
+
+        // Without the caller's folder a relative path is never guessed, and
+        // a selection with nothing left is no selection.
+        assert!(argv_selection(
+            &[PathBuf::from("-notes.txt")],
+            ContextAction::Configure,
+            None,
+            None
+        )
+        .is_none());
+    }
+
+    /// Paths after `--` are a Linux transport. Windows and macOS keep the
+    /// handoff file as the only one, so the same command line is refused
+    /// there, exactly as it was before Linux existed.
+    #[test]
+    fn fr_004_argv_selections_are_honoured_on_linux_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("a.pdf");
+        std::fs::write(&file, b"%PDF-1.4\n").unwrap();
+        let argv = [
+            "pluryprint".to_string(),
+            "--invoke=context-menu".to_string(),
+            "--action=queue".to_string(),
+            "--".to_string(),
+            file.to_string_lossy().into_owned(),
+        ];
+        let cli = Cli::parse_context_menu(&argv).expect("parses everywhere");
+        let resolved = selection_from_at_cwd(dir.path(), &cli, None);
+
+        match startup(argv.clone()) {
+            Startup::Gui { selection, handoff } => {
+                assert!(handoff.is_none(), "no handoff file is involved");
+                if cfg!(target_os = "linux") {
+                    let selection = selection.expect("the files are pre-loaded");
+                    assert_eq!(selection.action, ContextAction::Queue);
+                    assert_eq!(selection.paths.len(), 1);
+                    assert_eq!(resolved.unwrap(), selection);
+                } else {
+                    assert!(selection.is_none(), "refused, and the app opens empty");
+                    assert!(resolved.is_err());
+                }
+            }
+            other => panic!("a context-menu launch always opens the GUI, got {other:?}"),
+        }
+        assert_eq!(ARGV_SELECTION, cfg!(target_os = "linux"));
+    }
+
+    /// A menu entry whose files are all gone opens the app empty rather than
+    /// with an empty selection.
+    #[test]
+    fn fr_004_an_argv_selection_of_missing_files_is_refused() {
+        let cli = Cli::parse_context_menu([
+            "pluryprint",
+            "--invoke=context-menu",
+            "--",
+            "/nonexistent/pluryprint/a.pdf",
+        ])
+        .unwrap();
+        assert!(selection_from_at_cwd(Path::new("/nonexistent"), &cli, None).is_err());
     }
 
     /// The CLI's log records name the subcommand and nothing it was given:

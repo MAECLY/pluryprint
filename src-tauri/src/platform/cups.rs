@@ -11,11 +11,14 @@
 //!
 //! Per-queue enumeration is best-effort: missing tools or fields degrade to
 //! empty/`None`, because a half-readable printer is still worth showing.
-//! **Discovery is the exception**: a scan that could not run returns `Err` so
-//! the UI can say so, instead of claiming the network holds no printers.
+//! Two exceptions return `Err` so the UI can say so instead of showing an
+//! empty list: a printer list without `lpstat` at all (`cups_missing`: on
+//! Linux the CUPS client tools are a package of their own), and a network
+//! scan that could not run.
 
 use std::collections::HashMap;
-use std::process::Command;
+
+use crate::util::appimage::host_command;
 
 use anyhow::Context;
 
@@ -25,7 +28,7 @@ use crate::util::error::{IpcErrorCode, LocalizedError};
 
 /// Run a CLI in the C locale and return its stdout (lossy UTF-8).
 fn lc_run(program: &str, args: &[&str]) -> anyhow::Result<String> {
-    let out = Command::new(program)
+    let out = host_command(program)
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -34,9 +37,11 @@ fn lc_run(program: &str, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Run a CLI and succeed only on a zero exit status.
+/// Run a CLI and succeed only on a zero exit status (macOS settings panes;
+/// the tests' queue clean-up).
+#[cfg(any(test, target_os = "macos"))]
 fn run_ok(program: &str, args: &[&str]) -> anyhow::Result<()> {
-    let status = Command::new(program)
+    let status = host_command(program)
         .args(args)
         .status()
         .with_context(|| format!("failed to spawn `{program}`"))?;
@@ -56,7 +61,7 @@ fn run_ok(program: &str, args: &[&str]) -> anyhow::Result<()> {
 /// A tool that cannot even be started means CUPS itself is not answering
 /// (`cups_unavailable`).
 fn run_ok_capture(program: &str, args: &[&str], reason: &'static str) -> anyhow::Result<()> {
-    let out = Command::new(program)
+    let out = host_command(program)
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -180,8 +185,8 @@ pub fn print_test_page(name: &str) -> anyhow::Result<()> {
 }
 
 /// Open the OS "Printers" settings so the user can add one manually.
-/// macOS 13+ deep link, with a legacy-pane fallback. (`open` is macOS-only;
-/// on Linux this returns an error the UI surfaces as a toast.)
+/// macOS 13+ deep link, with a legacy-pane fallback.
+#[cfg(target_os = "macos")]
 pub fn open_printer_settings() -> anyhow::Result<()> {
     const URL: &str = "x-apple.systempreferences:com.apple.Print-Scan-Settings.extension";
     if run_ok("open", &[URL]).is_ok() {
@@ -191,6 +196,122 @@ pub fn open_printer_settings() -> anyhow::Result<()> {
         "open",
         &["/System/Library/PreferencePanes/PrintAndFax.prefPane"],
     )
+}
+
+/// Open the desktop's printer settings so the user can add one manually
+/// (Linux and other non-macOS Unix).
+///
+/// Every desktop has its own tool, so the candidates of
+/// [`printer_settings_candidates`] are tried in turn, the running desktop's
+/// first, ending with the CUPS web interface in the browser. A tool that is
+/// not installed, or that fails at once, moves on to the next. When none can
+/// be started the error says where CUPS can still be managed
+/// (`printer_settings_unavailable`).
+#[cfg(not(target_os = "macos"))]
+pub fn open_printer_settings() -> anyhow::Result<()> {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let appdir = std::env::var_os("APPDIR").map(std::path::PathBuf::from);
+    let mut tried = Vec::new();
+    for (program, args) in printer_settings_candidates(&desktop) {
+        match launch_detached(program, args, appdir.as_deref()) {
+            Ok(()) => return Ok(()),
+            Err(e) => tried.push(format!("{program}: {e}")),
+        }
+    }
+    Err(LocalizedError::new(
+        IpcErrorCode::Internal,
+        "printer_settings_unavailable",
+        format!(
+            "no printer settings tool could be opened ({}); manage printers at \
+             http://localhost:631/ in a browser",
+            tried.join("; ")
+        ),
+    )
+    .into())
+}
+
+/// The CUPS web interface's printer page, the last resort of
+/// [`open_printer_settings`].
+#[cfg(any(test, not(target_os = "macos")))]
+const CUPS_WEB_PRINTERS: &str = "http://localhost:631/printers/";
+
+/// The printer-settings tools to try on a Linux desktop, in order. Pure.
+///
+/// `desktop` is `XDG_CURRENT_DESKTOP` (a `:`-separated list such as
+/// `ubuntu:GNOME`). KDE Plasma's own module comes first on KDE, GNOME
+/// Settings first on GNOME and its relatives, and the desktop-neutral
+/// `system-config-printer` first everywhere else (Xfce, Cinnamon, MATE...).
+/// `xdg-open` on the CUPS web interface is always last.
+#[cfg(any(test, not(target_os = "macos")))]
+fn printer_settings_candidates(desktop: &str) -> Vec<(&'static str, &'static [&'static str])> {
+    const GNOME: (&str, &[&str]) = ("gnome-control-center", &["printers"]);
+    const SCP: (&str, &[&str]) = ("system-config-printer", &[]);
+    const KDE6: (&str, &[&str]) = ("kcmshell6", &["kcm_printer_manager"]);
+    const KDE5: (&str, &[&str]) = ("kcmshell5", &["kcm_printer_manager"]);
+    let is = |name: &str| {
+        desktop
+            .split(':')
+            .any(|d| d.trim().eq_ignore_ascii_case(name))
+    };
+    let mut list = if is("KDE") {
+        vec![KDE6, KDE5, SCP, GNOME]
+    } else if ["GNOME", "Unity", "Budgie", "Pantheon"]
+        .iter()
+        .any(|d| is(d))
+    {
+        vec![GNOME, SCP, KDE6, KDE5]
+    } else {
+        vec![SCP, GNOME, KDE6, KDE5]
+    };
+    list.push(("xdg-open", &[CUPS_WEB_PRINTERS]));
+    list
+}
+
+/// How long a settings tool may take to fail before it counts as started.
+#[cfg(not(target_os = "macos"))]
+const LAUNCH_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Start a GUI tool without waiting for its window to close: it counts as
+/// started unless it cannot be spawned or exits with a failure within
+/// [`LAUNCH_GRACE`] (an unknown settings panel, no display). A tool still
+/// running is reaped on a background thread when it exits.
+///
+/// Inside an AppImage the environment points GTK and GIO at the libraries
+/// bundled with Pluryprint; a system tool must not load them, so those
+/// variables are cleaned first ([`crate::util::appimage::host_env`]).
+#[cfg(not(target_os = "macos"))]
+fn launch_detached(
+    program: &str,
+    args: &[&str],
+    appdir: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
+    use std::process::Stdio;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(appdir) = appdir {
+        crate::util::appimage::apply(
+            &mut cmd,
+            &crate::util::appimage::host_env(appdir, std::env::vars_os()),
+        );
+    }
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("failed to spawn `{program}`"))?;
+    let started = std::time::Instant::now();
+    while started.elapsed() < LAUNCH_GRACE {
+        match child.try_wait()? {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => anyhow::bail!("`{program}` exited with {status}"),
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
@@ -307,9 +428,10 @@ fn lpadmin_args(queue: &str, uri: &str, display: &str) -> anyhow::Result<Vec<Str
 }
 
 /// Every installed CUPS queue with its options, capabilities and pending-job
-/// count. An empty CUPS setup is `Ok(vec![])`, not an error.
+/// count. An empty CUPS setup is `Ok(vec![])`, not an error; a system without
+/// the CUPS client tools is `cups_missing`.
 pub fn list_printers() -> anyhow::Result<Vec<Printer>> {
-    let names = queue_names();
+    let names = queue_names_or_missing(|| lc_run("lpstat", &["-e"]))?;
     if names.is_empty() {
         return Ok(Vec::new());
     }
@@ -348,7 +470,7 @@ pub fn default_printer() -> anyhow::Result<Option<String>> {
 /// painted as "no printers found" (which is what `unwrap_or_default()` used to
 /// do).
 fn run_ippfind(args: &[&str]) -> anyhow::Result<String> {
-    let out = match Command::new("ippfind")
+    let out = match host_command("ippfind")
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -552,13 +674,47 @@ fn strip_port(authority: &str) -> &str {
 // ----------------------------------------------------------------------------
 
 fn queue_names() -> Vec<String> {
-    lc_run("lpstat", &["-e"])
-        .unwrap_or_default()
-        .lines()
+    parse_queue_names(&lc_run("lpstat", &["-e"]).unwrap_or_default())
+}
+
+/// `lpstat -e`'s output, one queue per line.
+fn parse_queue_names(out: &str) -> Vec<String> {
+    out.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .map(String::from)
         .collect()
+}
+
+/// The queue names `lpstat` (run by `run`) reports, telling "no printers"
+/// apart from "no `lpstat`".
+///
+/// macOS always has the CUPS tools; Linux has them only with the CUPS client
+/// package (`cups-client` on Debian and Ubuntu, `cups-client` or `cups` on
+/// Fedora), and without it the Printers screen would claim there are no
+/// printers. A program that is not there is `cups_missing`; any other failure
+/// keeps the best-effort empty list.
+fn queue_names_or_missing(
+    run: impl FnOnce() -> anyhow::Result<String>,
+) -> anyhow::Result<Vec<String>> {
+    match run() {
+        Ok(out) => Ok(parse_queue_names(&out)),
+        Err(e)
+            if e.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Err(LocalizedError::new(
+                IpcErrorCode::DependencyMissing,
+                "cups_missing",
+                format!(
+                    "the CUPS client tools are not installed ({e:#}) — install cups-client \
+                     (Debian, Ubuntu) or cups (Fedora) to list and use printers"
+                ),
+            )
+            .into())
+        }
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 fn detail(name: &str, default: Option<&str>, jobs: &HashMap<String, u32>) -> Printer {
@@ -710,7 +866,7 @@ pub fn engine_caps(p: &Printer) -> crate::engine::print::PrinterCaps {
 
 /// `lpoptions -p <name> -l`, or `None` when it could not run or failed.
 fn capability_probe(name: &str) -> Option<String> {
-    Command::new("lpoptions")
+    host_command("lpoptions")
         .args(["-p", name, "-l"])
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -1385,6 +1541,53 @@ mod tests {
     /// CI never runs it, so a failure here never blocks a merge. Run it
     /// locally with `cargo test --manifest-path src-tauri/Cargo.toml --
     /// --ignored list_printers_smoke`.
+    /// A missing `lpstat` is `cups_missing`, not an empty printer list; a
+    /// CUPS with no queues is still an empty list.
+    #[test]
+    fn fr_092_no_lpstat_is_cups_missing_not_an_empty_list() {
+        let missing = queue_names_or_missing(|| lc_run("/nonexistent/lpstat", &["-e"]))
+            .expect_err("no lpstat");
+        let e = crate::util::error::IpcError::from(missing);
+        assert_eq!(e.code(), IpcErrorCode::DependencyMissing);
+        assert_eq!(e.reason(), Some("cups_missing"));
+        assert!(e.message().contains("cups-client"), "{}", e.message());
+
+        assert_eq!(
+            queue_names_or_missing(|| Ok(" Office\nPDF \n\n".to_string())).unwrap(),
+            ["Office", "PDF"]
+        );
+        assert!(queue_names_or_missing(|| Ok(String::new()))
+            .unwrap()
+            .is_empty());
+        // Any other failure keeps the best-effort empty list.
+        assert!(queue_names_or_missing(|| anyhow::bail!("odd"))
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Linux printer settings: the running desktop's own tool first, the
+    /// desktop-neutral one next, and the CUPS web interface always last.
+    #[test]
+    fn printer_settings_follow_the_desktop() {
+        let first = |desktop: &str| printer_settings_candidates(desktop)[0].0;
+        assert_eq!(first("KDE"), "kcmshell6");
+        assert_eq!(first("ubuntu:GNOME"), "gnome-control-center");
+        assert_eq!(first("Budgie:GNOME"), "gnome-control-center");
+        assert_eq!(first("XFCE"), "system-config-printer");
+        assert_eq!(first("X-Cinnamon"), "system-config-printer");
+        assert_eq!(first(""), "system-config-printer");
+        for desktop in ["KDE", "GNOME", ""] {
+            let list = printer_settings_candidates(desktop);
+            assert_eq!(list.len(), 5, "{desktop}");
+            assert_eq!(
+                list.last().unwrap(),
+                &("xdg-open", &[CUPS_WEB_PRINTERS][..])
+            );
+            let kde = list.iter().find(|(p, _)| *p == "kcmshell5").unwrap();
+            assert_eq!(kde.1, ["kcm_printer_manager"]);
+        }
+    }
+
     #[test]
     #[ignore = "requires a real CUPS install; run with -- --ignored"]
     fn list_printers_smoke() {

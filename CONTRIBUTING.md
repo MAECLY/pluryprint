@@ -26,7 +26,7 @@ The full contribution guide lives in [`docs/08-development/contributing.md`](./d
 
 For a high-level orientation, also see:
 
-- [`docs/08-development/local-setup.md`](./docs/08-development/local-setup.md) — prerequisites and first-run checklist
+- [`docs/08-development/local-setup.md`](./docs/08-development/local-setup.md) — prerequisites on Windows, macOS and Linux (the WebKitGTK and GTK development packages) and the first-run checklist
 - [`docs/08-development/repo-structure.md`](./docs/08-development/repo-structure.md) — where things live
 - [`docs/08-development/coding-standards.md`](./docs/08-development/coding-standards.md) — formatting + style
 

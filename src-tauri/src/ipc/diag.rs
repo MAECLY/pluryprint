@@ -44,9 +44,17 @@ pub struct AppInfo {
     /// It rides on `app_info` rather than a command of its own because this is
     /// exactly what `app_info` is for — "what does this build see on this
     /// host?" — and because the screens that care already fetch it once on
-    /// mount. The probe itself is a handful of `is_file` calls (see
-    /// [`deps::report_all`]), so it costs nothing to answer on every call and
-    /// is never stale.
+    /// mount. The probe is mostly `is_file` calls (see [`deps::report_all`]).
+    /// The one exception is a `convert` met while looking for the Linux HEIF
+    /// decoder: it is run (`convert -version`, up to five seconds) to tell
+    /// ImageMagick's from GraphicsMagick's ([`deps::is_heif_decoder`]). Its
+    /// answer is kept per program file for the life of the process; no
+    /// answer (it hung past five seconds or could not start) counts as
+    /// "not ImageMagick" for a minute and is then asked again. So the
+    /// first call on such a machine can take five seconds, and with a
+    /// `convert` that hangs one call a minute does; every other costs a few
+    /// `stat`s, and a program replaced or changed is asked again, so the
+    /// list is never stale.
     ///
     /// `#[serde(default)]` — as on `AppSettings::meta`, and for the same
     /// reason: the server always sends it, but a test building an `AppInfo` by
@@ -59,9 +67,31 @@ pub struct AppInfo {
     /// CLI (FR-008). The installers do not put it on `PATH`, so a command the
     /// UI offers to copy has to name this path for the paste to work.
     /// `None` when the OS will not say (the UI then explains the requirement
-    /// instead of offering a command that cannot run).
+    /// instead of offering a command that cannot run). Inside a Linux
+    /// AppImage it is the AppImage file itself (`$APPIMAGE`), wherever it
+    /// was saved and whatever it is called now, never the temporary mount
+    /// the binary runs from.
     #[serde(default)]
     pub executable: Option<String>,
+    /// The package this build was bundled as, from Tauri's own stamp
+    /// (`tauri::utils::platform::bundle_type`): `"appimage"`, `"deb"`,
+    /// `"rpm"`, `"nsis"`, `"msi"` or `"app"`; `None` for a build that was
+    /// not bundled (`cargo run`). The updater reads the same stamp.
+    #[serde(default)]
+    pub bundle_type: Option<String>,
+}
+
+/// The executable `app_info` reports: the AppImage file when `appimage`
+/// (`$APPIMAGE`) names one, else `exe`. Pure.
+pub fn reported_executable(
+    exe: Option<String>,
+    appimage: Option<&std::ffi::OsStr>,
+) -> Option<String> {
+    let image = appimage
+        .map(std::path::Path::new)
+        .filter(|p| p.is_absolute())
+        .map(|p| p.to_string_lossy().into_owned());
+    image.or(exe)
 }
 
 /// FR-058 canary: report the version, resolved paths and dependency probe.
@@ -78,10 +108,20 @@ pub fn app_info() -> Result<AppInfo, IpcError> {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         dependencies: deps::report_all(),
-        executable: std::env::current_exe()
-            .ok()
-            .map(|p| p.canonicalize().unwrap_or(p))
-            .map(|p| without_verbatim_prefix(&p.to_string_lossy())),
+        executable: reported_executable(
+            std::env::current_exe()
+                .ok()
+                .map(|p| p.canonicalize().unwrap_or(p))
+                .map(|p| without_verbatim_prefix(&p.to_string_lossy())),
+            if cfg!(target_os = "linux") {
+                std::env::var_os("APPIMAGE")
+            } else {
+                None
+            }
+            .as_deref(),
+        ),
+        bundle_type: tauri::utils::platform::bundle_type()
+            .map(|kind| format!("{kind:?}").to_ascii_lowercase()),
     })
 }
 
@@ -286,6 +326,34 @@ fn allowed_external(raw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inside an AppImage the CLI command must name the AppImage file, not
+    /// the temporary mount the binary runs from (which vanishes on exit and
+    /// whose name the UI could only guess).
+    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+    /// (on Windows `/tmp/...` is not even absolute).
+    #[cfg(unix)]
+    #[test]
+    fn fr_008_an_appimage_reports_its_own_file_as_the_executable() {
+        use std::ffi::OsStr;
+        let mount = Some("/tmp/.mount_PluryX/usr/bin/pluryprint".to_string());
+        assert_eq!(
+            reported_executable(
+                mount.clone(),
+                Some(OsStr::new("/home/u/Apps/plury.AppImage"))
+            ),
+            Some("/home/u/Apps/plury.AppImage".to_string())
+        );
+        assert_eq!(reported_executable(mount.clone(), None), mount);
+        assert_eq!(
+            reported_executable(mount.clone(), Some(OsStr::new(""))),
+            mount
+        );
+        assert_eq!(
+            reported_executable(mount.clone(), Some(OsStr::new("x.AppImage"))),
+            mount
+        );
+    }
 
     /// FR-008: the command the UI offers to copy names the executable the way
     /// a user would type it.

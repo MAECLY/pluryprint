@@ -3,8 +3,10 @@
 //! This module is *declaration only* — no I/O, no business rules — so the whole
 //! command surface can be parsed and asserted in tests without touching the
 //! machine. It mirrors `docs/04-architecture/ipc-and-cli.md` §3.2/§3.3 plus the
-//! two entry points the shell extensions need (`--invoke=context-menu` and
-//! `--files-from`, see [`super::handoff`]).
+//! entry points the shell integrations need: `--invoke=context-menu` with
+//! either `--files-from` (the Windows and macOS extensions, see
+//! [`super::handoff`]) or, on Linux, the paths after `--` (the Dolphin and Nemo
+//! menus, see `src-tauri/linux/`).
 //!
 //! Flag names are public surface (§5 of the same doc): add, deprecate, but do
 //! not rename.
@@ -27,8 +29,8 @@ pub const SUBCOMMANDS: &[&str] = &["print", "printers", "profiles", "queue", "up
 #[command(
     name = "pluryprint",
     version,
-    about = "Batch file printing for Windows and macOS.",
-    long_about = "Batch file printing for Windows and macOS.\n\nRun without arguments to open the app; run a subcommand to work headlessly \
+    about = "Batch file printing for Windows, macOS and Linux.",
+    long_about = "Batch file printing for Windows, macOS and Linux.\n\nRun without arguments to open the app; run a subcommand to work headlessly \
 (no window is created). Exit codes are documented in docs/04-architecture/ipc-and-cli.md."
 )]
 pub struct Cli {
@@ -51,6 +53,18 @@ pub struct Cli {
     #[arg(long, value_name = "NAME-OR-ID")]
     pub profile: Option<String>,
 
+    /// The files of a `--invoke=context-menu` selection given after `--`
+    /// (`--invoke=context-menu --action=queue -- a.pdf b.pdf`), filled only
+    /// by [`Cli::parse_context_menu`]. Linux only: a file-manager action is a
+    /// static `.desktop`/`.nemo_action` line that can expand `%F` but cannot
+    /// write a handoff file. Elsewhere such a selection is refused.
+    ///
+    /// Not a clap positional on purpose: one would turn `pluryprint
+    /// frobnicate` from "unrecognized subcommand" into "unexpected argument"
+    /// and add `-- <PATHS>` to every platform's usage line.
+    #[arg(skip)]
+    pub paths: Vec<PathBuf>,
+
     /// Force headless mode even without a subcommand.
     #[arg(long)]
     pub cli: bool,
@@ -64,10 +78,48 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+impl Cli {
+    /// Parse a `--invoke=context-menu` command line, taking everything after
+    /// the first `--` as the selection's paths ([`Cli::paths`]) and the rest
+    /// through clap as usual. Only the context-menu route calls this; every
+    /// other command line goes through plain `try_parse_from`, so `--` there
+    /// means what clap says it means.
+    ///
+    /// A selection has one transport: paths after `--` together with
+    /// `--files-from` are refused as a conflict.
+    pub fn parse_context_menu<I, T>(argv: I) -> Result<Cli, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<std::ffi::OsString> + Clone,
+    {
+        let mut head: Vec<std::ffi::OsString> = argv.into_iter().map(Into::into).collect();
+        let paths: Vec<PathBuf> = match head.iter().position(|a| a == "--") {
+            Some(at) => head
+                .split_off(at)
+                .into_iter()
+                .skip(1)
+                .map(PathBuf::from)
+                .collect(),
+            None => Vec::new(),
+        };
+        let mut cli = Cli::try_parse_from(head)?;
+        if !paths.is_empty() && cli.files_from.is_some() {
+            use clap::CommandFactory;
+            return Err(Cli::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--files-from cannot be used with paths after --",
+            ));
+        }
+        cli.paths = paths;
+        Ok(cli)
+    }
+}
+
 /// Entry points that are not a plain terminal invocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum InvokeSource {
-    /// Launched by the Windows Explorer / macOS Finder integration.
+    /// Launched by the Windows Explorer / macOS Finder integration, or by a
+    /// Linux file manager's action (Dolphin, Nemo).
     ContextMenu,
 }
 
@@ -487,6 +539,57 @@ mod tests {
     fn fr_112_command_surface_is_well_formed() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// The Linux file-manager form: the selection after `--`, the action as
+    /// `--action=<a>`. Paths there are values even when they look like flags.
+    #[test]
+    fn fr_004_context_menu_paths_follow_the_end_of_options_marker() {
+        let cli = Cli::parse_context_menu([
+            "pluryprint",
+            "--invoke=context-menu",
+            "--action=queue",
+            "--",
+            "/home/u/a report.pdf",
+            "-notes.txt",
+        ])
+        .expect("the Dolphin/Nemo command line parses");
+        assert_eq!(cli.invoke, Some(InvokeSource::ContextMenu));
+        assert_eq!(cli.action, ContextAction::Queue);
+        assert_eq!(
+            cli.paths,
+            [
+                PathBuf::from("/home/u/a report.pdf"),
+                PathBuf::from("-notes.txt")
+            ]
+        );
+        assert!(cli.files_from.is_none() && cli.command.is_none());
+    }
+
+    /// The paths are only a context-menu transport: never with a handoff
+    /// file, and never part of the ordinary command line, whose errors stay
+    /// what they were.
+    #[test]
+    fn fr_004_context_menu_paths_exclude_files_from_and_leave_clap_alone() {
+        use clap::error::ErrorKind;
+        let both = Cli::parse_context_menu([
+            "pluryprint",
+            "--invoke=context-menu",
+            "--files-from",
+            "/tmp/handoff/sel.json",
+            "--",
+            "/a.pdf",
+        ])
+        .unwrap_err();
+        assert_eq!(both.kind(), ErrorKind::ArgumentConflict);
+
+        // Outside the context-menu route `--` is clap's: no positional
+        // takes what follows, and a typo is still an unknown subcommand.
+        assert!(Cli::try_parse_from(["pluryprint", "--", "/a.pdf"]).is_err());
+        let typo = Cli::try_parse_from(["pluryprint", "frobnicate"]).unwrap_err();
+        assert_eq!(typo.kind(), ErrorKind::InvalidSubcommand);
+        let print = Cli::try_parse_from(["pluryprint", "print", "--files", "a.pdf"]).unwrap();
+        assert!(print.paths.is_empty() && matches!(print.command, Some(Command::Print(_))));
     }
 
     #[test]

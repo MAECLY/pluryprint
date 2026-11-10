@@ -16,11 +16,11 @@ import {
   type Locale,
   type TranslationKey,
 } from '@/i18n';
-import { isMacPlatform } from '@/components/AppShell/MPAppShell';
 import { ConfirmDialog, type ConfirmState } from '@/components/ConfirmDialog';
 import { useLocale, useT, type TFunction } from '@/i18n/I18nProvider';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useProfilesStore } from '@/stores/profilesStore';
+import { useHostPlatform, type HostPlatform } from '@/lib/platform';
 
 interface SettingsScreenProps {
   /** Resolved (light/dark) theme — always present for the 2-way fallback. */
@@ -234,6 +234,28 @@ interface EngineFieldProps {
 }
 
 /** Mirrors the Rust `Bounds::accepts`: the only client-side copy of the rule. */
+/**
+ * FR-001: where the right-click entry lives on this platform. macOS ships a
+ * Finder Service; Windows an Explorer entry; on Linux it depends on the
+ * package — the .deb registers "Open with" and the Dolphin and Nemo actions,
+ * an AppImage nothing until the user integrates it with their desktop.
+ */
+function shellNoteKey(
+  host: HostPlatform,
+):
+  | 'printing.shellNote'
+  | 'printing.shellNoteMac'
+  | 'printing.shellNoteLinux'
+  | 'printing.shellNoteLinuxAppImage'
+  | 'printing.shellNoteLinuxUnknown' {
+  if (host.os === 'macos') return 'printing.shellNoteMac';
+  if (host.os !== 'linux') return 'printing.shellNote';
+  if (host.linuxPackage === 'deb') return 'printing.shellNoteLinux';
+  if (host.linuxPackage === 'appimage')
+    return 'printing.shellNoteLinuxAppImage';
+  return 'printing.shellNoteLinuxUnknown';
+}
+
 function accepts(bounds: Bounds | undefined, n: number): boolean {
   if (!bounds) return true;
   if (n === 0 && bounds.zero === 'disables') return true;
@@ -328,6 +350,7 @@ export function SettingsScreen({
   setMode,
 }: SettingsScreenProps) {
   const t = useT('settings');
+  const host = useHostPlatform();
   const locale = useLocale();
   const settings = useSettingsStore((s) => s.settings);
   const status = useSettingsStore((s) => s.status);
@@ -623,9 +646,7 @@ export function SettingsScreen({
             />
           </Note>
         )}
-        <Note>
-          {t(isMacPlatform() ? 'printing.shellNoteMac' : 'printing.shellNote')}
-        </Note>
+        <Note>{t(shellNoteKey(host))}</Note>
 
         <div style={{ height: 24 }} />
         <MPSectionLabel>{t('sections.engine')}</MPSectionLabel>

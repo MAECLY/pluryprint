@@ -46,6 +46,7 @@
     "print_one": "Imprimir 1 archivo",
     "print_other": "Imprimir {{count}} archivos",
     "printWithProfile": "Imprimir con «{{name}}»",
+    "printNow": "Imprimir ahora",
     "configure": "Configurar el trabajo de impresión…",
     "queue": "Añadir a la cola de impresión",
     "tooltip": "Imprime por lotes los archivos seleccionados con Pluryprint"
@@ -94,6 +95,7 @@
         "printer_list_unstable": "La lista de impresoras cambió mientras se leía. Vuelve a intentarlo.",
         "printer_query_failed": "Windows notificó un error al leer las impresoras.",
         "discovery_failed": "Falló la búsqueda de impresoras en la red.",
+        "printer_settings_unavailable": "No se pudo abrir ninguna aplicación de ajustes de impresoras. Puedes gestionarlas en http://localhost:631 desde el navegador.",
         "update_state_save_failed": "No se pudo guardar tu elección sobre la actualización."
       },
       "InvalidRequest": {
@@ -144,15 +146,19 @@
         "password_empty": "Escribe la contraseña del PDF."
       },
       "DependencyMissing": {
-        "ippfind_missing": "La detección en red necesita las herramientas cliente de CUPS (ippfind), que no están instaladas."
+        "ippfind_missing": "La detección en red necesita las herramientas cliente de CUPS (ippfind), que no están instaladas.",
+        "ippfind_missingLinux": "La detección en red necesita ippfind, de las herramientas IPP de CUPS, que no está instalado. Instala el paquete cups-ipp-utils (en Debian y Ubuntu: sudo apt install cups-ipp-utils).",
+        "cups_missing": "Las herramientas de impresión de CUPS no están instaladas, así que no se pueden mostrar impresoras. Instala el paquete cups-client (Debian, Ubuntu) o cups (Fedora)."
       },
       "PrintFailed": {
         "set_default_failed": "El sistema no pudo establecer la impresora predeterminada.",
         "add_printer_needs_admin": "Añadir una impresora puede requerir permisos de administrador. Usa «Abrir la configuración de impresoras» para añadirla desde Windows.",
+        "add_printer_needs_adminLinux": "Añadir una impresora puede requerir permisos de administrador (en muchos sistemas, pertenecer al grupo lpadmin). Usa «Abrir ajustes de impresoras» para añadirla desde los ajustes de impresoras del sistema.",
         "spooler_down": "El servicio Cola de impresión de Windows no se está ejecutando. Inícialo (Servicios → Cola de impresión) y vuelve a intentarlo.",
         "add_printer_no_ippurl": "Esta versión de Windows no puede añadir una impresora IPP desde Pluryprint. Usa «Abrir la configuración de impresoras» para añadirla desde Windows.",
         "add_printer_failed": "El sistema no pudo añadir la impresora. La carpeta de registros tiene los detalles.",
         "cups_unavailable": "El servicio de impresión del sistema (CUPS) no respondió.",
+        "cups_unavailableLinux": "El servicio de impresión del sistema (CUPS) no respondió. Comprueba que está instalado y en marcha (systemctl status cups).",
         "test_page_failed": "No se pudo preparar la página de prueba."
       },
       "UpdateSignatureInvalid": {
@@ -164,7 +170,12 @@
         "not_an_installed_app": "Esta copia de Pluryprint no es una aplicación instalada, así que no puede actualizarse sola. Descarga la versión desde la página de versiones.",
         "install_failed": "No se pudo instalar la actualización. La carpeta de registros tiene los detalles.",
         "bad_endpoint": "La dirección de actualizaciones de esta versión no es válida.",
-        "app_not_located": "Pluryprint no encontró su propia instalación para actualizarla."
+        "app_not_located": "Pluryprint no encontró su propia instalación para actualizarla.",
+        "wrong_package_format": "La actualización publicada para esta plataforma no es del tipo de paquete con el que se instaló esta copia. No se ha instalado nada; descarga la versión desde la página de versiones.",
+        "appimage_not_writable": "La actualización no pudo reemplazar la AppImage porque no se puede escribir en su carpeta. Mueve el archivo .AppImage a una carpeta tuya (por ejemplo, ~/Applications) e inténtalo de nuevo.",
+        "auth_cancelled": "No se instaló la actualización porque se canceló o falló la petición de la contraseña de administrador. No se ha cambiado nada.",
+        "package_install_failed": "El gestor de paquetes del sistema no pudo instalar la actualización. Instala el paquete desde la página de versiones.",
+        "previous_app_not_restored": "La actualización falló y no se pudo restaurar la versión anterior. Se conservó en «{{path}}»; muévela de vuelta o reinstala desde la página de versiones."
       },
       "InvalidState": {
         "update_in_progress": "Ya se está instalando una actualización.",
@@ -208,7 +219,8 @@
     },
     "libre-office": {
       "remediation": "Falta LibreOffice, así que no se pueden imprimir archivos de Office, OpenDocument ni RTF. Descárgalo gratis desde https://www.libreoffice.org/download",
-      "remediationMac": "Falta LibreOffice, así que no se pueden imprimir archivos de Office ni OpenDocument. Descárgalo gratis desde https://www.libreoffice.org/download"
+      "remediationMac": "Falta LibreOffice, así que no se pueden imprimir archivos de Office ni OpenDocument. Descárgalo gratis desde https://www.libreoffice.org/download",
+      "remediationLinux": "Falta LibreOffice, así que no se pueden imprimir archivos de Office, OpenDocument ni RTF. Instálalo desde los paquetes de tu distribución (en Debian y Ubuntu: sudo apt install libreoffice) o descárgalo gratis desde https://www.libreoffice.org/download"
     },
     "chromium": {
       "remediation": "Pluryprint ya no usa Microsoft Edge ni Google Chrome: los archivos HTML, Markdown y de texto se imprimen con la vista web del sistema. Reanuda el trabajo para imprimirlo."
@@ -222,22 +234,30 @@
     "hevc-codec": {
       "remediation": "Falta el descodificador de vídeo HEVC que necesita esta foto HEIC. Instala «Extensiones de vídeo HEVC» desde Microsoft Store. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     },
+    "heif-decoder": {
+      "remediation": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
+    },
     "no-heif-decoder": {
-      "remediation": "No hay ningún descodificador de imágenes HEIF en este sistema. Convierte antes la foto a JPEG o PNG."
+      "remediation": "No hay ningún descodificador de imágenes HEIF en este sistema. Convierte antes la foto a JPEG o PNG.",
+      "remediationLinux": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick, o convierte antes la foto a JPEG o PNG."
     },
     "sips": {
       "remediation": "No se encontró sips, la herramienta de imágenes de macOS."
     },
     "cups": {
-      "remediation": "No se pudo iniciar el servicio de impresión del sistema (CUPS). Comprueba que la impresión está configurada en este equipo."
+      "remediation": "No se pudo iniciar el servicio de impresión del sistema (CUPS). Comprueba que la impresión está configurada en este equipo.",
+      "remediationLinux": "El servicio de impresión del sistema (CUPS) no está disponible, así que no se puede imprimir nada. Instala las herramientas cliente de CUPS (el paquete cups-client en Debian y Ubuntu) y comprueba que el servicio cups está en marcha."
     },
     "no-print-backend": {
       "remediation": "La impresión no está disponible en esta plataforma."
+    },
+    "heif-decoder": {
+      "remediation": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     }
   },
   "testPage": {
     "title": "Página de prueba de Pluryprint",
-    "tagline": "Impresión por lotes de código abierto para Windows y Mac.",
+    "tagline": "Impresión por lotes de código abierto para Windows, Mac y Linux.",
     "headline": "Página de prueba",
     "confirm": "Si puedes leer esto con claridad, tu impresora funciona con Pluryprint.",
     "prop1": "Sin límite de 15 archivos",

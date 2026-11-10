@@ -43,10 +43,12 @@ Vitest), and `pnpm test:e2e` is the sole WebdriverIO entry point.
 
 ## WebdriverIO on Windows
 
-`tauri-driver` supports **Windows and Linux only**. CI does not run this
-suite (`ci.yml` is the lean pull-request gate); run it on a Windows machine or
-the VM. Install `tauri-driver` (`cargo install tauri-driver --locked`), read
-the installed WebView2 runtime version from its EdgeUpdate registry key
+`tauri-driver` supports **Windows and Linux only**. The pull-request gate
+(`ci.yml`) does not run this suite; `linux.yml` runs it on Linux ARM64 after
+every merge, without blocking (see [below](#webdriverio-on-linux)). On
+Windows, run it on a Windows machine or the VM. Install `tauri-driver`
+(`cargo install tauri-driver --locked`), read the installed WebView2 runtime
+version from its EdgeUpdate registry key
 (`HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`,
 value `pv`) and download the `msedgedriver` of exactly that version, exported
 as `NATIVE_DRIVER`. Build a debug binary with
@@ -121,10 +123,33 @@ Things to know before running it on your own machine:
   version: a mismatched `msedgedriver` makes session creation retry three
   times over two minutes before failing.
 
+## WebdriverIO on Linux
+
+On Linux `tauri-driver` proxies to WebKitGTK's own `WebKitWebDriver`, which
+it finds on `PATH`: no `NATIVE_DRIVER`, and no version to match by hand
+(Debian and Ubuntu ship it as `webkit2gtk-driver`, built from the same
+WebKitGTK as the library the app links). Without a desktop session, run it
+under a virtual display and a session bus:
+
+```sh
+sudo apt-get install webkit2gtk-driver xvfb dbus-x11
+cargo install tauri-driver --version 2.1.0 --locked
+pnpm tauri build --debug --no-bundle --config src-tauri/tauri.ci.conf.json
+dbus-run-session -- xvfb-run -a pnpm test:e2e
+```
+
+`linux.yml`'s `e2e` job does exactly this on `ubuntu-22.04-arm`, with a
+cups-pdf queue as the default printer for the printers spec, and uploads
+`e2e/artifacts/` when it fails. It is `continue-on-error` for now: the specs
+were written and verified against WebView2, so the first Linux runs are
+expected to surface spec assumptions (timings, the printers screen's Windows
+transport note) rather than app bugs. Under Xvfb, WebKitGTK renders in
+software: set `WEBKIT_DISABLE_COMPOSITING_MODE=1` if pages stay blank.
+
 ## Launch smoke (by hand)
 
-CI no longer launches the app. To check that a packaged binary boots at all,
-build it with `pnpm tauri build --debug --config src-tauri/tauri.ci.conf.json`
+The pull-request gate never launches the app (on Linux, `linux.yml`'s e2e
+job does). To check that a packaged binary boots at all, build it with `pnpm tauri build --debug --config src-tauri/tauri.ci.conf.json`
 (unsigned: no updater key), launch it, and look in the real per-user log
 folder (`%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` on Windows,
 `~/Library/Logs/Pluryprint/` on macOS) for `app_started` and then
@@ -201,7 +226,7 @@ engine's real `spool` path, and refuse to submit to any queue that would print:
 | `src-tauri/tests/print_quality_windows.rs` | Windows       | `PLURYPRINT_QUALITY_QUEUES` (default `Maecly_Hold_Win`), every one **paused** | Draft/High reach the job's own DEVMODE through the per-user default swap, the user's default comes back byte for byte (or is cleared again), a killed process is recovered, two processes keep their own quality, `paperkind=`/`bin=` ids land in the job, a no-print PDF is refused before SumatraPDF |
 
 ```sh
-MAECLY_REAL_PRINTER=1 cargo test --test real_printer -- --ignored              # macOS
+MAECLY_REAL_PRINTER=1 cargo test --test real_printer -- --ignored              # macOS, Linux
 $env:MAECLY_REAL_PRINTER='1'; cargo test --test real_printer_windows -- --ignored --test-threads=1   # Windows
 ```
 

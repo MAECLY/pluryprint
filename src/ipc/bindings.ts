@@ -808,9 +808,17 @@ arch: string;
  * It rides on `app_info` rather than a command of its own because this is
  * exactly what `app_info` is for — "what does this build see on this
  * host?" — and because the screens that care already fetch it once on
- * mount. The probe itself is a handful of `is_file` calls (see
- * [`deps::report_all`]), so it costs nothing to answer on every call and
- * is never stale.
+ * mount. The probe is mostly `is_file` calls (see [`deps::report_all`]).
+ * The one exception is a `convert` met while looking for the Linux HEIF
+ * decoder: it is run (`convert -version`, up to five seconds) to tell
+ * ImageMagick's from GraphicsMagick's ([`deps::is_heif_decoder`]). Its
+ * answer is kept per program file for the life of the process; no
+ * answer (it hung past five seconds or could not start) counts as
+ * "not ImageMagick" for a minute and is then asked again. So the
+ * first call on such a machine can take five seconds, and with a
+ * `convert` that hangs one call a minute does; every other costs a few
+ * `stat`s, and a program replaced or changed is asked again, so the
+ * list is never stale.
  * 
  * `#[serde(default)]` — as on `AppSettings::meta`, and for the same
  * reason: the server always sends it, but a test building an `AppInfo` by
@@ -824,9 +832,19 @@ dependencies?: DependencyReport[];
  * CLI (FR-008). The installers do not put it on `PATH`, so a command the
  * UI offers to copy has to name this path for the paste to work.
  * `None` when the OS will not say (the UI then explains the requirement
- * instead of offering a command that cannot run).
+ * instead of offering a command that cannot run). Inside a Linux
+ * AppImage it is the AppImage file itself (`$APPIMAGE`), wherever it
+ * was saved and whatever it is called now, never the temporary mount
+ * the binary runs from.
  */
-executable?: string | null }
+executable?: string | null; 
+/**
+ * The package this build was bundled as, from Tauri's own stamp
+ * (`tauri::utils::platform::bundle_type`): `"appimage"`, `"deb"`,
+ * `"rpm"`, `"nsis"`, `"msi"` or `"app"`; `None` for a build that was
+ * not bundled (`cargo run`). The updater reads the same stamp.
+ */
+bundle_type?: string | null }
 /**
  * The subset of [`Config`] exposed to the frontend as one bundle by
  * `get_app_settings` / `set_app_settings`. Deliberately excludes `printers`
@@ -960,7 +978,13 @@ export type Dependency =
  * only, paid unless the PC maker preinstalled it): HEIC photos are HEVC
  * inside.
  */
-"hevc-codec"
+"hevc-codec" | 
+/**
+ * An external HEIF decoder (Linux only): libheif's `heif-dec` or
+ * `heif-convert`, or ImageMagick's `magick` or `convert`. Linux has no
+ * system decoder to ask, so the program is looked for like any other.
+ */
+"heif-decoder"
 /**
  * One line of an install's output, as it happens (FR-058).
  */
@@ -2524,8 +2548,8 @@ export type UpdateInstallResult = {
  */
 installed: string | null; 
 /**
- * The new version runs only after a restart (macOS). On Windows the
- * installer restarts the app itself and this process exits.
+ * The new version runs only after a restart (macOS, Linux). On Windows
+ * the installer restarts the app itself and this process exits.
  */
 restart_required: boolean }
 /**

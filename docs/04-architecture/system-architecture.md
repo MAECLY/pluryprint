@@ -1,6 +1,6 @@
 # System Architecture
 
-> **TL;DR** — Pluryprint is a Tauri 2 app made of (a) a small **Rust** COM DLL that Windows Explorer loads for the right-click entry (on macOS, an `NSServices` entry inside the app bundle), (b) **one Rust executable** that is the GUI, the headless CLI, and — started with `--worker` — the hidden worker that renders documents, and (c) the processes it runs for a job: LibreOffice, `sips`/`textutil` on macOS, and the final printer (SumatraPDF on Windows, CUPS `lp` on macOS). The DLL hands the selection over in a JSON file named on the command line; the webview talks to Rust through typed Tauri commands; Rust drives every child process with an argument vector, a timeout and the job's cancel flag.
+> **TL;DR** — Pluryprint is a Tauri 2 app made of (a) a small **Rust** COM DLL that Windows Explorer loads for the right-click entry (on macOS, an `NSServices` entry inside the app bundle; on Linux, desktop-entry files the file manager reads), (b) **one Rust executable** that is the GUI, the headless CLI, and — started with `--worker` — the hidden worker that renders documents, and (c) the processes it runs for a job: LibreOffice, `sips`/`textutil` on macOS, a HEIF decoder on Linux, and the final printer (SumatraPDF on Windows, CUPS `lp` on macOS and Linux). Linux is a preview platform from 0.0.5 ([ADR-0015](../adr/0015-linux-support.md)). The DLL hands the selection over in a JSON file named on the command line; the webview talks to Rust through typed Tauri commands; Rust drives every child process with an argument vector, a timeout and the job's cancel flag.
 
 This page is the map. The details live in [print-engine.md](./print-engine.md), [shell-extensions.md](./shell-extensions.md), [ipc-and-cli.md](./ipc-and-cli.md), [auto-updater.md](./auto-updater.md) and [security-model.md](./security-model.md).
 
@@ -8,8 +8,8 @@ This page is the map. The details live in [print-engine.md](./print-engine.md), 
 
 ```
                     End user
-     (right-clicks files in Explorer / Finder, or opens the app,
-      or runs `pluryprint print …` from a script)
+     (right-clicks files in Explorer / Finder / Dolphin / Nemo,
+      or opens the app, or runs `pluryprint print …` from a script)
                         |
                         v
 +-------------------------------------------------------------+
@@ -30,7 +30,7 @@ This page is the map. The details live in [print-engine.md](./print-engine.md), 
 ```
 
 - **OS print spooler.** The Windows Print Spooler or CUPS. Pluryprint never talks to a driver directly: SumatraPDF or `lp` hands the PDF to the spooler, and the job is followed there until it prints or ends unconfirmed.
-- **External programs.** SumatraPDF is bundled with the Windows installer. LibreOffice (Office, OpenDocument, RTF on Windows) and, on Windows, the HEIF/HEVC Store codecs are installed by the user, by hand or from the app's consent dialog. Everything else is in the app or the OS: images, SVG, Markdown and text are converted in-process; HTML, Markdown and text are paginated by the system web view (WebView2 / WKWebView) in a worker; `sips` and `textutil` ship with macOS.
+- **External programs.** SumatraPDF is bundled with the Windows installer. LibreOffice (Office, OpenDocument, RTF on Windows and Linux) and a HEIF decoder (the HEIF/HEVC Store codecs on Windows; libheif's tools or ImageMagick on Linux) are installed by the user, by hand or from the app's consent dialog (on Linux, a web link). Everything else is in the app or the OS: images, SVG, Markdown and text are converted in-process; HTML, Markdown and text are paginated by the system web view (WebView2 / WKWebView / WebKitGTK) in a worker; `sips` and `textutil` ship with macOS; on Linux the CUPS client tools come with the distribution.
 - **GitHub releases.** The only host Pluryprint contacts on its own: the update manifest of the user's channel, and, when the user asks, the signed update it names ([ADR-0011](../adr/0011-release-channel.md)). There is no update server, no crash reporter and no telemetry endpoint.
 
 ## 2. Processes
@@ -55,9 +55,9 @@ This page is the map. The details live in [print-engine.md](./print-engine.md), 
                               +--------------------------+  +------------------+
 ```
 
-- **Explorer DLL** (`shell-ext-win/`, Rust `cdylib`) runs inside `explorer.exe`. It only reads the selection, writes it to a JSON handoff file and starts `pluryprint.exe --invoke=context-menu --files-from <file> --action <action> [--profile <id>]`; it never prints and never reads file contents. It is registered per user as an `ExplorerCommandHandler` verb ([ADR-0013](../adr/0013-explorer-command-per-user-verb.md)). On macOS the same entry point is the in-bundle Finder service.
+- **Explorer DLL** (`shell-ext-win/`, Rust `cdylib`) runs inside `explorer.exe`. It only reads the selection, writes it to a JSON handoff file and starts `pluryprint.exe --invoke=context-menu --files-from <file> --action <action> [--profile <id>]`; it never prints and never reads file contents. It is registered per user as an `ExplorerCommandHandler` verb ([ADR-0013](../adr/0013-explorer-command-per-user-verb.md)). On macOS the same entry point is the in-bundle Finder service. On Linux it is a desktop entry: the `.desktop` file's `MimeType=` list puts Pluryprint under **Open with** in every file manager, and the `.deb` adds a Dolphin service menu and Nemo actions (**Print now**, **Configure print job**, **Add to print queue**) that start `pluryprint` with the selected paths.
 - **The app** is one executable. `main` decides from `argv` alone, in this order: a `--worker` request runs the worker and exits; a CLI subcommand runs headless with no window; otherwise the GUI starts. The GUI is single-instance (`tauri-plugin-single-instance`): a second launch forwards its selection, which the window drains once with `take_pending_selections`, and exits.
-- **The console CLI** `pluryprint-cli.exe` (Windows) exists so shells wait for the exit code; on macOS the app binary is the CLI. The CLI runs the same engine directly, with a private cache, no queue and no retries.
+- **The console CLI** `pluryprint-cli.exe` (Windows) exists so shells wait for the exit code; on macOS and Linux the app binary is the CLI (`pluryprint` on `PATH` from the `.deb`; for an AppImage, the AppImage file itself). The CLI runs the same engine directly, with a private cache, no queue and no retries.
 - **Workers** are the same executable started with `--worker render-pdf` (HTML, Markdown, text, RTF on macOS, through the system web view) or `--worker svg`. Each is bounded by the conversion timeout and the job's cancel flag; a hostile file that crashes or wedges it ends the worker, not the app ([ADR-0012](../adr/0012-system-web-view-renderer.md)).
 - **Other children** (LibreOffice, `sips`, `textutil`, SumatraPDF, `lp`) are short-lived, run as the user, without a shell, in a private scratch folder, and are killed with their process tree on timeout or cancel.
 
@@ -79,7 +79,8 @@ engine/              SUPPORTED_EXTS, dependency resolver (deps.rs), page ranges
                      html, markdown, text, rtf_mac, pdf_security, process (bounded runner)
   print/             cups.rs, sumatra.rs, windows.rs (spooler tracking),
                      devmode_swap.rs (Windows quality and colour, D16)
-render/              web view printing for the render worker (windows.rs, macos.rs)
+render/              web view printing for the render worker (windows.rs, macos.rs;
+                     a WebKitGTK backend on Linux)
 worker/              the --worker dispatch: render, svg
 platform/            printer listing, defaults, add printer, test page, DNS-SD,
                      macOS Finder service and handoff

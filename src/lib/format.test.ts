@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cliCommandForDisplay,
+  cliExecutable,
   cliPrintCommand,
   cliProgram,
   distinguishingFolders,
@@ -122,6 +123,70 @@ describe('cliPrintCommand', () => {
     ).toBe("pluryprint-cli print --files '*.pdf' --profile Quick");
     expect(cliProgram('windows')).toBe('pluryprint-cli');
     expect(cliProgram('macos')).toBe('pluryprint');
+  });
+
+  it('Linux .deb: pluryprint is on PATH, so the command names it bare', () => {
+    expect(
+      cliPrintCommand({
+        executable: '/usr/bin/pluryprint',
+        os: 'linux',
+        profile: 'Quick',
+        linuxPackage: 'deb',
+      }),
+    ).toBe("pluryprint print --files '*.pdf' --profile Quick");
+    expect(cliProgram('linux', { linuxPackage: 'deb' })).toBe('pluryprint');
+    expect(
+      cliExecutable({
+        executable: '/usr/bin/pluryprint',
+        os: 'linux',
+        linuxPackage: 'deb',
+      }),
+    ).toBeNull();
+  });
+
+  it('Linux AppImage: never the temporary mount, which vanishes on exit', () => {
+    const appImage = 'Pluryprint_0.0.5_linux_x64.AppImage';
+    expect(
+      cliPrintCommand({
+        executable: '/tmp/.mount_PluryAb12/usr/bin/pluryprint',
+        os: 'linux',
+        profile: 'Quick',
+        linuxPackage: 'appimage',
+        appImage,
+      }),
+    ).toBe(
+      "./Pluryprint_0.0.5_linux_x64.AppImage print --files '*.pdf' --profile Quick",
+    );
+    // Without a name to offer, a glob that matches the release asset.
+    expect(cliProgram('linux', { linuxPackage: 'appimage' })).toBe(
+      './Pluryprint_*.AppImage',
+    );
+  });
+
+  it('Linux AppImage: the AppImage file itself, quoted, when the backend names it', () => {
+    expect(
+      cliPrintCommand({
+        executable: '/home/ana/My Apps/Pluryprint_0.0.5_linux_arm64.AppImage',
+        os: 'linux',
+        profile: 'Quick',
+        linuxPackage: 'appimage',
+      }),
+    ).toBe(
+      "'/home/ana/My Apps/Pluryprint_0.0.5_linux_arm64.AppImage' print --files '*.pdf' --profile Quick",
+    );
+  });
+
+  it('Linux, package unknown: the executable path, as on macOS', () => {
+    expect(
+      cliPrintCommand({
+        executable: '/home/ana/pluryprint/target/release/pluryprint',
+        os: 'linux',
+        profile: 'Quick',
+      }),
+    ).toBe(
+      "/home/ana/pluryprint/target/release/pluryprint print --files '*.pdf' --profile Quick",
+    );
+    expect(cliProgram('linux')).toBe('pluryprint');
   });
 
   it('falls back to the bare command name when the executable is unknown', () => {

@@ -162,7 +162,6 @@ export async function restoreDefaultSettings(): Promise<void> {
  * `nav.settings` in `src/i18n/locales/es/home.json`.
  */
 export async function forceEnglishUi(): Promise<void> {
-  await dismissOnboarding();
   // The sidebar may still be rendering when the session starts. Wait for it
   // in either language before picking one: an early English miss would fall
   // back to "Ajustes" on an English UI and burn its whole timeout.
@@ -172,6 +171,19 @@ export async function forceEnglishUi(): Promise<void> {
     async () => (await english.isExisting()) || (await spanish.isExisting()),
     { timeout: 15_000, timeoutMsg: 'the sidebar never rendered' },
   );
+  // The tour waits for the config (App.tsx), so on a slow host (a debug
+  // build under Xvfb on Linux) it can appear after the sidebar and cover it
+  // just as Settings is clicked. Give it a moment to show up before
+  // deciding there is none; this runs once per session, not per test.
+  await browser
+    .waitUntil(
+      async () =>
+        (await $('button=Skip').isExisting()) ||
+        (await $('button=Omitir').isExisting()),
+      { timeout: 5_000 },
+    )
+    .catch(() => undefined);
+  await dismissOnboarding();
   const settings = (await english.isExisting()) ? english : spanish;
   await settings.waitForClickable({ timeout: 10_000 });
   await settings.click();

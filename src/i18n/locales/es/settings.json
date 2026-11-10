@@ -41,7 +41,10 @@
     },
     "profilesError": "No se ha podido cargar la lista de perfiles.",
     "shellNote": "El instalador añade Pluryprint al menú contextual del Explorador: en Windows 11 está en «Mostrar más opciones» (o Mayús+F10) y en Windows 10, en el propio menú.",
-    "shellNoteMac": "La impresión con el botón derecho funciona desde Finder › Servicios › Imprimir con Pluryprint. Esos títulos de menú siguen el idioma del sistema."
+    "shellNoteMac": "La impresión con el botón derecho funciona desde Finder › Servicios › Imprimir con Pluryprint. Esos títulos de menú siguen el idioma del sistema.",
+    "shellNoteLinux": "El paquete .deb añade Pluryprint a «Abrir con» en tu gestor de archivos, y «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión» al menú contextual de Dolphin (KDE, en un submenú Pluryprint) y Nemo (Cinnamon, como tres entradas).",
+    "shellNoteLinuxAppImage": "Una AppImage no registra ninguna entrada en el menú contextual por sí sola. Intégrala en tu escritorio (un gestor de AppImage puede hacerlo) para encontrar Pluryprint en «Abrir con»; las acciones de Dolphin y Nemo solo vienen con el paquete .deb.",
+    "shellNoteLinuxUnknown": "El paquete .deb añade Pluryprint a «Abrir con» en tu gestor de archivos, y «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión» a Dolphin (KDE, en un submenú Pluryprint) y Nemo (Cinnamon, como tres entradas). Una AppImage solo aparece en «Abrir con» cuando la integras en tu escritorio."
   },
   "engine": {
     "concurrency": {

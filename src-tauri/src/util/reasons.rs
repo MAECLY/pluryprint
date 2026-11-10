@@ -65,6 +65,27 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     (IpcErrorCode::UpdateInstallFailed, "install_failed", &[]),
     (IpcErrorCode::UpdateInstallFailed, "bad_endpoint", &[]),
     (IpcErrorCode::UpdateInstallFailed, "app_not_located", &[]),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "wrong_package_format",
+        &[],
+    ),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "appimage_not_writable",
+        &[],
+    ),
+    (IpcErrorCode::UpdateInstallFailed, "auth_cancelled", &[]),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "package_install_failed",
+        &[],
+    ),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "previous_app_not_restored",
+        &["path"],
+    ),
     // --- Internal ---
     (IpcErrorCode::Internal, "open_logs_failed", &[]),
     (IpcErrorCode::Internal, "open_link_failed", &[]),
@@ -75,6 +96,7 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     (IpcErrorCode::Internal, "printer_list_unstable", &[]),
     (IpcErrorCode::Internal, "printer_query_failed", &[]),
     (IpcErrorCode::Internal, "discovery_failed", &[]),
+    (IpcErrorCode::Internal, "printer_settings_unavailable", &[]),
     (IpcErrorCode::Internal, "update_state_save_failed", &[]),
     // --- Invalid request: links, profiles, import, updates ---
     (IpcErrorCode::InvalidRequest, "url_not_allowed", &[]),
@@ -194,6 +216,7 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     ),
     // --- Dependencies ---
     (IpcErrorCode::DependencyMissing, "ippfind_missing", &[]),
+    (IpcErrorCode::DependencyMissing, "cups_missing", &[]),
     // --- Printers ---
     (IpcErrorCode::PrintFailed, "set_default_failed", &[]),
     (IpcErrorCode::PrintFailed, "add_printer_needs_admin", &[]),
@@ -279,6 +302,9 @@ pub const JOB_REASONS: &[ReasonSpec<&'static str>] = &[
     ("conversion_failed", "page_too_large", &["limit"]),
     // The console CLI without the app next to it (the app is the renderer).
     ("conversion_failed", "render_worker_missing", &[]),
+    // Linux: the worker found no X11 or Wayland session to start WebKitGTK
+    // in (a headless CLI run over SSH, a service).
+    ("conversion_failed", "render_no_display", &[]),
     // No longer emitted: only the headless-browser fallback, removed in
     // round 6, refused a page whose stylesheets named a share. Kept so an
     // older `queue.json` that carries it still explains itself.
@@ -309,6 +335,7 @@ pub const JOB_REASONS: &[ReasonSpec<&'static str>] = &[
     ("dependency_missing", "pandoc", &[]),
     ("dependency_missing", "heif-codec", &[]),
     ("dependency_missing", "hevc-codec", &[]),
+    ("dependency_missing", "heif-decoder", &[]),
     ("dependency_missing", "no-heif-decoder", &[]),
     ("dependency_missing", "sips", &[]),
     ("dependency_missing", "cups", &[]),
@@ -336,6 +363,7 @@ pub const PREVIEW_NOTES: &[(&str, &[&str])] = &[
 /// at once instead of retrying it (FR-034 retries are for transient failures).
 pub const TERMINAL_CONVERSION_REASONS: &[&str] = &[
     "render_worker_missing",
+    "render_no_display",
     "share_reference_refused",
     "page_not_checkable",
     "svg_too_large",

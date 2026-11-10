@@ -3,17 +3,19 @@
  *
  * These drive the *real built binary* through `tauri-driver` (the WebDriver
  * bridge Tauri ships), not the Vite dev server. `tauri-driver` is a cargo
- * binary (`cargo install tauri-driver --locked`); on Windows it proxies to the
+ * binary (`cargo install tauri-driver --locked`). On Windows it proxies to the
  * Microsoft Edge WebDriver (`msedgedriver.exe`) that matches the installed
- * WebView2 runtime — pass its path via the NATIVE_DRIVER env var.
+ * WebView2 runtime — pass its path via the NATIVE_DRIVER env var. On Linux it
+ * proxies to WebKitGTK's `WebKitWebDriver` (package `webkit2gtk-driver`),
+ * which it finds on PATH.
  *
  * tauri-driver has no macOS support (WKWebView exposes no WebDriver), so this
- * suite runs on Windows (and Linux) only; the CI e2e job is Windows and
- * non-blocking. Run locally on Windows with `pnpm test:e2e` after a
- * `pnpm tauri build --debug`.
+ * suite runs on Windows and Linux only. CI runs it on Linux ARM64 after every
+ * merge (linux.yml, non-blocking, under xvfb-run); run it locally on Windows
+ * with `pnpm test:e2e` after a `pnpm tauri build --debug`.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
@@ -119,6 +121,19 @@ export const config: WebdriverIO.Config = {
     await browser.saveScreenshot(
       path.join(artifactsDir, `${safe}-${Date.now()}.png`),
     );
+  },
+
+  // Linux: ending a session closes the window, but WebKitWebDriver leaves
+  // the app process running (seen with tauri-driver 2.1.0 and WebKitGTK
+  // 2.50). The next session's launch is then handed to that process by the
+  // single-instance plugin and exits, and session creation times out four
+  // times over (eight minutes per spec). End what this session started (and
+  // any other Pluryprint on this machine: do not run the suite next to one).
+  afterSession: () => {
+    if (process.platform !== 'linux') return;
+    spawnSync('pkill', ['-KILL', '-x', path.basename(application)], {
+      stdio: 'ignore',
+    });
   },
 
   onComplete: () => {

@@ -1,7 +1,7 @@
 {
   "title": "About",
   "byline": "by Maecly",
-  "tagline": "Open source batch printing for Windows and Mac. No 15-file limit, no Adobe required, no $149 license fee.",
+  "tagline": "Open source batch printing for Windows, Mac and Linux. No 15-file limit, no Adobe required, no $149 license fee.",
   "version": {
     "line": "{{version}} · build {{buildDate}}",
     "withChannel": "{{version}} · build {{buildDate}} · {{channel}} channel",
@@ -37,7 +37,10 @@
       "remindLater": "Remind me later",
       "skipVersion": "Skip this version",
       "install": "Install now",
-      "verifiedNote": "The download is checked against Pluryprint's release signature before anything is installed, and no administrator rights are needed."
+      "verifiedNote": "The download is checked against Pluryprint's release signature before anything is installed, and no administrator rights are needed.",
+      "verifiedNoteLinuxAppImage": "The download is checked against Pluryprint's release signature before anything is installed. The new version replaces this AppImage file where it is, so no administrator rights are needed.",
+      "verifiedNoteLinuxDeb": "The download is checked against Pluryprint's release signature before anything is installed. Pluryprint was installed from the .deb package, so the system asks for an administrator password to install the update.",
+      "verifiedNoteLinux": "The download is checked against Pluryprint's release signature before anything is installed. An AppImage is replaced where it is; a .deb installation asks for an administrator password."
     },
     "deferred": "Reminder postponed. Check again whenever you like.",
     "retry": "Retry",
@@ -58,7 +61,11 @@
     }
   },
   "components": {
-    "platform": "Platform:"
+    "platform": "Platform:",
+    "packages": {
+      "appimage": "AppImage",
+      "deb": ".deb package"
+    }
   },
   "paths": {
     "config": "config:",

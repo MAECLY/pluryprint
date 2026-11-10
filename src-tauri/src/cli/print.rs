@@ -501,6 +501,7 @@ fn print_one(
 fn read_password(args: &PrintArgs) -> Result<Option<crate::engine::PdfPassword>, CliError> {
     use std::io::{IsTerminal, Read};
     let text = if let Some(path) = &args.password_file {
+        let path = &crate::cli::from_caller(path);
         let mut text = zeroize::Zeroizing::new(String::new());
         std::fs::File::open(path)
             .and_then(|mut f| f.read_to_string(&mut text))
@@ -549,7 +550,7 @@ pub fn password_from_text(text: &str) -> Result<crate::engine::PdfPassword, CliE
 /// Exactly one of the two is present (clap enforces the group).
 fn collect_inputs(args: &PrintArgs) -> Result<Vec<String>, CliError> {
     match &args.files_from {
-        Some(path) => Ok(handoff::read_file(path)?.paths),
+        Some(path) => Ok(handoff::read_file(&crate::cli::from_caller(path))?.paths),
         None => Ok(args.files.clone()),
     }
 }

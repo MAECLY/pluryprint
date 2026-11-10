@@ -12,7 +12,7 @@ A single scrolling column: an identity header, the update-check action and its r
 ┌─ About ──────────────────────────────────────────────────────────────────────┐
 │  ▣  Pluryprint                                                                │
 │     0.1.0 · build 2026-07-12 · stable channel                                 │
-│     Open source batch printing for Windows and Mac. No 15-file limit…         │
+│     Open source batch printing for Windows, Mac and Linux. No 15-file limit…  │
 │                                                                                │
 │  [ ⟳ Check for updates ]                                                       │
 │  ┌ Updates ───────────────────────────────────────────────────────────────┐  │

@@ -277,7 +277,11 @@ pub(crate) fn render_system_capped(
     cmd.arg(crate::worker::WORKER_FLAG)
         .arg(crate::worker::WorkerKind::RenderPdf.as_arg())
         .args(request.to_args())
-        .current_dir(work.path());
+        .current_dir(worker_cwd(
+            work.path(),
+            std::env::var_os("APPDIR").as_deref(),
+            cfg!(target_os = "linux"),
+        ));
     let log = work.path().join("render.log");
     match run_capped(
         cmd,
@@ -297,8 +301,16 @@ pub(crate) fn render_system_capped(
             // The worker gave up on its own watchdog: a timeout, terminal
             // like the engine's own, never a render failure to retry.
             let full = std::fs::read_to_string(&log).unwrap_or_default();
-            if full.contains(crate::render::TIMEOUT_MARKER) {
+            if crate::render::log_reports(&full, crate::render::TIMEOUT_MARKER) {
                 return Err(super::process::timed_out_error(RENDERER_LABEL, timeout));
+            }
+            // Linux without a graphical session: no retry can start the web
+            // view, so it is terminal and says why instead of "render failed".
+            if crate::render::log_reports(&full, crate::render::NO_DISPLAY_MARKER) {
+                return Err(EngineError::ConversionFailed(Failure::new(
+                    "render_no_display",
+                    super::process::log_tail(&log, 400),
+                )));
             }
             let detail = super::process::log_tail(&log, 400);
             tracing::warn!(event = "render_worker_failed", detail = %detail, error = %failure.detail);
@@ -314,6 +326,29 @@ pub(crate) fn render_system_capped(
         Err(CappedError::Engine(other)) => return Err(other),
     }
     super::take_output(&produced, output, RENDERER_LABEL, &log)
+}
+
+/// The folder the render worker starts in: the job's private work folder,
+/// except inside a Linux AppImage. There linuxdeploy rewrites the paths
+/// WebKitGTK spawns its helper processes from (`WebKitNetworkProcess`,
+/// `WebKitWebProcess`) to `././/lib/<triplet>/webkit2gtk-4.1/…`, relative to
+/// the current folder, and the AppImage's AppRun starts the app in
+/// `$APPDIR/usr` so they resolve. A worker started anywhere else aborts with
+/// "Unable to spawn a new child process" before it loads the page, so it
+/// starts in `$APPDIR/usr` too. Every path the worker uses is absolute, so the
+/// folder changes nothing else. Pure: `appdir` is the `APPDIR` the AppImage
+/// runtime sets, `linux` whether this is Linux.
+pub(crate) fn worker_cwd(work: &Path, appdir: Option<&std::ffi::OsStr>, linux: bool) -> PathBuf {
+    if linux {
+        if let Some(usr) = appdir
+            .filter(|d| !d.is_empty())
+            .map(|d| Path::new(d).join("usr"))
+            .filter(|usr| usr.is_dir())
+        {
+            return usr;
+        }
+    }
+    work.to_path_buf()
 }
 
 /// The Content-Security-Policy every staged page carries: no script, plugin,
@@ -632,20 +667,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn nfr_render_worker_timeout_is_terminal_with_reason() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("fake-worker.sh");
         let args_log = dir.path().join("args.txt");
-        std::fs::write(
-            &fake,
-            format!(
-                "#!/bin/sh\necho \"$@\" > '{}'\necho '{}: the render did not finish within 7s' >&2\nexit 1\n",
+        let fake = crate::util::fake_program::script(
+            dir.path(),
+            "fake-worker.sh",
+            &format!(
+                "echo \"$@\" > '{}'\necho '{}: the render did not finish within 7s' >&2\nexit 1",
                 args_log.display(),
                 crate::render::TIMEOUT_MARKER
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let work = WorkDir::new("timeout-test").unwrap();
         let cancel = AtomicBool::new(false);
         let err = render_system_with(
@@ -770,6 +802,66 @@ mod tests {
         std::fs::write(dir.join(gui), b"app").unwrap();
         assert_eq!(worker_exe_for(&dir.join(cli)).unwrap(), dir.join(gui));
         assert_eq!(worker_exe_for(&dir.join(gui)).unwrap(), dir.join(gui));
+    }
+
+    /// Inside a Linux AppImage the worker starts in `$APPDIR/usr`, where
+    /// WebKitGTK's relative helper paths resolve; everywhere else (and when
+    /// `APPDIR` is unset, empty or not an AppImage) in the job's work folder.
+    #[test]
+    fn fr_055_render_worker_starts_where_the_appimage_webkit_finds_its_helpers() {
+        let work = tempfile::tempdir().unwrap();
+        let appdir = tempfile::tempdir().unwrap();
+        let usr = appdir.path().join("usr");
+        std::fs::create_dir(&usr).unwrap();
+        let ad = Some(appdir.path().as_os_str());
+        assert_eq!(worker_cwd(work.path(), ad, true), usr);
+        assert_eq!(worker_cwd(work.path(), ad, false), work.path());
+        assert_eq!(worker_cwd(work.path(), None, true), work.path());
+        assert_eq!(
+            worker_cwd(work.path(), Some(std::ffi::OsStr::new("")), true),
+            work.path()
+        );
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(
+            worker_cwd(work.path(), Some(bare.path().as_os_str()), true),
+            work.path()
+        );
+    }
+
+    /// A worker with no graphical session to start its web view in (Linux)
+    /// fails with its own terminal reason, not a retryable render failure.
+    #[cfg(unix)]
+    #[test]
+    fn fr_055_render_worker_without_a_display_is_terminal_with_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = crate::util::fake_program::script(
+            dir.path(),
+            "fake-worker.sh",
+            &format!(
+                "echo '{}: no X11 or Wayland display' >&2\nexit 1",
+                crate::render::NO_DISPLAY_MARKER
+            ),
+        );
+        let work = WorkDir::new("no-display-test").unwrap();
+        let cancel = AtomicBool::new(false);
+        let err = render_system_with(
+            &fake,
+            b"<p>x",
+            dir.path(),
+            &dir.path().join("o.pdf"),
+            &work,
+            &cancel,
+            None,
+            &PageSetup::default(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f) if f.reason == Some("render_no_display")),
+            "{err:?}"
+        );
+        assert!(crate::util::reasons::is_terminal_conversion_reason(
+            "render_no_display"
+        ));
     }
 
     /// The CLI without the app next to it fails with a registered reason the

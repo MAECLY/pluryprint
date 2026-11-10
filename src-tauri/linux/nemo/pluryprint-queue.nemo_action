@@ -1,0 +1,30 @@
+# Nemo (Cinnamon) action: adds the selection to the queue without starting it.
+# Installed by the .deb at
+# /usr/share/nemo/actions/pluryprint-queue.nemo_action. Nemo has no
+# system-wide submenus, so the three actions sit at the top level and name
+# Pluryprint themselves.
+#
+# Extensions= rather than Mimetypes=: Nemo matches a MIME type together with
+# its subclasses, and text/plain would then offer the action on every source
+# file and log. Entries keep their leading dot because Nemo compares them as a
+# plain suffix ("md" would match "cmd"). Every selected item must match, and
+# "dir" lets folders through. `shell_menu::linux_files` tests keep the list in
+# step with the engine.
+#
+# Quote=double: Nemo builds one command string and splits it like a shell
+# command line. Without it, Nemo 5.2 to 5.4 (Ubuntu 22.04, Mint 21.0) leave
+# spaces in the paths unescaped, so "a report.pdf" arrives as two arguments.
+# Every version wraps each quoted path in double quotes, and 5.4 and later
+# escape what is inside them.
+
+[Nemo Action]
+Name=Add to the Pluryprint print queue
+Name[es]=Añadir a la cola de impresión de Pluryprint
+Comment=Add the selected files to the queue without printing them yet
+Comment[es]=Añade los archivos seleccionados a la cola sin imprimirlos todavía
+Exec=pluryprint --invoke=context-menu --action=queue -- %F
+Quote=double
+Icon-Name=view-list-details
+Selection=notnone
+Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;
+Dependencies=pluryprint;

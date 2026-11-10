@@ -1,4 +1,5 @@
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -46,6 +47,7 @@ vi.mock('@/stores/profilesStore', () => ({
 // Imported after the mock is registered (vi.mock hoists regardless).
 import { SettingsScreen } from './SettingsScreen';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { rememberHostInfo } from '@/lib/platform';
 
 /** The engine bounds a real backend ships in `meta.limits` (ENGINE_LIMITS). */
 const LIMITS: EngineLimits = {
@@ -668,6 +670,30 @@ describe('SettingsScreen', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/under Show more options/)).toBeInTheDocument();
     expect(screen.queryByText(/no installer registers it yet/)).toBeNull();
+  });
+
+  it('FR-001: on Linux the shell note depends on the package', async () => {
+    rememberHostInfo({ os: 'linux', executable: '/usr/bin/pluryprint' });
+    mockSettings();
+    renderSettings();
+    await waitReady();
+    expect(
+      screen.getByText(/The \.deb package adds Pluryprint to Open With/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Dolphin \(KDE, in a Pluryprint submenu\) and Nemo/),
+    ).toBeInTheDocument();
+
+    // A later `app_info` answer re-words the note in place.
+    act(() => {
+      rememberHostInfo({
+        os: 'linux',
+        executable: '/tmp/.mount_Plury1/usr/bin/pluryprint',
+      });
+    });
+    expect(
+      screen.getByText(/An AppImage registers no right-click entry by itself/),
+    ).toBeInTheDocument();
   });
 
   it('FR-001: on macOS the shell note points at the Finder Services entry', async () => {

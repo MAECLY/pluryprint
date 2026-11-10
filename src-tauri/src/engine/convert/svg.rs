@@ -298,7 +298,14 @@ fn render(input: &Path) -> Result<Vec<u8>, EngineError> {
         ..usvg::Options::default()
     };
     if needs_fonts(&doc) {
-        opt.fontdb = system_fonts();
+        let fonts = system_fonts();
+        if cfg!(target_os = "linux") {
+            // Text without a font-family uses usvg's default, "Times New
+            // Roman", which a Linux desktop rarely has: use the serif family
+            // the database settled on instead (see `use_installed_generics`).
+            opt.font_family = fonts.family_name(&usvg::fontdb::Family::Serif).to_owned();
+        }
+        opt.fontdb = fonts;
     }
     opt.image_href_resolver = resolver(dir, budget.clone());
     let tree = build_tree(&doc, &opt)?;
@@ -838,9 +845,55 @@ fn system_fonts() -> Arc<usvg::fontdb::Database> {
         .get_or_init(|| {
             let mut db = usvg::fontdb::Database::new();
             db.load_system_fonts();
+            if cfg!(target_os = "linux") {
+                use_installed_generics(&mut db);
+            }
             Arc::new(db)
         })
         .clone()
+}
+
+/// Linux: fontdb maps the generic families to Windows and macOS fonts (Times
+/// New Roman, Arial, Courier New), which a Linux desktop rarely has, and usvg
+/// silently drops text whose family it cannot find. Point each generic family
+/// that is missing at the first common Linux family that is installed, so
+/// `serif`, `sans-serif` and `monospace` text prints as it does elsewhere.
+fn use_installed_generics(db: &mut usvg::fontdb::Database) {
+    use usvg::fontdb::Family;
+    fn installed(db: &usvg::fontdb::Database, name: &str) -> bool {
+        db.faces()
+            .any(|face| face.families.iter().any(|(family, _)| family == name))
+    }
+    const SERIF: &[&str] = &[
+        "DejaVu Serif",
+        "Liberation Serif",
+        "Noto Serif",
+        "FreeSerif",
+    ];
+    const SANS: &[&str] = &["DejaVu Sans", "Liberation Sans", "Noto Sans", "FreeSans"];
+    const MONO: &[&str] = &[
+        "DejaVu Sans Mono",
+        "Liberation Mono",
+        "Noto Sans Mono",
+        "FreeMono",
+    ];
+    for (generic, candidates) in [
+        (Family::Serif, SERIF),
+        (Family::SansSerif, SANS),
+        (Family::Monospace, MONO),
+    ] {
+        if installed(db, db.family_name(&generic)) {
+            continue;
+        }
+        let Some(name) = candidates.iter().find(|name| installed(db, name)) else {
+            continue;
+        };
+        match generic {
+            Family::Serif => db.set_serif_family(*name),
+            Family::SansSerif => db.set_sans_serif_family(*name),
+            _ => db.set_monospace_family(*name),
+        }
+    }
 }
 
 fn convert_failed(why: &str) -> EngineError {
@@ -1703,6 +1756,31 @@ mod tests {
         assert!(!parse(RECT));
         let pdf = convert_file(&svg).unwrap();
         mediabox(&pdf);
+    }
+
+    /// FR-052a on Linux: text in a generic family, or with no family at all,
+    /// still prints when the Windows and macOS fonts fontdb names by default
+    /// are not installed (the drawing used to come out without its text).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_052a_generic_family_text_prints_on_linux() {
+        let dir = tempfile::tempdir().unwrap();
+        for family in [
+            "",
+            " font-family=\"serif\"",
+            " font-family=\"sans-serif\"",
+            " font-family=\"monospace\"",
+        ] {
+            let body = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60"><text x="10" y="40" font-size="30"{family}>Pluryprint</text></svg>"#
+            );
+            let svg = write(dir.path(), "g.svg", body.as_bytes());
+            let pdf = std::fs::read(convert_file(&svg).unwrap()).unwrap();
+            assert!(
+                pdf.windows(5).any(|w| w == b"/Font"),
+                "no font in the PDF for{family:?}"
+            );
+        }
     }
 
     /// A PDF matrix `[a b c d e f]`, composed as PDF does (row vectors).

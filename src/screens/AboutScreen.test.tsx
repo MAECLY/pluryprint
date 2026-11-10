@@ -577,6 +577,52 @@ describe('AboutScreen', () => {
     );
   });
 
+  it('FR-083: a .deb install warns that the system will ask for an administrator password', async () => {
+    mockAbout({
+      update: MINOR_UPDATE,
+      appInfo: {
+        ...fixtureAppInfo,
+        os: 'linux',
+        arch: 'x86_64',
+        executable: '/usr/bin/pluryprint',
+      },
+    });
+    renderAbout();
+    await waitForAppInfo();
+
+    const card = await openUpdateCard();
+    expect(
+      within(card).getByText(/asks for an administrator password/i),
+    ).toBeInTheDocument();
+    expect(
+      within(card).queryByText(/no administrator rights are needed/i),
+    ).toBeNull();
+    // The platform line names the package, which decides how updates work.
+    expect(
+      screen.getByText('linux · x86_64 · .deb package'),
+    ).toBeInTheDocument();
+  });
+
+  it('FR-083: an AppImage is replaced in place, with no administrator rights', async () => {
+    mockAbout({
+      update: MINOR_UPDATE,
+      appInfo: {
+        ...fixtureAppInfo,
+        os: 'linux',
+        arch: 'aarch64',
+        executable: '/tmp/.mount_PluryQ1/usr/bin/pluryprint',
+      },
+    });
+    renderAbout();
+    await waitForAppInfo();
+
+    const card = await openUpdateCard();
+    expect(
+      within(card).getByText(/replaces this AppImage file where it is/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('linux · aarch64 · AppImage')).toBeInTheDocument();
+  });
+
   it('FR-087: a major update is installed only after a second, explicit confirmation', async () => {
     const calls = mockAbout({
       update: fixtureUpdateCheckAvailable, // 1.0.0 → 9.9.9
@@ -942,10 +988,16 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
     'Chromium / Edge',
     'Chromium / Microsoft Edge',
     'CUPS lp',
+    // The Linux web view stack, one combined row (system libraries, bundled
+    // only inside the AppImage), and the HEIC decoders run as subprocesses.
+    'GLib',
+    'GTK 3',
     'ImageMagick',
     'Inno Setup',
     'JetBrains Mono',
     'LibreOffice',
+    'libheif tools / ImageMagick',
+    'libsoup 3 and their dependencies',
     'NSIS',
     'Pandoc',
     'Rust standard library',
@@ -954,6 +1006,7 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
     'TypeScript runtime helpers',
     'WKWebView',
     'WebKit / WKWebView (macOS)',
+    'WebKitGTK 4.1',
     'WebView2 (loader stub)',
     'WebView2 loader',
     'create-dmg',
@@ -1020,6 +1073,9 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
       ...tomlKeys(tomlSection(cargo, "[target.'cfg(unix)'.dependencies]")),
       ...tomlKeys(
         tomlSection(cargo, `[target.'cfg(target_os = "macos")'.dependencies]`),
+      ),
+      ...tomlKeys(
+        tomlSection(cargo, `[target.'cfg(target_os = "linux")'.dependencies]`),
       ),
       ...tomlKeys(tomlSection(shellExt, '[dependencies]')),
       ...Object.keys(pkg.dependencies),
@@ -1094,6 +1150,12 @@ describe('third-party inventory (docs/09-legal/third-party-licenses.md)', () => 
           tomlSection(
             cargo,
             `[target.'cfg(target_os = "macos")'.dependencies]`,
+          ),
+        ),
+        ...tomlKeys(
+          tomlSection(
+            cargo,
+            `[target.'cfg(target_os = "linux")'.dependencies]`,
           ),
         ),
         ...tomlKeys(tomlSection(cargo, '[build-dependencies]')),

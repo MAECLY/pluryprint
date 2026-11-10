@@ -1,0 +1,230 @@
+# The full Linux run, kept out of the pull-request gate: ci.yml lints Linux
+# and runs its unit tests on every pull request (x64); this runs everything
+# else on ARM64, the architecture ci.yml does not cover. It needs a display
+# (the WebKitGTK render worker), a CUPS server with real queues (the print
+# backend, tests/real_printer.rs) and the external converters (LibreOffice,
+# ImageMagick, libheif), which is more than a pull request should wait for.
+# It runs after every merge to main, every Monday (so a runner image or
+# distribution update that breaks Linux is noticed without anyone touching
+# the tree) and by hand. Nothing here builds a package or reads a secret:
+# release.yml builds and signs the AppImage and .deb.
+#
+# The image is ubuntu-22.04-arm: the release builds the Linux packages on
+# ubuntu-22.04 and ubuntu-22.04-arm (glibc 2.35), so the libraries tested
+# here are the ones the packages are built against.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '29 5 * * 1'
+  workflow_dispatch:
+
+# Every job only reads the repository; none publishes anything.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Backend (ubuntu-22.04-arm, full)
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 90
+    env:
+      # A test run never moves a MaeclyPrint-era data directory (ADR-0009).
+      PLURYPRINT_SKIP_MIGRATION: '1'
+      # Xvfb has no GPU: WebKitGTK renders in software, without the
+      # compositing mode that would need one.
+      WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The ARM64 images are not the x64 ones: if rustup is missing, install
+      # it the documented way rather than through a third-party action.
+      - name: Install Rust toolchain
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      # Build: what tauri links against (as in ci.yml). Tests: a display and
+      # a session bus for WebKitGTK, CUPS with the cups-pdf backend for the
+      # queues below, and the converters the engine calls (LibreOffice
+      # without its GUI, ImageMagick and libheif's heif-convert for HEIC),
+      # so their tests run instead of skipping.
+      - name: Install Linux build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file \
+            xvfb xauth dbus-x11 fonts-dejavu \
+            cups cups-client cups-bsd cups-ipp-utils printer-driver-cups-pdf \
+            imagemagick libheif-examples libreoffice-writer-nogui
+
+      # Two queues on the cups-pdf backend, so nothing reaches paper:
+      # `PDF`, the default destination, and `Maecly_Hold`, which holds every
+      # job (job-hold-until=indefinite), the queue tests/real_printer.rs and
+      # the ignored engine::print::cups tests submit to and cancel. The
+      # runner's user joins lpadmin, CUPS's administrators, so the ignored
+      # platform::cups test can add and remove a queue the way the app does.
+      - name: Create the CUPS test queues
+        run: |
+          set -euo pipefail
+          sudo usermod -aG lpadmin "$USER"
+          sudo systemctl start cups
+          for _ in $(seq 1 30); do lpstat -r | grep -q 'is running' && break; sleep 1; done
+          ppd=$(lpinfo -m | awk '/CUPS-PDF/ {print $1; exit}')
+          sudo lpadmin -p PDF -E -v cups-pdf:/ -m "$ppd"
+          sudo lpadmin -d PDF
+          sudo lpadmin -p Maecly_Hold -E -v cups-pdf:/ -m "$ppd" \
+            -o job-hold-until-default=indefinite
+          lpstat -t
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-full-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-full-
+
+      - name: cargo clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # Everything, never filtered, under a virtual display and its own
+      # session bus.
+      - name: cargo test
+        run: |
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1920x1080x24' \
+            cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast
+
+      # The real-spooler suites, against the hold queue above: CUPS turns
+      # the lp vector into the intended job attributes, every job stays held
+      # and is cancelled on the way out. They run even when the suite above
+      # failed: they answer a different question.
+      - name: cargo test (real CUPS spooler)
+        if: ${{ !cancelled() }}
+        env:
+          MAECLY_REAL_PRINTER: '1'
+          MAECLY_HOLD_QUEUE: Maecly_Hold
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored cups
+          cargo test --manifest-path src-tauri/Cargo.toml --test real_printer -- --ignored --test-threads=1
+
+  # The WebdriverIO suite (e2e/) against the built app, through tauri-driver
+  # and WebKitGTK's own WebDriver (WebKitWebDriver). It does not fail the
+  # workflow yet: the specs were written and verified against WebView2 on
+  # Windows (labels, the printers screen's Windows transport note, timings),
+  # and WebKitWebDriver has its own gaps, so the first Linux runs are
+  # expected to find spec assumptions rather than app bugs. Make it blocking
+  # (drop continue-on-error) once it has passed on main for a few weeks.
+  e2e:
+    name: E2E (ubuntu-22.04-arm, WebKitWebDriver)
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 90
+    continue-on-error: true
+    env:
+      PLURYPRINT_SKIP_MIGRATION: '1'
+      WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      # webkit2gtk-driver is WebKitWebDriver, which tauri-driver proxies to
+      # on Linux (as msedgedriver on Windows). CUPS gives the printers spec
+      # a queue to list.
+      - name: Install Linux build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file \
+            xvfb xauth dbus-x11 fonts-dejavu webkit2gtk-driver \
+            cups cups-client cups-bsd printer-driver-cups-pdf
+
+      - name: Create the CUPS test queue
+        run: |
+          set -euo pipefail
+          sudo systemctl start cups
+          for _ in $(seq 1 30); do lpstat -r | grep -q 'is running' && break; sleep 1; done
+          ppd=$(lpinfo -m | awk '/CUPS-PDF/ {print $1; exit}')
+          sudo lpadmin -p PDF -E -v cups-pdf:/ -m "$ppd"
+          sudo lpadmin -d PDF
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/tauri-driver
+            src-tauri/target/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-e2e-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-e2e-
+
+      - name: Install tauri-driver
+        run: |
+          command -v tauri-driver >/dev/null || cargo install tauri-driver --version 2.1.0 --locked
+          command -v tauri-driver WebKitWebDriver
+
+      # A debug binary with the frontend embedded and no installers or
+      # updater artifacts (the e2e/README.md recipe), where wdio.conf.ts
+      # looks for it: src-tauri/target/debug/pluryprint.
+      - name: Build the app
+        run: pnpm tauri build --debug --no-bundle --config src-tauri/tauri.ci.conf.json
+
+      - name: E2E (WebdriverIO)
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1920x1080x24' pnpm test:e2e
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-linux-artifacts
+          path: e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

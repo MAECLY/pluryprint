@@ -226,6 +226,12 @@ pub fn wait_bounded(
 /// helpers with it. Windows needs nothing up front: `taskkill /T` walks the
 /// tree by parent pid. The Windows console window is suppressed so a
 /// conversion does not flash a terminal in the user's face.
+///
+/// No `pre_exec`: a command without one is started with `posix_spawn`
+/// (`process_group` is a spawn attribute), not a `fork` of this whole
+/// process, which matters for every converter and the dependency installer.
+/// The one child that needs code before `exec` gets it from
+/// [`adopt_orphans`].
 pub(crate) fn isolate_process_tree(cmd: &mut Command) {
     #[cfg(unix)]
     {
@@ -240,16 +246,43 @@ pub(crate) fn isolate_process_tree(cmd: &mut Command) {
     }
 }
 
+/// Make the child the subreaper of everything it starts (Linux,
+/// `PR_SET_CHILD_SUBREAPER`, kept across `exec`), for [`run_capped`] with
+/// [`CapScope::Tree`] only, the one child [`tree::TreeSampler`] walks: a
+/// helper whose parent exits (a double fork) is adopted by the child instead
+/// of by init, so it stays the child's descendant and the walk still finds it
+/// by its parent link, even after a `setsid` took it out of the group.
+///
+/// It needs a `pre_exec`, which turns the spawn into a `fork` + `exec`, so
+/// it is not part of [`isolate_process_tree`]: every other child keeps the
+/// `posix_spawn` path.
+#[cfg(target_os = "linux")]
+pub(crate) fn adopt_orphans(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: runs in the forked child before exec; prctl is a single
+    // async-signal-safe syscall that touches no memory of ours. Best
+    // effort: a kernel without it (before 3.4) leaves the old behaviour,
+    // an orphan adopted by init.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+            Ok(())
+        });
+    }
+}
+
 /// Kill `child` and everything it spawned, then reap it. Best effort: each
 /// step ignores failures because the child may already be gone.
 pub(crate) fn kill_tree(child: &mut Child) {
     let pid = child.id();
     #[cfg(unix)]
     {
-        // `kill -KILL -<pgid>` signals the whole group the child leads. Run
-        // through the `kill` utility so no `libc` binding is needed.
+        // `kill -KILL -- -<pgid>` signals the whole group the child leads.
+        // The `--` is not optional: procps-ng's `kill` (3.3.17, Ubuntu 22.04)
+        // reads a bare `-<pgid>` after the signal as a second signal option
+        // and then signals the *caller's* group, killing this process.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -283,8 +316,9 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
     let pid = child.id();
     #[cfg(unix)]
     {
+        // `--` as in [`kill_tree`]: without it procps-ng signals our group.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -336,8 +370,10 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
 /// `None` when it cannot be told (`kill` would not run).
 #[cfg(unix)]
 pub(crate) fn group_alive(pgid: u32) -> Option<bool> {
+    // `--` as in [`kill_tree`]: procps-ng otherwise probes our own group,
+    // which is always alive, and every tree would look like it survived.
     let probe = Command::new("kill")
-        .args(["-0", &format!("-{pgid}")])
+        .args(["-0", "--", &format!("-{pgid}")])
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -453,6 +489,16 @@ pub const MEMORY_CAP_ENV: &str = "PLURYPRINT_WORKER_MEMORY_CAP";
 /// checked: a bomb can allocate fast, so more often than [`POLL`].
 const MEMORY_POLL: Duration = Duration::from_millis(20);
 
+/// On Linux, how many [`MEMORY_POLL`]s pass between two walks of `/proc` that
+/// refresh which processes belong to a [`CapScope::Tree`] child
+/// ([`tree::TreeSampler`]): the walk reads every `/proc/<pid>/stat` on the
+/// system, a few milliseconds on a busy desktop. The memory of every process
+/// already known to be in the tree is still read on every poll; only a
+/// helper started since the last walk waits for the next one (at most
+/// 200 ms) to be counted.
+#[cfg(all(unix, not(target_os = "macos")))]
+const TREE_SCAN_EVERY: u32 = 10;
+
 /// What [`run_capped`]'s memory cap covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapScope {
@@ -483,9 +529,27 @@ pub enum CapScope {
 ///   for `mmap`, so this process also samples the child's memory every
 ///   [`MEMORY_POLL`] (macOS: its physical footprint, compressed pages
 ///   included; Linux: its resident set) and kills it past the cap. For
-///   [`CapScope::Tree`] it samples the child's whole process group on macOS.
-///   (WebKit's own web-content and networking processes are XPC services that
-///   launchd starts, outside that group: they are not covered.)
+///   [`CapScope::Tree`] it samples more than the child:
+///   - *macOS:* the child's whole process group ([`group_memory_in_use`]).
+///     WebKit's own web-content and networking processes are XPC services
+///     that launchd starts, outside that group: they are not covered.
+///   - *Linux:* the child's process group **and** every descendant of the
+///     child or of a group member, found by their parent links
+///     ([`tree::TreeSampler`]), so a helper that starts its own session or
+///     group (`setsid`, `bwrap --new-session`) is still counted. Which
+///     processes belong is refreshed every [`TREE_SCAN_EVERY`] polls; the
+///     resident set of each one already known is read on every poll, so a
+///     known helper cannot grow past the cap between two refreshes. The
+///     child is the subreaper of its tree ([`adopt_orphans`]), so a
+///     helper whose parent exits (a double fork) is adopted by the child
+///     and found by the next walk while the child lives. A
+///     process stays a member once found, even after its parent exits,
+///     until it exits itself; a pid the kernel reused for
+///     another process is told apart by its start time. Past the cap, on a
+///     cancel or a timeout, the tree is frozen (every member stopped until
+///     no new one appears) and then every member is killed, as well as the
+///     group; once the child has exited the members it left behind are
+///     killed the same way, as the Job Object does on Windows.
 ///
 /// A child that ran out of memory is [`CappedError::OverMemory`]; a cancel,
 /// a timeout or any other failure is what [`run_bounded`] would return.
@@ -510,6 +574,10 @@ pub fn run_capped(
         .stderr(Stdio::from(stderr))
         .env(MEMORY_CAP_ENV, memory_cap.to_string());
     isolate_process_tree(&mut cmd);
+    #[cfg(target_os = "linux")]
+    if scope == CapScope::Tree {
+        adopt_orphans(&mut cmd);
+    }
     let cannot_cap = |e: String| {
         engine(EngineError::ConversionFailed(
             Failure::new(
@@ -528,33 +596,28 @@ pub fn run_capped(
         return Err(cannot_cap(e));
     }
     #[cfg(not(windows))]
-    let _ = (&cannot_cap, scope);
+    let _ = &cannot_cap;
 
     let started = Instant::now();
+    let mut watch = Watch::new(child.id(), scope);
     let status = loop {
         if cancel.load(Ordering::Relaxed) {
-            kill_tree(&mut child);
+            watch.kill(&mut child);
             return Err(engine(EngineError::Cancelled));
         }
         if timeout.is_some_and(|limit| started.elapsed() >= limit) {
-            kill_tree(&mut child);
+            watch.kill(&mut child);
             return Err(engine(timed_out_error(label, timeout)));
         }
-        #[cfg(unix)]
-        let used = match scope {
-            CapScope::Process => memory_in_use(child.id()),
-            CapScope::Tree => group_memory_in_use(child.id()),
-        };
-        #[cfg(unix)]
-        if used.is_some_and(|used| used > memory_cap) {
-            kill_tree(&mut child);
+        if watch.used().is_some_and(|used| used > memory_cap) {
+            watch.kill(&mut child);
             return Err(CappedError::OverMemory);
         }
         match child.wait_timeout(MEMORY_POLL) {
             Ok(Some(status)) => break status,
             Ok(None) => continue,
             Err(e) => {
-                kill_tree(&mut child);
+                watch.kill(&mut child);
                 return Err(engine(stopped_error(
                     Stopped::WaitFailed(e.to_string()),
                     label,
@@ -563,6 +626,7 @@ pub fn run_capped(
             }
         }
     };
+    watch.exited();
     if status.success() {
         return Ok(());
     }
@@ -626,35 +690,382 @@ pub fn memory_in_use(pid: u32) -> Option<u64> {
 }
 
 /// The memory the process group `pgid` (a child [`isolate_process_tree`]
-/// made a group leader) is using together, as [`memory_in_use`] counts it.
-/// On Linux only the leader is counted. `None` when the group is gone.
-#[cfg(unix)]
+/// made a group leader) is using together, as [`memory_in_use`] counts it:
+/// every member, not only the leader, so a helper the child starts cannot
+/// grow past the cap unseen. `None` when the group is gone. macOS only:
+/// Linux counts a tree, not a group ([`tree::TreeSampler`]).
+#[cfg(target_os = "macos")]
 pub fn group_memory_in_use(pgid: u32) -> Option<u64> {
-    #[cfg(target_os = "macos")]
-    {
-        let group = libc::pid_t::try_from(pgid).ok()?;
-        let mut pids = vec![0 as libc::pid_t; 256];
-        // SAFETY: the buffer is `pids`, of the byte size passed; the call
-        // writes at most that many pids and returns how many it wrote.
-        let n = unsafe {
-            libc::proc_listpgrppids(
-                group,
-                pids.as_mut_ptr().cast(),
-                libc::c_int::try_from(pids.len() * std::mem::size_of::<libc::pid_t>()).ok()?,
-            )
-        };
-        let n = usize::try_from(n).ok().filter(|n| *n > 0)?;
-        let total = pids
-            .iter()
-            .take(n.min(pids.len()))
-            .filter_map(|pid| memory_in_use(u32::try_from(*pid).ok()?))
-            .sum::<u64>();
-        // The leader counts even when the listing missed it.
-        Some(total.max(memory_in_use(pgid).unwrap_or(0)))
+    let group = libc::pid_t::try_from(pgid).ok()?;
+    let mut pids = vec![0 as libc::pid_t; 256];
+    // SAFETY: the buffer is `pids`, of the byte size passed; the call
+    // writes at most that many pids and returns how many it wrote.
+    let n = unsafe {
+        libc::proc_listpgrppids(
+            group,
+            pids.as_mut_ptr().cast(),
+            libc::c_int::try_from(pids.len() * std::mem::size_of::<libc::pid_t>()).ok()?,
+        )
+    };
+    let n = usize::try_from(n).ok().filter(|n| *n > 0)?;
+    let total = pids
+        .iter()
+        .take(n.min(pids.len()))
+        .filter_map(|pid| memory_in_use(u32::try_from(*pid).ok()?))
+        .sum::<u64>();
+    // The leader counts even when the listing missed it.
+    Some(total.max(memory_in_use(pgid).unwrap_or(0)))
+}
+
+/// What [`run_capped`] watches while its child runs, by platform and
+/// [`CapScope`], and how it ends the child and what it started.
+struct Watch {
+    #[cfg(unix)]
+    leader: u32,
+    #[cfg(unix)]
+    scope: CapScope,
+    #[cfg(all(unix, not(target_os = "macos")))]
+    tree: Option<tree::TreeSampler>,
+}
+
+impl Watch {
+    fn new(leader: u32, scope: CapScope) -> Self {
+        #[cfg(not(unix))]
+        let _ = (leader, scope);
+        Self {
+            #[cfg(unix)]
+            leader,
+            #[cfg(unix)]
+            scope,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            tree: (scope == CapScope::Tree).then(|| tree::TreeSampler::new(leader)),
+        }
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        memory_in_use(pgid)
+
+    /// The memory in use now, as the scope counts it. `None` when it cannot
+    /// be read, and always on Windows, where the Job Object enforces the cap
+    /// itself.
+    fn used(&mut self) -> Option<u64> {
+        #[cfg(target_os = "macos")]
+        {
+            match self.scope {
+                CapScope::Process => memory_in_use(self.leader),
+                CapScope::Tree => group_memory_in_use(self.leader),
+            }
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let _ = self.scope;
+            match &mut self.tree {
+                Some(tree) => tree.sample(),
+                None => memory_in_use(self.leader),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    }
+
+    /// End the running child and everything it started, then reap it. On
+    /// Linux, for a tree, each member is killed before the group: the
+    /// child's parent links are only whole while it is alive.
+    fn kill(&mut self, child: &mut Child) {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some(tree) = &mut self.tree {
+            tree.kill_all();
+        }
+        kill_tree(child);
+    }
+
+    /// The child exited by itself (and was reaped): on Linux, for a tree,
+    /// kill the helpers it left behind, as closing the Job Object does on
+    /// Windows. Nothing on macOS, where it never did.
+    fn exited(&mut self) {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some(tree) = &mut self.tree {
+            tree.leader_reaped();
+            tree.kill_all();
+        }
+    }
+}
+
+/// The Linux side of a [`CapScope::Tree`] cap: which processes belong to the
+/// capped child's tree, how much memory they use, and how they are all
+/// killed. Everything is read from `/proc`.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) mod tree {
+    use std::collections::{HashMap, HashSet};
+
+    use super::TREE_SCAN_EVERY;
+
+    /// The fields of a `/proc/<pid>/stat` file the tree is built from.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct ProcStat {
+        /// Parent pid (field 4).
+        pub ppid: u32,
+        /// Process group (field 5).
+        pub pgrp: u32,
+        /// Start time after boot, in clock ticks (field 22): with the pid,
+        /// it names one process, never the next one the pid is given to.
+        pub start: u64,
+        /// Resident set, in pages (field 24).
+        pub rss_pages: u64,
+    }
+
+    /// The [`ProcStat`] in the text of a `/proc/<pid>/stat` file. The second
+    /// field is the command name in parentheses, which may itself hold
+    /// spaces and parentheses, so the fields are counted from the last `)`.
+    /// Pure.
+    pub(crate) fn parse_stat(stat: &str) -> Option<ProcStat> {
+        let (_, rest) = stat.rsplit_once(')')?;
+        // `rest` starts at field 3 (the state).
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        let field = |n: usize| fields.get(n - 3)?.parse::<u64>().ok();
+        Some(ProcStat {
+            ppid: u32::try_from(field(4)?).ok()?,
+            pgrp: u32::try_from(field(5)?).ok()?,
+            start: field(22)?,
+            rss_pages: field(24)?,
+        })
+    }
+
+    /// `/proc/<pid>/stat`, parsed; `None` once the process is gone.
+    pub(crate) fn read_stat(pid: u32) -> Option<ProcStat> {
+        parse_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+
+    fn page_size() -> u64 {
+        // SAFETY: sysconf has no preconditions.
+        u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap_or(4096)
+    }
+
+    /// One process of the tree: its pid and the start time it had when it
+    /// was found, so a reused pid is never taken for it.
+    pub(crate) type Member = (u32, u64);
+
+    /// The processes of a capped child's tree and the memory they use
+    /// (`run_capped`'s docs). Members are found by walking all of `/proc`
+    /// every [`TREE_SCAN_EVERY`] samples; each known member's resident set
+    /// is read on every sample, one `/proc/<pid>/stat` each.
+    pub(crate) struct TreeSampler {
+        leader: u32,
+        /// Whether `leader` still names the child (and its process group):
+        /// true until the child has been reaped. After that its pid may be
+        /// given to an unrelated process, which may lead a group of its own.
+        leader_ours: bool,
+        samples: u32,
+        members: Vec<Member>,
+        page: u64,
+    }
+
+    impl TreeSampler {
+        pub(crate) fn new(leader: u32) -> Self {
+            Self {
+                leader,
+                leader_ours: true,
+                samples: 0,
+                members: Vec::new(),
+                page: page_size(),
+            }
+        }
+
+        /// The members found so far.
+        #[cfg(test)]
+        pub(crate) fn members(&self) -> &[Member] {
+            &self.members
+        }
+
+        /// The memory the whole tree uses now, in bytes; `None` when none of
+        /// it is left. Refreshes the membership every [`TREE_SCAN_EVERY`]
+        /// calls, the first included.
+        pub(crate) fn sample(&mut self) -> Option<u64> {
+            let scan = self.samples.is_multiple_of(TREE_SCAN_EVERY);
+            self.samples = self.samples.wrapping_add(1);
+            if scan {
+                return self.refresh();
+            }
+            let mut total = 0u64;
+            self.members.retain(|&(pid, start)| match read_stat(pid) {
+                Some(stat) if stat.start == start => {
+                    total = total.saturating_add(stat.rss_pages);
+                    true
+                }
+                // Gone, or the pid now names another process.
+                _ => false,
+            });
+            (!self.members.is_empty()).then(|| total.saturating_mul(self.page))
+        }
+
+        /// Walk `/proc` and recompute the members: the leader and its group
+        /// (while [`Self::leader_ours`]), every member already known that is
+        /// still the same process, and every descendant of any of them.
+        /// Returns the memory they use, read in the same walk.
+        pub(crate) fn refresh(&mut self) -> Option<u64> {
+            let Ok(dir) = std::fs::read_dir("/proc") else {
+                // No /proc to walk: keep the members known so far.
+                return None;
+            };
+            let all: HashMap<u32, ProcStat> = dir
+                .flatten()
+                .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+                .filter_map(|pid| Some((pid, read_stat(pid)?)))
+                .collect();
+            let known: HashSet<Member> = self.members.iter().copied().collect();
+            let mut found: Vec<u32> = all
+                .iter()
+                .filter(|(pid, stat)| {
+                    known.contains(&(**pid, stat.start))
+                        || (self.leader_ours && (**pid == self.leader || stat.pgrp == self.leader))
+                })
+                .map(|(pid, _)| *pid)
+                .collect();
+            let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+            for (pid, stat) in &all {
+                children.entry(stat.ppid).or_default().push(*pid);
+            }
+            let mut seen: HashSet<u32> = found.iter().copied().collect();
+            let mut next = 0;
+            while next < found.len() {
+                for &child in children.get(&found[next]).map(Vec::as_slice).unwrap_or(&[]) {
+                    if seen.insert(child) {
+                        found.push(child);
+                    }
+                }
+                next += 1;
+            }
+            let mut total = 0u64;
+            self.members = found
+                .into_iter()
+                .map(|pid| {
+                    let stat = all[&pid];
+                    total = total.saturating_add(stat.rss_pages);
+                    (pid, stat.start)
+                })
+                .collect();
+            (!self.members.is_empty()).then(|| total.saturating_mul(self.page))
+        }
+
+        /// The child has been reaped: its pid no longer names it, nor its
+        /// group, unless the group still has members (the kernel does not
+        /// give out a pid that is a live group's id). When the pid already
+        /// names another process, the group is gone and only the members
+        /// known so far and their descendants are the tree.
+        pub(crate) fn leader_reaped(&mut self) {
+            self.members.retain(|&(pid, _)| pid != self.leader);
+            self.leader_ours = read_stat(self.leader).is_none();
+        }
+
+        /// Freeze the whole tree, then kill it: SIGSTOP every member,
+        /// refreshing the membership after each round until a walk finds no
+        /// member not yet stopped (at most [`FREEZE_ROUNDS`] walks), then
+        /// SIGKILL every member stopped, the leader last.
+        ///
+        /// A stopped process starts nothing, and a process whose parent is
+        /// stopped keeps that parent, so each walk finds whatever was forked
+        /// before the last stop by its parent link, and the tree settles.
+        /// Killing round by round instead left a gap: a member killed while
+        /// it was forking orphaned the child it had just started, which then
+        /// belonged to no one we knew (a `setsid` child has left the group
+        /// too) and survived.
+        pub(crate) fn kill_all(&mut self) {
+            let mut stopped: Vec<Member> = Vec::new();
+            let mut seen: HashSet<Member> = HashSet::new();
+            for _ in 0..FREEZE_ROUNDS {
+                self.refresh();
+                let fresh: Vec<Member> = self
+                    .members
+                    .iter()
+                    .filter(|m| !seen.contains(*m))
+                    .copied()
+                    .collect();
+                if fresh.is_empty() {
+                    break;
+                }
+                for member in fresh {
+                    signal_member(member, libc::SIGSTOP);
+                    seen.insert(member);
+                    stopped.push(member);
+                }
+            }
+            let (leader, rest): (Vec<Member>, Vec<Member>) = stopped
+                .into_iter()
+                .partition(|&(pid, _)| self.leader_ours && pid == self.leader);
+            for member in rest.into_iter().chain(leader) {
+                signal_member(member, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// How many walks of `/proc` [`TreeSampler::kill_all`] makes, at most,
+    /// while it stops the tree: one finds nothing new once every member is
+    /// stopped, so this bounds only a tree that keeps out-forking the walk.
+    const FREEZE_ROUNDS: usize = 32;
+
+    /// Whether [`signal_member`] falls back to a checked `kill` after
+    /// `pidfd_open` failed with `errno`: when the kernel has no pidfds
+    /// (`ENOSYS`, before 5.3) or none can be had now (`EMFILE`, `ENFILE`,
+    /// `ENOMEM`). A member stopped by the freeze and then left unsignalled
+    /// would stay frozen for good. Only `ESRCH` (already gone) and the
+    /// like end there. Pure.
+    pub(crate) fn falls_back_to_kill(errno: Option<i32>) -> bool {
+        matches!(
+            errno,
+            Some(libc::ENOSYS | libc::EMFILE | libc::ENFILE | libc::ENOMEM)
+        )
+    }
+
+    /// Send `signal` to `pid` with a plain `kill` if it is still the
+    /// process that started at `start`, checked just before (a pid reused
+    /// between the check and the signal is the one gap left).
+    pub(crate) fn kill_checked((pid, start): Member, signal: libc::c_int) {
+        let Ok(raw) = libc::pid_t::try_from(pid) else {
+            return;
+        };
+        if read_stat(pid).is_some_and(|stat| stat.start == start) {
+            // SAFETY: kill has no memory preconditions.
+            unsafe { libc::kill(raw, signal) };
+        }
+    }
+
+    /// Send `signal` to `pid` if it is still the process that started at
+    /// `start`. Through a pidfd where the kernel has one (Linux 5.3): the
+    /// descriptor pins the process, so the check and the signal are about
+    /// the same one even if it exits in between; otherwise, and when no
+    /// descriptor can be had ([`falls_back_to_kill`]), [`kill_checked`].
+    pub(crate) fn signal_member((pid, start): Member, signal: libc::c_int) {
+        let Ok(raw) = libc::pid_t::try_from(pid) else {
+            return;
+        };
+        let same = || read_stat(pid).is_some_and(|stat| stat.start == start);
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: plain syscalls on integers; the descriptor returned is
+            // ours (close-on-exec by default) and closed once, below.
+            let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, raw, 0) };
+            if fd >= 0 {
+                if same() {
+                    // SAFETY: as above; a null siginfo means a plain kill.
+                    unsafe {
+                        libc::syscall(
+                            libc::SYS_pidfd_send_signal,
+                            fd,
+                            signal,
+                            std::ptr::null::<libc::siginfo_t>(),
+                            0,
+                        );
+                    }
+                }
+                // SAFETY: `fd` is the descriptor opened above.
+                unsafe { libc::close(fd as libc::c_int) };
+                return;
+            }
+            if !falls_back_to_kill(std::io::Error::last_os_error().raw_os_error()) {
+                // ESRCH: already gone.
+                return;
+            }
+        }
+        kill_checked((pid, start), signal);
     }
 }
 
@@ -1137,6 +1548,464 @@ mod reason_tests {
     /// child that grows past its cap is killed as `OverMemory`; one that
     /// stays under it runs to the end; cancel and timeout behave as in
     /// `run_bounded`.
+    /// The group probe and the group kill address the child's group, never
+    /// ours. procps-ng's `kill` (Ubuntu 22.04) reads `kill -0 -<pgid>` as two
+    /// signal options and probes, or kills, the caller's own group: the
+    /// probe then said every finished tree was alive, and the kill took the
+    /// test runner with it.
+    #[cfg(unix)]
+    #[test]
+    fn kill_tree_ends_the_childs_group_and_the_probe_sees_it_gone() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 30 & sleep 30"]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let pgid = child.id();
+        assert_eq!(group_alive(pgid), Some(true));
+        assert!(kill_tree_confirmed(&mut child));
+        // We are still here, and the group really is gone.
+        assert_eq!(group_alive(pgid), Some(false));
+    }
+
+    /// The fields are read after the command name, whatever that name
+    /// holds.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn proc_stat_fields_are_read_after_the_command_name() {
+        let stat = "4242 (a) b (c) S 4100 4200 4100 0 -1 4194560 120 0 0 0 \
+                    7 3 0 0 20 0 1 0 987654 10485760 2560 18446744073709551615";
+        assert_eq!(
+            tree::parse_stat(stat),
+            Some(tree::ProcStat {
+                ppid: 4100,
+                pgrp: 4200,
+                start: 987654,
+                rss_pages: 2560,
+            })
+        );
+        assert_eq!(tree::parse_stat("4242 (sh) S 1 4242 1"), None);
+        assert_eq!(tree::parse_stat("4242 (sh"), None);
+        assert_eq!(tree::parse_stat(""), None);
+        // This process, as the kernel reports it.
+        let own = tree::read_stat(std::process::id()).unwrap();
+        // SAFETY: getpgrp and getppid have no preconditions.
+        let (pgrp, ppid) = unsafe { (libc::getpgrp(), libc::getppid()) };
+        assert_eq!(own.pgrp, u32::try_from(pgrp).unwrap());
+        assert_eq!(own.ppid, u32::try_from(ppid).unwrap());
+        assert!(own.rss_pages > 0 && own.start > 0);
+    }
+
+    /// Waits up to `limit` for `path` to exist and hold something.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn wait_for_file(path: &Path, limit: Duration) -> String {
+        let deadline = Instant::now() + limit;
+        loop {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if !text.trim().is_empty() {
+                    return text;
+                }
+            }
+            assert!(Instant::now() < deadline, "{} never came", path.display());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// What a Linux tree test started, SIGKILLed if the test panics (a
+    /// failed assertion included), so a failure never leaves a `sleep 600`
+    /// behind: the process whose pid the test's `pid_file` holds (an
+    /// orphan, read when the guard drops, so a panic before the test read
+    /// it is covered), the process `group`, and the `child`, the latter
+    /// checked against its start time so a pid the kernel reused is left
+    /// alone. A test that passes cleans up itself and asserts it did.
+    #[cfg(target_os = "linux")]
+    #[derive(Default)]
+    struct KillOnPanic {
+        pid_file: Option<std::path::PathBuf>,
+        group: Option<u32>,
+        child: Option<tree::Member>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl KillOnPanic {
+        /// Guard `child` (pid and start time).
+        fn child(mut self, pid: u32) -> Self {
+            self.child = tree::read_stat(pid).map(|stat| (pid, stat.start));
+            self
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for KillOnPanic {
+        fn drop(&mut self) {
+            if !std::thread::panicking() {
+                return;
+            }
+            // Never 0 or 1: kill(0) is our own group, kill(1) init.
+            let real = |pid: u32| pid > 1 && i32::try_from(pid).is_ok();
+            let orphan = self
+                .pid_file
+                .as_ref()
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .filter(|&pid| real(pid));
+            if let Some(pid) = orphan {
+                // SAFETY: a plain syscall on a positive pid.
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+            if let Some(group) = self.group.filter(|&g| real(g)) {
+                // SAFETY: a plain syscall on another process group.
+                unsafe { libc::killpg(group as i32, libc::SIGKILL) };
+            }
+            if let Some(member) = self.child {
+                tree::kill_checked(member, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// Whether `pid` is a live process (not gone, not a zombie), checked for
+    /// up to two seconds while it is.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn still_alive(pid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let alive = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| Some(s.rsplit_once(')')?.1.split_whitespace().next()? != "Z"))
+                .unwrap_or(false);
+            if !alive || Instant::now() >= deadline {
+                return alive;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Security note 8 on Linux: a helper found by one walk of `/proc` is
+    /// measured on every poll after it, not only at the next walk. The
+    /// helper here waits until a walk has found it, then grows by 300 MB;
+    /// the very next sample (not a walk) must see it. The sampler this
+    /// replaced read only the leader between walks and added what the
+    /// others used at the last one, so for up to nine polls a helper could
+    /// grow unseen.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn nfr_security_a_known_helper_that_grows_right_after_a_walk_is_seen_at_the_next_poll() {
+        const { assert!(TREE_SCAN_EVERY > 2, "the second sample must not be a walk") };
+        let dir = tempfile::tempdir().unwrap();
+        let (pid_file, go, grown) = (
+            dir.path().join("pid"),
+            dir.path().join("go"),
+            dir.path().join("grown"),
+        );
+        // The size is an argument, not a literal: perl folds a constant `x`
+        // while it compiles, and would grow before it ever waited.
+        let helper = format!(
+            "perl -e 'open my $f, q(>), $ARGV[0]; print $f $$; close $f; \
+               select(undef, undef, undef, 0.01) until -e $ARGV[1]; \
+               $x = q(a) x ($ARGV[3]*1024*1024); open $f, q(>), $ARGV[2]; print $f 1; close $f; \
+               sleep 30' '{}' '{}' '{}' 300 & wait",
+            pid_file.display(),
+            go.display(),
+            grown.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &helper]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let perl: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+
+        let mut tree = tree::TreeSampler::new(child.id());
+        let before = tree.sample().expect("the walk finds the tree");
+        assert!(
+            tree.members().iter().any(|&(pid, _)| pid == perl),
+            "the walk found the helper: {:?}",
+            tree.members()
+        );
+        std::fs::write(&go, "1").unwrap();
+        wait_for_file(&grown, Duration::from_secs(20));
+        let after = tree.sample().expect("the tree is still there");
+        assert!(
+            after >= before + 250 * 1024 * 1024,
+            "the next poll saw {after} bytes, {before} before the helper grew"
+        );
+
+        tree.kill_all();
+        kill_tree(&mut child);
+        assert!(!still_alive(perl), "the helper outlived the kill");
+    }
+
+    /// Security note 8 on Linux: a helper orphaned by a double fork, out of
+    /// the group too (`setsid`), is adopted by the capped child (its
+    /// subreaper), so a walk after the orphaning still finds it by its
+    /// parent link, and it is killed with the tree. Adopted by init, it was
+    /// no one's descendant we knew and outlived the kill.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_a_double_forked_orphan_stays_in_the_tree_and_dies_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("orphan");
+        // The subshell starts the helper and exits at once, orphaning it.
+        let script = format!(
+            "(setsid sleep 600 & echo $! > '{}'); sleep 30",
+            pid_file.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        adopt_orphans(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let leader = child.id();
+        let _guard = KillOnPanic {
+            pid_file: Some(pid_file.clone()),
+            group: Some(leader),
+            ..KillOnPanic::default()
+        }
+        .child(leader);
+        let orphan: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        // Adopted once its parent subshell has gone.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stat = loop {
+            let stat = tree::read_stat(orphan).expect("the orphan is alive");
+            if stat.ppid == leader || Instant::now() >= deadline {
+                break stat;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(stat.ppid, leader, "the orphan was not adopted by the child");
+        assert_ne!(stat.pgrp, leader, "setsid did not move the orphan out");
+
+        // A first walk made after the orphaning finds it.
+        let mut tree = tree::TreeSampler::new(leader);
+        tree.sample().expect("the walk finds the tree");
+        assert!(
+            tree.members().iter().any(|&(pid, _)| pid == orphan),
+            "{:?}",
+            tree.members()
+        );
+        tree.kill_all();
+        kill_tree(&mut child);
+        assert!(!still_alive(orphan), "the orphan outlived the kill");
+    }
+
+    /// [`isolate_process_tree`] alone makes no subreaper (it has no
+    /// `pre_exec`, so its children keep the `posix_spawn` path): a double
+    /// fork's orphan under it is adopted by someone else, never by the child.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn isolate_process_tree_alone_does_not_adopt_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("orphan");
+        let script = format!(
+            "(setsid sleep 600 & echo $! > '{}'); sleep 30",
+            pid_file.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let leader = child.id();
+        let _guard = KillOnPanic {
+            pid_file: Some(pid_file.clone()),
+            group: Some(leader),
+            ..KillOnPanic::default()
+        }
+        .child(leader);
+        let orphan: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        let orphan_start = tree::read_stat(orphan).expect("the orphan is alive").start;
+        // Its parent subshell (in the child's group) exits at once; then it
+        // is adopted, by the child if it were a subreaper, else by a
+        // process outside the child's group (init, or the container's).
+        let adopted_outside =
+            |ppid: u32| tree::read_stat(ppid).is_some_and(|parent| parent.pgrp != leader);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stat = loop {
+            let stat = tree::read_stat(orphan).expect("the orphan is alive");
+            if stat.ppid == leader || adopted_outside(stat.ppid) || Instant::now() >= deadline {
+                break stat;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_ne!(stat.ppid, leader, "the child adopted the orphan");
+        assert!(adopted_outside(stat.ppid), "the orphan was never adopted");
+        tree::kill_checked((orphan, orphan_start), libc::SIGKILL);
+        kill_tree(&mut child);
+    }
+
+    /// A member is signalled even when no pidfd can be had (`EMFILE`,
+    /// `ENFILE`: too many open files), through a `kill` checked against its
+    /// start time, so a member the freeze stopped is never left frozen; a
+    /// pid that names another process now is left alone.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_a_member_is_signalled_without_a_pidfd() {
+        for errno in [libc::ENOSYS, libc::EMFILE, libc::ENFILE, libc::ENOMEM] {
+            assert!(tree::falls_back_to_kill(Some(errno)), "{errno}");
+        }
+        assert!(!tree::falls_back_to_kill(Some(libc::ESRCH)));
+        assert!(!tree::falls_back_to_kill(None));
+
+        let mut child = Command::new("sleep").arg("600").spawn().unwrap();
+        let pid = child.id();
+        let _guard = KillOnPanic::default().child(pid);
+        let start = tree::read_stat(pid).unwrap().start;
+        // Another start time: not this process, not signalled.
+        tree::kill_checked((pid, start + 1), libc::SIGKILL);
+        assert!(child.try_wait().unwrap().is_none());
+        tree::kill_checked((pid, start), libc::SIGSTOP);
+        tree::kill_checked((pid, start), libc::SIGKILL);
+        let status = child.wait().unwrap();
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(libc::SIGKILL)
+        );
+    }
+
+    /// Security note 8 on Linux: a member that keeps forking children into
+    /// sessions of their own is killed with every child it managed to start.
+    /// Killed round by round, the looping member died between two forks and
+    /// orphaned the child it had just started, outside the group and no
+    /// longer anyone's descendant we knew; frozen first, it keeps its
+    /// children until all of them are found and killed.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn nfr_security_kill_all_leaves_no_survivor_of_a_member_forking_in_a_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let pids = dir.path().join("pids");
+        let looper = dir.path().join("looper");
+        // Forks `setsid sleep` children as fast as it can, recording each
+        // one; the shell around it leads the group.
+        let script = format!(
+            "sh -c 'echo $$ > \"$1\"; while :; do setsid sleep 600 & echo $! >> \"$2\"; done' \
+               sh '{}' '{}' & wait",
+            looper.display(),
+            pids.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let looper: u32 = wait_for_file(&looper, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        let mut tree = tree::TreeSampler::new(child.id());
+        tree.sample().expect("the walk finds the tree");
+        // Let it fork well past one walk's worth of children.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(&pids).map_or(0, |p| p.lines().count()) < 50 {
+            assert!(Instant::now() < deadline, "the loop never forked");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        tree.kill_all();
+        kill_tree(&mut child);
+
+        assert!(!still_alive(looper), "the forking member outlived kill_all");
+        let started: Vec<u32> = std::fs::read_to_string(&pids)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        // SIGKILL is delivered at once, but give the kernel a moment.
+        let alive = |pid: u32| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| Some(s.rsplit_once(')')?.1.split_whitespace().next()? != "Z"))
+                .unwrap_or(false)
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let survivors = loop {
+            let survivors: Vec<u32> = started.iter().copied().filter(|&p| alive(p)).collect();
+            if survivors.is_empty() || Instant::now() >= deadline {
+                break survivors;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(
+            survivors.is_empty(),
+            "{} of {} children survived: {survivors:?}",
+            survivors.len(),
+            started.len()
+        );
+    }
+
+    /// Security note 8 on Linux: a helper that leaves the child's process
+    /// group and session (`setsid`, as `bwrap --new-session` does for a
+    /// sandboxed web process) is still the child's descendant: it counts
+    /// against the tree cap and is killed with the tree. It used to escape
+    /// both: the group scan never saw it, and the group kill never reached
+    /// it. A helper left behind by a child that exits by itself is killed
+    /// too, as closing the Job Object does on Windows.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn nfr_security_a_setsid_helper_counts_against_the_tree_cap_and_dies_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("err.log");
+        let cancel = AtomicBool::new(false);
+        let ids = dir.path().join("ids");
+        let script = format!(
+            "setsid perl -e 'open my $f, q(>), $ARGV[0]; \
+               print $f join(q( ), $$, getppid(), getpgrp()); close $f; \
+               $x = q(a) x ($ARGV[1]*1024*1024); sleep 30' '{}' 400 & wait; exit 0",
+            ids.display()
+        );
+        // The size comes from an argument: perl folds a constant `x` while it
+        // compiles, so a literal 400 MB would be allocated (and the tree
+        // killed) before the helper got to write its ids.
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        let started = Instant::now();
+        let r = run_capped(
+            cmd,
+            "grow",
+            &cancel,
+            None,
+            &log,
+            64 * 1024 * 1024,
+            CapScope::Tree,
+        );
+        assert!(matches!(r, Err(CappedError::OverMemory)), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(20));
+        let ids: Vec<u32> = std::fs::read_to_string(&ids)
+            .unwrap()
+            .split_whitespace()
+            .map(|n| n.parse().unwrap())
+            .collect();
+        let [perl, shell, group] = ids[..] else {
+            panic!("{ids:?}")
+        };
+        // It really left the group the shell leads.
+        assert_ne!(group, shell, "setsid did not move the helper out");
+        assert_eq!(group, perl);
+        assert!(!still_alive(perl), "the setsid helper outlived the cap");
+
+        // Left behind by a child that exited 0: killed once the child ends.
+        let pid_file = dir.path().join("left");
+        let script = format!(
+            "setsid sleep 30 & echo $! > '{}'; sleep 0.5; exit 0",
+            pid_file.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        // The shell outlives one walk of /proc (every 200 ms) after it
+        // started the helper: a helper that leaves the group and loses its
+        // parent before any walk saw it is not found (`run_capped`'s docs).
+        run_capped(cmd, "leave", &cancel, None, &log, 64 << 20, CapScope::Tree).unwrap();
+        let left: u32 = wait_for_file(&pid_file, Duration::from_secs(5))
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(!still_alive(left), "a helper outlived its finished child");
+    }
+
     #[cfg(unix)]
     #[test]
     fn nfr_security_run_capped_kills_a_child_over_its_memory_cap() {
@@ -1166,7 +2035,10 @@ mod reason_tests {
         assert!(started.elapsed() < Duration::from_secs(20));
         // Round 7: a tree cap also counts a helper the child starts (the
         // shell stays, perl runs as its child in the same group).
+        // On Linux that needs every member of the group summed: counting the
+        // leader alone let the shell sleep out perl's 30 s and exit 0.
         let helper = "perl -e '$x = q(a) x (400*1024*1024); sleep 30'; exit 0";
+        let started = Instant::now();
         let r = run_capped(
             sh(helper),
             "grow",
@@ -1177,6 +2049,7 @@ mod reason_tests {
             CapScope::Tree,
         );
         assert!(matches!(r, Err(CappedError::OverMemory)), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(20));
 
         assert!(run_capped(
             sh("exit 0"),

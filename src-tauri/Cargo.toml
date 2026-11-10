@@ -1,8 +1,11 @@
 [package]
 name = "pluryprint"
 version = "0.0.4"
-description = "Open source batch file printing for Windows and macOS."
-authors = ["Maecly maintainers"]
+description = "Open source batch file printing for Windows, macOS and Linux."
+# The .deb's Maintainer field: tauri's deb bundler writes the authors here,
+# falling back to bundle.publisher only without them. bundle.publisher
+# ("Maecly") stays what the Windows installer shows as the publisher.
+authors = ["Maecly <hola@maecly.com>"]
 license = "AGPL-3.0-only"
 repository = "https://github.com/MAECLY/pluryprint"
 edition = "2021"
@@ -234,6 +237,23 @@ objc2-web-kit = { version = "0.3", default-features = false, features = [
   "block2",
   "objc2-core-foundation",
 ] }
+
+# --- Linux render worker (FR-055) ---
+# HTML -> PDF through WebKitGTK in the hidden render worker (render::linux):
+# a web view in an off-screen GTK window printed to GTK's print-to-file
+# printer. Every crate is pinned to the line wry and tao already use (tauri
+# 2.12 / wry 0.57: webkit2gtk 2.0, gtk-rs 0.18, libsoup 3), so the tree keeps
+# one copy of each binding and the system libraries the app already links
+# are the only ones loaded. All MIT. `v2_40` is the feature wry turns on, but
+# the run-time floor is WebKitGTK 2.42: wry itself imports
+# `webkit_cookie_manager_get_all_cookies` (2.41.90), and the binary binds
+# every symbol at start. Ubuntu 22.04, Debian 12 and Fedora 38 have 2.42 or
+# later through their updates; the .deb's Depends says so.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
+gtk = "0.18"
+# The response headers the worker's scheme handler serves the page with.
+soup = { package = "soup3", version = "0.5" }
 
 # --- SVG worker memory cap on Unix (security note 8) ---
 # setrlimit(RLIMIT_DATA) in the worker, and the parent's memory watchdog

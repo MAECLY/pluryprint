@@ -1,3 +1,9 @@
+import {
+  appImageFileName,
+  isAppImageMount,
+  type LinuxPackage,
+} from '@/lib/platform';
+
 /**
  * Format a size in kibibytes into a human-friendly string.
  * Ported from `claude design/maeclyprint/project/data.jsx:57`.
@@ -73,12 +79,34 @@ export function quoteShellArg(arg: string, flavor: ShellFlavor): string {
 const CLI_PROGRAM_WINDOWS = 'pluryprint-cli';
 
 /**
- * The command-line program's name on `os` (`'windows'`, `'macos'`, …):
- * `pluryprint-cli` on Windows, where the app itself is a GUI program a shell
- * does not wait for; the app's own `pluryprint` elsewhere.
+ * How the command-line program is reached on Linux, which depends on the
+ * package (see `LinuxPackage` in `lib/platform`): the .deb installs
+ * `pluryprint` on `PATH`; an AppImage is run by its own file name.
  */
-export function cliProgram(os: string | undefined): string {
-  return os === 'windows' ? CLI_PROGRAM_WINDOWS : 'pluryprint';
+export interface CliLinux {
+  /** The package that installed this build, when known. */
+  linuxPackage?: LinuxPackage | null | undefined;
+  /** The AppImage's file name (`appImageFileName`), for the AppImage. */
+  appImage?: string | undefined;
+}
+
+/**
+ * The command-line program's name on `os` (`'windows'`, `'macos'`,
+ * `'linux'`): `pluryprint-cli` on Windows, where the app itself is a GUI
+ * program a shell does not wait for; on Linux the AppImage's own file, run
+ * from the folder it was saved in (`./Pluryprint_….AppImage`), because
+ * nothing puts an AppImage on `PATH`; the app's own `pluryprint` elsewhere,
+ * which the .deb installs into `/usr/bin`.
+ */
+export function cliProgram(
+  os: string | undefined,
+  linux: CliLinux = {},
+): string {
+  if (os === 'windows') return CLI_PROGRAM_WINDOWS;
+  if (os === 'linux' && linux.linuxPackage === 'appimage') {
+    return `./${linux.appImage ?? appImageFileName()}`;
+  }
+  return 'pluryprint';
 }
 
 /**
@@ -91,6 +119,14 @@ export function cliProgram(os: string | undefined): string {
  * and it names the console-subsystem `pluryprint-cli.exe` installed next to
  * the app: `pluryprint.exe` is a GUI program, so PowerShell would neither wait
  * for it nor show its output or exit code (FR-009).
+ *
+ * Linux has two exceptions. The .deb does put `pluryprint` on `PATH`, so the
+ * bare name is both shorter and what the package's users expect. An AppImage
+ * runs from a temporary mount (`/tmp/.mount_…`) that vanishes when the app
+ * quits, so that path is never offered: the AppImage file itself is (the
+ * backend reports it as the executable when it knows it), or failing that
+ * its file name, run from its folder.
+ *
  * The glob is quoted on purpose — the CLI expands patterns itself, and a shell
  * that expanded it first would hand over a different argument list.
  */
@@ -98,24 +134,50 @@ export function cliPrintCommand({
   executable,
   os,
   profile,
+  linuxPackage,
+  appImage,
 }: {
   executable: string | null | undefined;
   os: string | undefined;
   profile: string;
-}): string {
+} & CliLinux): string {
   const flavor: ShellFlavor = os === 'windows' ? 'powershell' : 'posix';
-  let program = cliProgram(os);
-  if (executable) {
-    const path =
+  let program = cliProgram(os, { linuxPackage, appImage });
+  const path = cliExecutable({ executable, os, linuxPackage });
+  if (path) {
+    const named =
       os === 'windows'
-        ? executable.replace(/[^\\/]*$/, `${CLI_PROGRAM_WINDOWS}.exe`)
-        : executable;
-    program = quoteShellArg(path, flavor);
+        ? path.replace(/[^\\/]*$/, `${CLI_PROGRAM_WINDOWS}.exe`)
+        : path;
+    program = quoteShellArg(named, flavor);
     if (flavor === 'powershell' && program.startsWith("'")) {
       program = `& ${program}`;
     }
   }
   return `${program} print --files ${quoteShellArg('*.pdf', flavor)} --profile ${quoteShellArg(profile, flavor)}`;
+}
+
+/**
+ * The executable path a copied command should name, or `null` when the
+ * command names the program by itself: no path is known, the .deb put it on
+ * `PATH`, or the path is an AppImage's temporary mount (see
+ * {@link cliPrintCommand}).
+ */
+export function cliExecutable({
+  executable,
+  os,
+  linuxPackage,
+}: {
+  executable: string | null | undefined;
+  os: string | undefined;
+  linuxPackage?: LinuxPackage | null | undefined;
+}): string | null {
+  if (!executable) return null;
+  if (os === 'linux') {
+    if (linuxPackage === 'deb') return null;
+    if (isAppImageMount(executable)) return null;
+  }
+  return executable;
 }
 
 /**

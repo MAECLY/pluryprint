@@ -426,6 +426,7 @@ We accept that **signed + notarized** artifacts are not bit-reproducible. The **
 ## See also
 
 - [installer-windows.md](./installer-windows.md) — Windows counterpart
-- [code-signing.md](./code-signing.md) — full code signing details for both platforms
+- [code-signing.md](./code-signing.md) — full code signing details for Windows and macOS
+- [installer-linux.md](./installer-linux.md) — the Linux AppImage and `.deb`
 - [auto-update-flow.md](./auto-update-flow.md) — how installed apps receive updates
 - [ci-cd.md](./ci-cd.md) — where this installer is built in CI

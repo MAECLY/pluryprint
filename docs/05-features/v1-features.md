@@ -20,12 +20,12 @@ All of these shipped ahead of v0.2 (FR-052..FR-057). See [supported-formats.md](
 | `.xlsx`, `.xls` | LibreOffice | |
 | `.pptx`, `.ppt` | LibreOffice | |
 | `.odt`, `.ods`, `.odp` | LibreOffice | |
-| `.rtf` | LibreOffice (Windows); `textutil` → the system web view (macOS) | |
+| `.rtf` | LibreOffice (Windows, Linux); `textutil` → the system web view (macOS) | |
 | `.txt` | decoded in-process → the system web view | BOM, UTF-8, else Windows-1252 |
-| `.html`, `.htm` | the system web view (WebView2 / WKWebView) in a worker | Local files only; no script, no network |
+| `.html`, `.htm` | the system web view (WebView2 / WKWebView / WebKitGTK) in a worker | Local files only; no script, no network |
 | `.md`, `.markdown` | `pulldown-cmark` in-process → the system web view | No Pandoc, no LaTeX |
 | `.svg`, `.svgz` | `usvg` + `svg2pdf` in a worker | Vector output |
-| `.heic`, `.heif` | OS decoder (`sips` / WIC) | Windows needs the Store *HEIF Image Extensions* (and *HEVC Video Extensions* for `.heic`) |
+| `.heic`, `.heif` | OS decoder (`sips` / WIC); on Linux `heif-dec` / `heif-convert` (libheif) or ImageMagick | Windows needs the Store *HEIF Image Extensions* (and *HEVC Video Extensions* for `.heic`); Linux needs one of the Linux decoders |
 
 ### Dependency detection
 
@@ -154,7 +154,6 @@ These don't fit a single milestone; they accrue over multiple releases.
 | Feature | Lives in |
 |---|---|
 | macOS support | v1.1 (M5) |
-| Linux support | v2.x if community demand |
 | Hot folder | v2 |
 | Multi-printer load balancing | v2 |
 | Email/cloud folder monitoring | v2 |

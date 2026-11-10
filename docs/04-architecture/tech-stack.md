@@ -1,6 +1,6 @@
 # Tech Stack
 
-> **TL;DR** — Pluryprint is built on **Tauri 2 + Rust + React (TypeScript)**. This combination gives us a small installer, fast cold start, low idle RAM, and a near-fully shared codebase across Windows and macOS — which is exactly what a context-menu-invoked utility needs. Updates install through Tauri's updater plugin with a minisign-signed manifest per channel on GitHub Releases; see [`auto-updater.md`](./auto-updater.md).
+> **TL;DR** — Pluryprint is built on **Tauri 2 + Rust + React (TypeScript)**. This combination gives us a small installer, fast cold start, low idle RAM, and a near-fully shared codebase across Windows, macOS and Linux — which is exactly what a context-menu-invoked utility needs. Updates install through Tauri's updater plugin with a minisign-signed manifest per channel on GitHub Releases; see [`auto-updater.md`](./auto-updater.md). Linux (x86_64 and ARM64, AppImage and `.deb`) joins from 0.0.5 as a preview ([ADR-0015](../adr/0015-linux-support.md)).
 
 ## 1. Stack at a glance
 
@@ -23,7 +23,7 @@ Everything in this table is declared in `src-tauri/Cargo.toml`, `shell-ext-win/C
 | Image → PDF            | `image` 0.25 (jpeg/png/tiff/bmp/webp) + `lopdf` 0.44, **in-process** |
 | SVG → PDF              | `usvg` + `svg2pdf` (vector), `flate2` for SVGZ, in the `--worker svg` process |
 | Markdown / text → HTML | `pulldown-cmark` 0.13 (`html` only); text decoded in-process |
-| HTML → PDF             | The system web view in the `--worker render-pdf` process: WebView2 through `webview2-com` / `windows-core` (Windows), `WKWebView` through `objc2` + `block2` (macOS) |
+| HTML → PDF             | The system web view in the `--worker render-pdf` process: WebView2 through `webview2-com` / `windows-core` (Windows), `WKWebView` through `objc2` + `block2` (macOS), WebKitGTK 4.1 through the gtk-rs / `webkit2gtk` bindings Tauri already links (Linux) |
 | Encrypted PDFs         | `lopdf` decryption in-process; the password held in a `zeroize`d buffer |
 | PDF inspection         | `lopdf`; `printpdf` 0.12 with `default-features = false` (the test page) |
 | CLI                    | `clap` 4 (`derive`), plus `wait-timeout` for bounded child waits and `walkdir` for folder expansion |
@@ -31,6 +31,8 @@ Everything in this table is declared in `src-tauri/Cargo.toml`, `shell-ext-win/C
 | Shell extension (Mac)  | NSServices provider declared in `Info.plist`, backed by `objc2` |
 | Installer (Win)        | Tauri's **NSIS** target, `installMode: currentUser`, English and Spanish, registering the Explorer command per user (no sparse package yet, ADR-0013) |
 | Installer (Mac)        | `.dmg` per architecture, `.app` signed ad hoc, not notarized (ADR-0011) |
+| Packages (Linux)       | AppImage and `.deb` per architecture (x86_64, ARM64), built on Ubuntu 22.04 (glibc 2.35, WebKitGTK 4.1 2.42 or later); no GPG or distribution signature (ADR-0015) |
+| File manager (Linux)   | A `.desktop` entry with `MimeType=` ("Open with"); the `.deb` adds a Dolphin service menu and Nemo actions (ADR-0015) |
 | Update flow            | `tauri-plugin-updater`: check and install read the same `latest.json` per channel on GitHub Releases; minisign signatures; install only on request |
 | Tauri plugins in use   | `tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-updater` |
 | Tests                  | `vitest` + `@testing-library/react` (frontend), `cargo test` incl. `src-tauri/tests/*` (backend), **WebdriverIO** for e2e |
@@ -61,7 +63,7 @@ Tauri 2 was selected after benchmarking five competing frameworks. The full comp
 ### Concrete Tauri 2 advantages
 
 1. **Updater plugin, in use.** Tauri's signed-manifest updater installs updates per user once the user asks; the check reads the same manifest. Releases live on GitHub, so there is no update server to run ([ADR-0011](../adr/0011-release-channel.md)).
-2. **System webview.** Uses WebView2 on Windows and WKWebView on macOS — no Chromium bundled. This is the source of the small installer and low RAM, and since round 3 the same web view also prints HTML, Markdown and text documents in a worker process ([ADR-0012](../adr/0012-system-web-view-renderer.md)).
+2. **System webview.** Uses WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux — no Chromium bundled (the Linux AppImage does bundle WebKitGTK itself, which makes it the one large download). This is the source of the small installer and low RAM, and since round 3 the same web view also prints HTML, Markdown and text documents in a worker process ([ADR-0012](../adr/0012-system-web-view-renderer.md)).
 3. **Rust backend.** Memory-safe, zero garbage-collection pauses, fast startup, excellent FFI for the COM DLL boundary, and a strong ecosystem (`tokio`, `serde`, `tracing`).
 4. **Type-safe IPC.** `tauri::command` macros plus generated TypeScript bindings (`tauri-specta` or hand-rolled) make the React ↔ Rust boundary safe.
 5. **First-class Windows support.** Tauri 2 fixed several Windows pain points from v1 (better installer story, MSIX support, mobile, capabilities system).

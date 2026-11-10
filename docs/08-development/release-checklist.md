@@ -34,12 +34,12 @@ This is the operational runbook a maintainer follows to ship a release. Print it
 ### Build verification
 
 - [ ] Local production build succeeds: `pnpm tauri build`.
-- [ ] Local installer build succeeds: `scripts\fetch-sumatrapdf.ps1`, `scripts\build-shell-ext.ps1 -Arch all`, then `pnpm tauri build` (see [installer-windows.md](../07-build-and-release/installer-windows.md)); on macOS `pnpm tauri build --bundles app,dmg`.
+- [ ] Local installer build succeeds: `scripts\fetch-sumatrapdf.ps1`, `scripts\build-shell-ext.ps1 -Arch all`, then `pnpm tauri build` (see [installer-windows.md](../07-build-and-release/installer-windows.md)); on macOS `pnpm tauri build --bundles app,dmg`; on Linux `pnpm tauri build --bundles appimage,deb` (see [local-setup.md](./local-setup.md) for the packages).
 - [ ] Reproducibility check (Windows): build the installer twice from the same commit; unsigned `setup.exe` files are byte-identical.
 
 ### Manual QA matrix
 
-For a stable release, run the manual QA suite on **every** combination below. For a beta, run on at least one Windows + one macOS combination.
+For a stable release, run the manual QA suite on **every** combination below. For a beta, run on at least one Windows + one macOS combination. Linux is a preview ([ADR-0015](../adr/0015-linux-support.md)): until a full pass on real hardware has been recorded for an architecture, its rows below are what removes the label, not a release blocker.
 
 | OS | Architecture | Display scaling | Test sequence |
 |---|---|---|---|
@@ -51,6 +51,12 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 | macOS 13 Ventura | x64 (Intel) | Default | Full QA suite (M5+ only) |
 | macOS 14 Sonoma | aarch64 (M-series) | Default | Full QA suite (M5+ only) |
 | macOS 15 Sequoia | aarch64 (M-series) | Default | Smoke (M5+ only) |
+| Ubuntu 22.04, GNOME on X11 | x86_64 | 100% | Full QA suite, AppImage and `.deb` |
+| Ubuntu 24.04, GNOME on Wayland | x86_64 | 100% | Full QA suite, AppImage (AppArmor user namespaces; runs with `fuse3` alone, no `libfuse2t64`) |
+| Debian 12, KDE Plasma | x86_64 | 100% | Smoke, `.deb`, the Dolphin entries |
+| Fedora (current), GNOME | x86_64 | 100% | Smoke, AppImage |
+| Linux Mint (Cinnamon) or Ubuntu with Nemo | x86_64 | 100% | The Nemo entries, `.deb` |
+| Ubuntu 24.04 ARM64 (VM) | aarch64 | 100% | Full QA suite, AppImage and `.deb` |
 
 **Format coverage** (each platform): print at least one of each format end-to-end:
 
@@ -68,7 +74,7 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 
 **Printer coverage** (cycle through these per platform):
 
-- [ ] Microsoft Print to PDF (Windows) / cups-pdf (macOS) — virtual sink
+- [ ] Microsoft Print to PDF (Windows) / cups-pdf (macOS, Linux) — virtual sink
 - [ ] At least one **physical laser** printer (we test with a Brother HL-L2350DW)
 - [ ] At least one **physical inkjet** printer (we test with an HP DeskJet)
 - [ ] At least one **network** printer (we test with a Canon over IP)
@@ -110,6 +116,8 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 - [ ] Each macOS artifact passes `codesign --verify --deep --strict --verbose=2 <artifact>`.
 - [ ] Each macOS `.pkg` and `.dmg` passes `spctl --assess --verbose <artifact>`.
 - [ ] Each macOS artifact passes `stapler validate <artifact>`.
+- [ ] Linux: the draft carries `Pluryprint_X.Y.Z_linux_{x64,arm64}.{AppImage,deb}`, their `.sig` files and `Pluryprint_X.Y.Z_linux_{x64,arm64}_appimage-sources.txt` (each naming its type2-runtime commit), and `latest.json` has `linux-x86_64`, `linux-aarch64` (→ `.AppImage`) and `linux-x86_64-deb`, `linux-aarch64-deb` (→ `.deb`).
+- [ ] Linux has no OS signature to check. Each `.deb` lists the expected contents and dependencies (`dpkg-deb --info` / `--contents`: `Depends: cups-client, libc6 (>= 2.35), libwebkit2gtk-4.1-0 (>= 2.42)` plus the unversioned WebKitGTK and GTK entries Tauri adds, `Recommends: cups-ipp-utils, libheif-examples`, no `Suggests` (Tauri cannot set one), the `.desktop` entry, the Dolphin and Nemo entries), and each AppImage starts with `--version` on its own architecture.
 
 ## Release day (T-0)
 

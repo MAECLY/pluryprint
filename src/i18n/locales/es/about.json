@@ -1,7 +1,7 @@
 {
   "title": "Acerca de",
   "byline": "por Maecly",
-  "tagline": "Impresión por lotes de código abierto para Windows y Mac. Sin límite de 15 archivos, sin necesidad de Adobe, sin licencia de 149 $.",
+  "tagline": "Impresión por lotes de código abierto para Windows, Mac y Linux. Sin límite de 15 archivos, sin necesidad de Adobe, sin licencia de 149 $.",
   "version": {
     "line": "{{version}} · compilación {{buildDate}}",
     "withChannel": "{{version}} · compilación {{buildDate}} · canal {{channel}}",
@@ -37,7 +37,10 @@
       "remindLater": "Recordármelo más tarde",
       "skipVersion": "Omitir esta versión",
       "install": "Instalar ahora",
-      "verifiedNote": "Antes de instalar nada, la descarga se comprueba con la firma de las versiones de Pluryprint, y no hacen falta permisos de administrador."
+      "verifiedNote": "Antes de instalar nada, la descarga se comprueba con la firma de las versiones de Pluryprint, y no hacen falta permisos de administrador.",
+      "verifiedNoteLinuxAppImage": "Antes de instalar nada, la descarga se comprueba con la firma de las versiones de Pluryprint. La nueva versión sustituye este archivo AppImage donde está, así que no hacen falta permisos de administrador.",
+      "verifiedNoteLinuxDeb": "Antes de instalar nada, la descarga se comprueba con la firma de las versiones de Pluryprint. Pluryprint se instaló con el paquete .deb, así que el sistema te pedirá una contraseña de administrador para instalar la actualización.",
+      "verifiedNoteLinux": "Antes de instalar nada, la descarga se comprueba con la firma de las versiones de Pluryprint. Una AppImage se sustituye donde está; una instalación con el paquete .deb pide una contraseña de administrador."
     },
     "deferred": "Aviso pospuesto. Puedes volver a comprobarlo cuando quieras.",
     "retry": "Reintentar",
@@ -58,7 +61,11 @@
     }
   },
   "components": {
-    "platform": "Plataforma:"
+    "platform": "Plataforma:",
+    "packages": {
+      "appimage": "AppImage",
+      "deb": "paquete .deb"
+    }
   },
   "paths": {
     "config": "configuración:",

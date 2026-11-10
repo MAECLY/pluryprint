@@ -27,7 +27,9 @@
     "copied": "Comando copiado al portapapeles",
     "copyFailed": "No se pudo acceder al portapapeles: selecciona el comando y cópialo a mano.",
     "pathNote": "Usa la ruta completa de la aplicación: todavía no está en tu PATH.",
-    "noPathNote": "Todavía no está en tu PATH: sustituye {{program}} por su ruta completa, en la carpeta de la aplicación."
+    "noPathNote": "Todavía no está en tu PATH: sustituye {{program}} por su ruta completa, en la carpeta de la aplicación.",
+    "onPathNote": "Ya está en tu PATH: el paquete .deb instaló pluryprint en /usr/bin.",
+    "noPathNoteAppImage": "Una AppImage no está en tu PATH: ejecuta {{program}} desde la carpeta en la que la guardaste o usa su ruta completa."
   },
   "recent": {
     "label": "Actividad reciente",
@@ -72,8 +74,11 @@
     "label": "Consejo",
     "pathCopied": "Todavía nada lo añade al PATH, así que llámalo por su ruta completa: la tarjeta «Usar la CLI» copia un comando que ya la incluye.",
     "pathManual": "Todavía nada lo añade al PATH, así que llámalo por su ruta completa, en la carpeta de la aplicación.",
+    "pathOnPath": "El paquete .deb lo añadió a tu PATH, así que funciona desde cualquier carpeta.",
+    "pathAppImage": "Nada añade una AppImage al PATH, así que ejecútala desde la carpeta en la que la guardaste o por su ruta completa.",
     "body": "Pluryprint también imprime desde un script, sin ventana: {{command}} … ejecuta su herramienta de línea de comandos, instalada junto a la aplicación. {{path}} En el Explorador, haz clic derecho sobre los archivos y elige Pluryprint; en Windows 11 la entrada está en «Mostrar más opciones».",
-    "bodyMac": "Pluryprint también imprime desde un script, sin ventana: {{command}} … usa el propio ejecutable de la aplicación como herramienta de línea de comandos. {{path}} En el Finder, selecciona archivos y elige Servicios › Imprimir con Pluryprint en el menú contextual."
+    "bodyMac": "Pluryprint también imprime desde un script, sin ventana: {{command}} … usa el propio ejecutable de la aplicación como herramienta de línea de comandos. {{path}} En el Finder, selecciona archivos y elige Servicios › Imprimir con Pluryprint en el menú contextual.",
+    "bodyLinux": "Pluryprint también imprime desde un script, sin ventana: {{command}} … usa el propio ejecutable de la aplicación como herramienta de línea de comandos. {{path}} {{menu}}"
   },
   "nav": {
     "home": "Inicio",
@@ -93,12 +98,13 @@
   "onboarding": {
     "welcome": {
       "title": "Bienvenido a Pluryprint",
-      "body": "Impresión por lotes de código abierto para Windows y Mac. Sin límite de 15 archivos, sin Adobe y sin licencia de 149 $."
+      "body": "Impresión por lotes de código abierto para Windows, Mac y Linux. Sin límite de 15 archivos, sin Adobe y sin licencia de 149 $."
     },
     "printers": {
       "title": "Detecta tus impresoras",
       "body": "Listaremos todas las impresoras instaladas en tu sistema, incluida «Microsoft Print to PDF» si está activada.",
-      "bodyMac": "Listaremos todas las impresoras instaladas en tu sistema. Para crear un PDF, usa «Guardar como PDF» en el diálogo de impresión de tus aplicaciones."
+      "bodyMac": "Listaremos todas las impresoras instaladas en tu sistema. Para crear un PDF, usa «Guardar como PDF» en el diálogo de impresión de tus aplicaciones.",
+      "bodyLinux": "Listaremos todas las impresoras configuradas en CUPS, el servicio de impresión del sistema. Para crear un PDF, usa «Imprimir a un archivo» en el diálogo de impresión de tus aplicaciones."
     },
     "cli": {
       "title": "Imprime sin ventana",
@@ -111,12 +117,18 @@
     "ready": {
       "title": "Listo para imprimir",
       "body": "Arrastra los archivos que quieras a la ventana o pulsa {{shortcut}}, elige un perfil y verás cómo se encolan. En el Explorador, haz clic derecho sobre los archivos y elige Pluryprint (en Windows 11, dentro de «Mostrar más opciones»).",
-      "bodyMac": "Arrastra los archivos que quieras a la ventana o pulsa {{shortcut}}, elige un perfil y verás cómo se encolan. En el Finder, haz clic derecho sobre los archivos y elige Servicios › Imprimir con Pluryprint."
+      "bodyMac": "Arrastra los archivos que quieras a la ventana o pulsa {{shortcut}}, elige un perfil y verás cómo se encolan. En el Finder, haz clic derecho sobre los archivos y elige Servicios › Imprimir con Pluryprint.",
+      "bodyLinux": "Arrastra los archivos que quieras a la ventana o pulsa {{shortcut}}, elige un perfil y verás cómo se encolan. {{menu}}"
     },
     "skip": "Omitir",
     "back": "Atrás",
     "continue": "Continuar",
     "start": "Empezar",
     "progress": "Paso {{step}} de {{total}}"
+  },
+  "linuxMenu": {
+    "deb": "En tu gestor de archivos, haz clic derecho sobre los archivos y elige Pluryprint en «Abrir con». Dolphin y Nemo también añaden «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión»: en un submenú Pluryprint en Dolphin y, en Nemo, como tres entradas que nombran a Pluryprint.",
+    "appimage": "Una AppImage no añade ninguna entrada al menú contextual por sí sola: cuando la integres en tu escritorio (un gestor de AppImage puede hacerlo), Pluryprint aparecerá en «Abrir con» de tu gestor de archivos.",
+    "unknown": "Si lo instalaste con el paquete .deb, Pluryprint aparece en «Abrir con» de tu gestor de archivos, y Dolphin y Nemo añaden «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión» (en un submenú Pluryprint en Dolphin y como tres entradas en Nemo). Una AppImage aparece en «Abrir con» cuando la integras en tu escritorio."
   }
 }

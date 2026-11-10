@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **TL;DR.** Test pyramid: many fast Rust unit tests, a thin layer of Rust integration binaries that exercise real on-disk paths, and a small WebdriverIO end-to-end suite driving the built GUI (Windows only in CI). Coverage is **gated in CI**: `cargo llvm-cov --fail-under-lines 70` on the Rust side and explicit `--coverage.thresholds.*` flags on the Vitest side. Requirement-tied tests carry an `FR-###` / `NFR-###` tag in their name.
+> **TL;DR.** Test pyramid: many fast Rust unit tests, a thin layer of Rust integration binaries that exercise real on-disk paths, and a small WebdriverIO end-to-end suite driving the built GUI (by hand on Windows; non-blocking on Linux ARM64 in `linux.yml`). Coverage is measured locally, not in CI: `cargo llvm-cov --fail-under-lines 70` on the Rust side and `pnpm test:coverage` on the Vitest side. Pull requests run the lean gate in `ci.yml` (Windows, macOS and Linux x64); `linux.yml` runs the full Linux suite, with a display, CUPS queues and the converters, after every merge to `main`. Requirement-tied tests carry an `FR-###` / `NFR-###` tag in their name.
 
 This document covers what we test, how, with which tools, and what the acceptance bar looks like.
 
@@ -150,25 +150,26 @@ Test functions that pin a requirement are **named after it** — `fr_020_crud_ro
 
 **Nothing in the suite prints today.** The default suite spawns neither SumatraPDF nor `lp`; the print backends are covered as *pure argument construction* — `sumatra::print_settings_string`, `sumatra::sumatra_args`, `cups::lp_opts`, `cups::lp_args` are pure functions with co-located unit tests, and only `spool`/`cancel` touch a process, `cfg`-gated per platform.
 
-The one exception is opt-in: **`src-tauri/tests/real_printer.rs`** (Unix only, every test `#[ignore]`d *and* gated on `MAECLY_REAL_PRINTER=1`) spools through the engine's public `engine::print::spool` to a CUPS queue that **holds every job** (`MAECLY_HOLD_QUEUE`, default `Maecly_Hold`, created with `-o job-hold-until-default=indefinite`). It reads each job back with `ipptool … get-job-attributes.test`, asserts the IPP attributes the mapping should produce (`copies`, `sides`, `media`, `ColorModel`/`print-color-mode`, `page-ranges`, `landscape`/`orientation-requested`, `media-source`/`InputSlot`, `print-quality`/`cupsPrintQuality`, `fit-to-page`) and cancels the job, also on panic. It refuses to submit unless `lpoptions -p <queue>` shows `job-hold-until=indefinite`, and asserts every job is `pending-held` before reading it. Nothing reaches paper. Without the env var the tests return immediately, so a plain `cargo test -- --ignored` passes them as no-ops. Each job is spooled with the queue's real capabilities (`platform::queue_of`), as the dispatcher does. Orientation goes out as `orientation-requested=3|4`; the check accepts that or an older `landscape` boolean. Observed on CUPS 2.x (macOS): when both quality spellings are sent, the queue keeps `cupsPrintQuality` and drops `print-quality`. `fr_032_spool_reports_the_cups_job_id` pins the request-id parse on a host whose `lp` prints its success line in Spanish.
+The one exception is opt-in: **`src-tauri/tests/real_printer.rs`** (Unix only, every test `#[ignore]`d *and* gated on `MAECLY_REAL_PRINTER=1`) spools through the engine's public `engine::print::spool` to a CUPS queue that **holds every job** (`MAECLY_HOLD_QUEUE`, default `Maecly_Hold`, created with `-o job-hold-until-default=indefinite`). It reads each job back with `ipptool … get-job-attributes.test`, asserts the IPP attributes the mapping should produce (`copies`, `sides`, `media`, `ColorModel`/`print-color-mode`, `page-ranges`, `landscape`/`orientation-requested`, `media-source`/`InputSlot`, `print-quality`/`cupsPrintQuality`, `fit-to-page`) and cancels the job, also on panic. It refuses to submit unless `lpoptions -p <queue>` shows `job-hold-until=indefinite`, and asserts every job is `pending-held` before reading it. Nothing reaches paper. Without the env var the tests return immediately, so a plain `cargo test -- --ignored` passes them as no-ops. Each job is spooled with the queue's real capabilities (`platform::queue_of`), as the dispatcher does. Orientation goes out as `orientation-requested=3|4`; the check accepts that or an older `landscape` boolean. Observed on CUPS 2.x (macOS): when both quality spellings are sent, the queue keeps `cupsPrintQuality` and drops `print-quality`. `linux.yml` runs this suite, and the ignored `engine::print::cups` tests, on every merge against a `Maecly_Hold` queue on the cups-pdf backend (CUPS 2.4, Ubuntu 22.04 ARM64), so a held job that were ever released would land as a PDF, not on paper. `fr_032_spool_reports_the_cups_job_id` pins the request-id parse on a host whose `lp` prints its success line in Spanish.
 
 The design when we do build it:
 
 - **Windows:** "Microsoft Print to PDF" (preinstalled), output path set via the job's `OutputFile` parameter.
 - **macOS:** `cups-pdf` (Homebrew), configured to write `.pdf` to a known location.
+- **Linux:** `printer-driver-cups-pdf`. `linux.yml` already creates such a queue, `PDF`, as the runner's default destination (output under `~/PDF`), next to the `Maecly_Hold` hold queue; nothing compares its output yet.
 
 Verification would be page count + text layer (deterministic, fast), with an opt-in visual diff at 150 DPI behind an env var. That needs a PDF-reading crate in `dev-dependencies` (`lopdf` is already a normal dependency and can read page counts) and a fixtures tree — neither of which exists yet. **Do not** cite this section as if the harness were available.
 
 ### Subprocess fixtures — not applicable yet
 
-CI installs **no** converters yet. The converters that shell out (LibreOffice, `sips`, and the render worker) are covered at three levels:
+Only `linux.yml` installs converters: LibreOffice (`libreoffice-writer-nogui`), ImageMagick and libheif's `heif-convert` (`libheif-examples`; Ubuntu 22.04 has libheif 1.12, which ships `heif-convert` but not `heif-dec`). `ci.yml` installs none. The converters that shell out (LibreOffice, `sips`, and the render worker) are covered at three levels:
 
 - **Fake binaries** (`external_tests::fakes`, Unix only): `/bin/sh` scripts standing in for `soffice`, the browser, the render worker and `sips`. They pin the argument vector that is actually spawned, the "exit 0 but no PDF" failure, the timeout kill of the whole process tree, the browser profile seeding, scratch-folder cleanup, and that HTML and Markdown go to the worker rather than a browser or Pandoc. They need nothing installed.
 - **Real tools** (`external_tests::fr_05x_real_*`): convert fixtures generated in-test (an RTF, a DOCX made by LibreOffice, and on macOS a HEIC made by `sips`), plus a LibreOffice document that must not reach a local listener. Each test locates its tool with the engine's own resolver and **returns early with a `SKIPPED` note** when the tool is absent, instead of using `#[ignore]`. A developer machine with the tools runs them on every `cargo test`, and a bare CI runner stays green.
 
 - **The real workers** (`tests/render_worker.rs`, `tests/svg_worker.rs`): the built binary's `--worker render-pdf` and `--worker svg`, with pagination, paper sizes, relative images, a hostile page, Markdown, UTF-16 text, RTF and parallel workers. They need only the OS web view.
 
-Installing LibreOffice in CI (`choco install libreoffice-fresh` on Windows, `brew install --cask libreoffice` on macOS) would turn the remaining skips into real coverage. That CI step is still owed.
+On Linux ARM64 the real-tool tests run on every merge (`linux.yml`). Installing LibreOffice in CI on Windows and macOS as well (`choco install libreoffice-fresh`, `brew install --cask libreoffice`) would turn their remaining skips into real coverage. That step is still owed.
 
 ### Ignored tests
 
@@ -185,7 +186,7 @@ These tests are `#[ignore]`d because they reach outside the process:
 | `tests/real_printer.rs` (6 tests) | Submits held jobs to a real CUPS queue and reads their IPP attributes back (see *Virtual printer* above); a no-op unless `MAECLY_REAL_PRINTER=1` | `MAECLY_REAL_PRINTER=1 cargo test --test real_printer -- --ignored --test-threads=1` |
 | `tests/real_printer_windows.rs` (2 tests), `tests/print_quality_windows.rs` (10 tests) | Spool to **paused** Windows queues and read the jobs back; a no-op unless `MAECLY_REAL_PRINTER=1` | see [e2e/README.md](../../e2e/README.md#real-spooler-suites-opt-in-never-print); `scripts/vm/print-quality-e2e.ps1` sets up the queues |
 
-CI does not run them: they need the network, real queues or a real printer, and must never fail a merge. Run them by hand with the commands above; `cargo test -- --ignored` runs *only* the ignored ones (the rest already ran in CI), **not** `--include-ignored`.
+`ci.yml` does not run them: they need the network, real queues or a real printer, and must never fail a pull request. The CUPS ones are the exception after a merge: `linux.yml` has a hold queue, and runs `cargo test --lib -- --ignored cups` and `cargo test --test real_printer -- --ignored --test-threads=1` with `MAECLY_REAL_PRINTER=1`. Run the rest by hand with the commands above; `cargo test -- --ignored` runs *only* the ignored ones (the rest already ran in CI), **not** `--include-ignored`.
 
 ## Frontend unit tests
 
@@ -264,7 +265,7 @@ Measured by `pnpm test:coverage` (`vitest run --coverage`) with the `@vitest/cov
 ### Tooling
 
 - **WebdriverIO** as the test framework (`@wdio/cli` + the Mocha framework adapter), configured in `e2e/wdio.conf.ts`.
-- **`tauri-driver`** (a cargo binary, `cargo install tauri-driver --locked`) as the WebDriver bridge to the Tauri webview. On Windows it proxies to the Edge WebDriver (`msedgedriver.exe`) matching the installed WebView2, passed via the `NATIVE_DRIVER` env var.
+- **`tauri-driver`** (a cargo binary, `cargo install tauri-driver --locked`; `linux.yml` pins 2.1.0) as the WebDriver bridge to the Tauri webview. On Windows it proxies to the Edge WebDriver (`msedgedriver.exe`) matching the installed WebView2, passed via the `NATIVE_DRIVER` env var. On Linux it proxies to WebKitGTK's own `WebKitWebDriver` (Debian/Ubuntu package `webkit2gtk-driver`), found on `PATH`; `NATIVE_DRIVER` is not needed.
 - Tests run against an actual built `pluryprint(.exe)` binary (`pnpm tauri build --debug`), not the dev server. Run locally with `pnpm test:e2e`.
 
 ### Platform support — Windows/Linux only
@@ -318,16 +319,31 @@ describe('About', () => {
 
 ### CI integration
 
-None. CI is the lean pull-request gate (lint, typecheck, format and unit tests for the frontend; fmt, clippy and the full Rust suite on Windows and macOS), because driving a real WebView2 GUI on a hosted runner is slow and flake-prone. Run the suite locally on Windows with `pnpm test:e2e` (see [e2e/README.md](../../e2e/README.md)); the Windows VM scripts under `scripts/vm/` cover the installed app.
+Not in the pull-request gate: `ci.yml` stays lean, because driving a real GUI on a hosted runner is slow and flake-prone. `linux.yml`'s `e2e` job runs the whole suite after every merge to `main`, weekly and by hand, on `ubuntu-22.04-arm`: it builds a debug binary with the frontend embedded (`pnpm tauri build --debug --no-bundle --config src-tauri/tauri.ci.conf.json`), installs `tauri-driver` and `webkit2gtk-driver`, creates a cups-pdf queue for the printers spec, and runs `pnpm test:e2e` under `xvfb-run` and its own session bus; failure screenshots are uploaded as the `e2e-linux-artifacts` artifact. The job is **`continue-on-error`** for now: the specs were written and verified against WebView2 on Windows, and WebKitWebDriver has gaps of its own, so its first runs are expected to find spec assumptions rather than app bugs. Measured before it first ran, in an Ubuntu 22.04 ARM64 container with WebKitGTK 2.50: the app starts, renders and answers WebDriver; `home`, `print-job`, `profiles` and `settings` pass; `about`, `printers` and `queue` time out (the 60 s test limit) and are still to be triaged. Two Linux-only fixes made the sessions open at all: `forceEnglishUi` waits for the onboarding tour, which appears after the sidebar on a slow host, and `afterSession` kills the app, which WebKitWebDriver leaves running (the single-instance plugin then swallowed the next session's launch). It becomes blocking once it has passed on `main` for a few weeks. On Windows, run the suite locally with `pnpm test:e2e` (see [e2e/README.md](../../e2e/README.md)); the Windows VM scripts under `scripts/vm/` cover the installed app.
 
 ### The full job list in `ci.yml`
 
 | Job | Runner | What it does |
 |---|---|---|
 | `frontend` | ubuntu | `pnpm lint`, `typecheck`, `format:check`, `test` |
-| `backend` | matrix windows + macOS | `cargo fmt --check` (Windows only, both crates), `cargo clippy --all-targets -- -D warnings`, the full `cargo test` (which is also the `src/ipc/bindings.ts` drift gate), and on Windows clippy + `cargo test` for `shell-ext-win/` |
+| `backend` | matrix `windows-latest`, `macos-latest`, `ubuntu-22.04` | `cargo fmt --check` (Windows only, both crates) and `cargo clippy --all-targets -- -D warnings` everywhere; on Windows the full `cargo test` (which is also the `src/ipc/bindings.ts` drift gate) and clippy + `cargo test` for `shell-ext-win/`; on macOS and Linux `cargo test --lib`, the unit tests that hold their cfg-gated code (CUPS, Finder, `/proc`). Linux first installs `libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file` |
 
-Both are blocking. Triggers: `pull_request`, `push` to `main`, `workflow_dispatch`. `shell-ext-win/` gets its own commands because it is deliberately **not** a Cargo workspace member (its release profile must keep `panic = "unwind"` so `catch_unwind` at the COM boundary works, which `src-tauri`'s `panic = "abort"` would destroy), so `--manifest-path src-tauri/Cargo.toml` never touches it. [ci-cd.md](../07-build-and-release/ci-cd.md) lists what moved to `release.yml` and what is local only.
+Both are blocking. Triggers: `pull_request`, `push` to `main`, `workflow_dispatch`. The Linux leg runs on `ubuntu-22.04`, the image the Linux packages are built on (glibc 2.35, WebKitGTK 2.42 or later from `jammy-updates`), x64 only; its unit tests need no display. The cargo cache is keyed on `runner.os` and `runner.arch`.
+
+### `linux.yml`: the full Linux run
+
+| Job | Runner | What it does |
+|---|---|---|
+| `test` | `ubuntu-22.04-arm` | Installs the build libraries, Xvfb, CUPS with `printer-driver-cups-pdf`, LibreOffice (`libreoffice-writer-nogui`), ImageMagick and `libheif-examples`; creates the `PDF` (default) and `Maecly_Hold` queues; then clippy, the full unfiltered `cargo test` under `dbus-run-session -- xvfb-run`, and the real-spooler suites (`--lib -- --ignored cups`, `--test real_printer -- --ignored --test-threads=1`) with `MAECLY_REAL_PRINTER=1` |
+| `e2e` | `ubuntu-22.04-arm` | The WebdriverIO suite through `tauri-driver` and `WebKitWebDriver` (see *CI integration* above); `continue-on-error` |
+
+Triggers: `push` to `main`, every Monday, `workflow_dispatch`; **never** `pull_request`, so a pull request waits only for `ci.yml`. ARM64 is the architecture `ci.yml` does not cover, so between them both Linux architectures are compiled and tested. The workflow builds no package and reads no secret. WebKitGTK runs with `WEBKIT_DISABLE_COMPOSITING_MODE=1` and `LIBGL_ALWAYS_SOFTWARE=1`, since Xvfb has no GPU.
+
+### Linux traps the suite already hit
+
+- **procps-ng `kill` and process groups.** On Ubuntu 22.04 (procps-ng 3.3.17), `kill -KILL -<pgid>` is read as a second signal option and signals the *caller's* group: the first converter killed at its timeout took the test runner, and cargo, with it, and `kill -0 -<pgid>` said every group was alive. The engine always writes `kill -KILL -- -<pgid>` and `kill -0 -- -<pgid>` (`engine::convert::process`); new code (and tests) that signal a group must do the same. `process::reason_tests::kill_tree_ends_the_childs_group_and_the_probe_sees_it_gone` pins it.
+- **Process-group memory.** Linux has no call that lists a process group, so `group_memory_in_use` scans `/proc/*/stat` for members (the fifth field, read after the last `)`) and sums their resident sets. A `CapScope::Tree` helper that leaves the group (`setsid`) is not counted.
+- **Zombies count as group members.** `kill -0 -- -<pgid>` succeeds while a killed helper is an unreaped zombie. The hosted runners have an init that reaps orphans; a container needs `docker run --init`, or the `fr_058` linger and cancel tests fail. `shell-ext-win/` gets its own commands because it is deliberately **not** a Cargo workspace member (its release profile must keep `panic = "unwind"` so `catch_unwind` at the COM boundary works, which `src-tauri`'s `panic = "abort"` would destroy), so `--manifest-path src-tauri/Cargo.toml` never touches it. [ci-cd.md](../07-build-and-release/ci-cd.md) lists what moved to `release.yml` and what is local only.
 
 ## Print mock harness — planned
 
@@ -418,6 +434,7 @@ We have a manual QA checklist (in [release-checklist.md](./release-checklist.md)
 - Windows 10 22H2.
 - Windows 11 23H2.
 - macOS 13, 14, 15 (M5+).
+- Linux (preview): Ubuntu 22.04 and 24.04 (GNOME, Wayland and X11), Debian 12 and Fedora 38 or later, the `.deb` where it applies and the AppImage everywhere, x64 and ARM64 (a VM is enough for ARM64).
 - At least 3 different physical printers (laser, inkjet, network).
 
 The checklist covers ~30 minutes of focused testing per platform.
@@ -433,7 +450,7 @@ UPDATE_BINDINGS=1 cargo test --manifest-path src-tauri/Cargo.toml
 git add src/ipc/bindings.ts
 ```
 
-CI's `backend` job runs the full, unfiltered `cargo test` on Windows and macOS, so this test always runs there. A filtered local run that never reaches `ipc_surface` regenerates nothing; run the full suite before committing a command change.
+CI's `backend` job runs the full, unfiltered `cargo test` on Windows (macOS and Linux run `--lib` only), and `linux.yml` runs it on Linux ARM64 after every merge, so this test always runs there. A filtered local run that never reaches `ipc_surface` regenerates nothing; run the full suite before committing a command change.
 
 If a future need for real string snapshots appears (log line format, manifest JSON), adding `insta` is a normal dependency decision — but it must be made before this section can describe it in the present tense.
 
@@ -443,20 +460,21 @@ If a future need for real string snapshots appears (log line format, manifest JS
 - **Win32 / CUPS APIs.** We trust the OS.
 - **Bundled subprocess output.** SumatraPDF is GPL'd third-party; if its output changes between versions, we update expectations, not bug them.
 - **Network layer for the updater.** We trust `ureq` for HTTP and TLS. The update client's own logic (semver comparison, release-payload parsing, the 404/no-release and error paths) *is* unit-tested against fixture payloads, and `src-tauri/tests/update_startup.rs` covers the startup check. The transport is covered against loopback servers only (status mapping, headers, the timeout and an unreachable server reading as `offline`, a `CONNECT` proxy, the proxy variable order); the one test that reads the published manifests over the network is `#[ignore]`d.
-- **Rendering output of WebView2 / WKWebView.** Browser rendering is tested by upstream.
+- **Rendering output of WebView2 / WKWebView / WebKitGTK.** Browser rendering is tested by upstream.
 
 ## Running tests locally
 
 | Command | Runs |
 |---|---|
 | `cargo test --manifest-path src-tauri/Cargo.toml` | Unit + integration tests not marked `#[ignore]` (or `make test-rust`) |
-| `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored` | **Only** the ignored ones (network + real CUPS); CI never runs them |
+| `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored` | **Only** the ignored ones (network + real CUPS); `ci.yml` never runs them, `linux.yml` runs the CUPS ones |
+| `dbus-run-session -- xvfb-run -a cargo test --manifest-path src-tauri/Cargo.toml` | The full suite on a Linux machine without a desktop session, as `linux.yml` runs it (needs `xvfb` and `dbus`) |
 | `cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored` | Everything, ignored included |
 | `cargo test <name>` | Tests matching `<name>` substring |
 | `cargo test --manifest-path shell-ext-win/Cargo.toml` | The shell extension's portable half; works on any host OS |
 | `pnpm test` | Frontend unit tests (`vitest run`) |
 | `pnpm test:coverage` | Frontend tests with V8 coverage (report under `coverage/`); no threshold locally |
-| `pnpm test:e2e` | E2E tests (Windows/Linux; requires a built binary + `tauri-driver` + `NATIVE_DRIVER`) |
+| `pnpm test:e2e` | E2E tests (Windows/Linux; requires a built binary + `tauri-driver`, plus `NATIVE_DRIVER` on Windows or `WebKitWebDriver` on Linux) |
 | `pnpm dev:e2e` | Frontend with the fake Tauri host on `:1421`, for browser-driven E2E on any OS |
 | `MAECLY_REAL_PRINTER=1 cargo test --manifest-path src-tauri/Cargo.toml --test real_printer -- --ignored --test-threads=1` | Real-CUPS mapping checks against a hold queue (Unix) |
 | `pnpm check-all` | `lint`, `format:check`, `typecheck`, `test` — **frontend only, no Rust** |

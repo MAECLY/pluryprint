@@ -34,6 +34,7 @@ import {
   type TranslationKey,
 } from '@/i18n';
 import type { IpcError } from '@/ipc/bindings';
+import { hostOs, platformKeyVariant, type OsId } from '@/lib/platform';
 
 /** The wire shape, loosened: an old or foreign payload may lack any field. */
 export type IpcErrorPayload = Partial<
@@ -113,13 +114,26 @@ const SETTING_LABELS: Readonly<Record<string, string>> = {
 /** A `{{name}}` placeholder a sentence still contains (an unfilled param). */
 const PLACEHOLDER = /\{\{\s*\w+\s*\}\}/;
 
-/** Where the sentence of `code` + `reason` lives, most specific first. */
-function reasonKeys(code: string, reason: string): [Namespace, string][] {
-  const keys: [Namespace, string][] = [
-    ['common', `ipcErrors.reasons.${code}.${reason}`],
-  ];
+/**
+ * Where the sentence of `code` + `reason` lives, most specific first. A
+ * `common` sentence may have a per-platform variant (`…Mac`, `…Linux`, see
+ * `platformKeyVariant`), tried before it: `ippfind` missing means "install
+ * cups-ipp-utils" on Linux and cannot happen on macOS, for instance.
+ */
+function reasonKeys(
+  code: string,
+  reason: string,
+  os: OsId = hostOs(),
+): [Namespace, string][] {
+  const keys: [Namespace, string][] = [];
+  const withVariant = (key: string) => {
+    const variant = platformKeyVariant(key, os);
+    if (variant !== key) keys.push(['common', variant]);
+    keys.push(['common', key]);
+  };
+  withVariant(`ipcErrors.reasons.${code}.${reason}`);
   if (code === 'DependencyMissing') {
-    keys.push(['common', `deps.${reason}.remediation`]);
+    withVariant(`deps.${reason}.remediation`);
   }
   for (const jobCode of ENGINE_JOB_CODES[code] ?? []) {
     keys.push(['queue', `jobErrors.reasons.${jobCode}.${reason}`]);

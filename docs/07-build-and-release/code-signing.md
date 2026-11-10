@@ -10,12 +10,13 @@
 |---|---|
 | Windows installers | **Not Authenticode-signed.** SmartScreen shows "Windows protected your PC"; the release notes (English and Spanish) say to choose **More info → Run anyway**. The installer is per user and asks for no administrator rights. |
 | macOS bundles | **Signed ad hoc** (`bundle.macOS.signingIdentity: "-"` in `tauri.conf.json`), which Apple silicon needs to run the app at all. Not notarized: ad hoc signatures cannot be. The release notes give the `xattr -dr com.apple.quarantine` step that Gatekeeper requires. |
+| Linux packages | **No signature of any kind** beyond the two rows below ([ADR-0015](../adr/0015-linux-support.md)): the AppImage carries no embedded signature and the `.deb` no `debsig` or GPG signature. Linux has no Gatekeeper or SmartScreen equivalent, so nothing warns; a GPG signature would only matter with an apt repository, which the project does not run. |
 | Updates | Every updater artifact is signed with Pluryprint's own **minisign** key (`TAURI_SIGNING_PRIVATE_KEY`, a GitHub secret); the app verifies it against the public key compiled in (`plugins.updater.pubkey`) and refuses anything else. `release.yml` verifies every signature, and that a tampered copy fails, before the draft is finished. |
 | Integrity of downloads | `SHA256SUMS` is attached to every release. |
 
 The full procedure is the runbook [releasing.md](./releasing.md). The rest of this document is the certificate-based design, kept for the day certificates are bought (it would also unblock the signed sparse package of [shell-extensions.md §2.5](../04-architecture/shell-extensions.md)). Treat its statements as a plan, not a description.
 
-This document covers code signing across both platforms: cert types, costs, procurement, signing tools, CI integration, and common pitfalls. It complements the OS-specific build documentation in [installer-windows.md](./installer-windows.md) and [installer-macos.md](./installer-macos.md).
+This document covers code signing on Windows and macOS (Linux has no certificate scheme to plan for): cert types, costs, procurement, signing tools, CI integration, and common pitfalls. It complements the OS-specific build documentation in [installer-windows.md](./installer-windows.md), [installer-macos.md](./installer-macos.md) and [installer-linux.md](./installer-linux.md).
 
 ## Why we sign
 

@@ -31,13 +31,15 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": ["nsis", "app", "dmg", "appimage", "deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/64x64.png",
+      "icons/icon.png"
     ],
     "resources": {
       "resources/sumatrapdf/*": "resources/sumatrapdf/",
@@ -48,7 +50,7 @@
     },
     "category": "Productivity",
     "shortDescription": "Batch file printing",
-    "longDescription": "Open source batch file printing for Windows and macOS. Right-click and print everything, with no 15-file limit, no Adobe required, and no $149 license fee.",
+    "longDescription": "Open source batch file printing for Windows, macOS and Linux. Right-click and print everything, with no 15-file limit, no Adobe required, and no $149 license fee.",
     "copyright": "Copyright (C) 2026 Maecly. Licensed under AGPL-3.0-only.",
     "publisher": "Maecly",
     "homepage": "https://pluryprint.maecly.com",
@@ -58,6 +60,27 @@
       "files": {
         "Resources/en.lproj/ServicesMenu.strings": "macos/en.lproj/ServicesMenu.strings",
         "Resources/es.lproj/ServicesMenu.strings": "macos/es.lproj/ServicesMenu.strings"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "depends": [
+          "cups-client",
+          "libc6 (>= 2.35)",
+          "libwebkit2gtk-4.1-0 (>= 2.42)"
+        ],
+        "recommends": ["cups-ipp-utils", "libheif-examples"],
+        "desktopTemplate": "linux/pluryprint.desktop.hbs",
+        "files": {
+          "/usr/share/kio/servicemenus/pluryprint.desktop": "linux/kio-servicemenu.desktop",
+          "/usr/share/nemo/actions/pluryprint-print-now.nemo_action": "linux/nemo/pluryprint-print-now.nemo_action",
+          "/usr/share/nemo/actions/pluryprint-configure.nemo_action": "linux/nemo/pluryprint-configure.nemo_action",
+          "/usr/share/nemo/actions/pluryprint-queue.nemo_action": "linux/nemo/pluryprint-queue.nemo_action"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
     },
     "windows": {

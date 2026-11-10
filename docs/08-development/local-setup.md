@@ -1,6 +1,6 @@
 # Local Setup
 
-> **TL;DR.** Install Rust stable, Node 24 LTS (22.22.2 at least) + pnpm, the platform's native build tools (Visual Studio Build Tools 2022 on Windows; Xcode CLT on macOS), then `pnpm install && pnpm tauri dev`. The app boots with hot reload in under 30 seconds on a typical dev machine.
+> **TL;DR.** Install Rust stable, Node 24 LTS (22.22.2 at least) + pnpm, the platform's native build tools (Visual Studio Build Tools 2022 on Windows; Xcode CLT on macOS; the WebKitGTK and GTK development packages on Linux), then `pnpm install && pnpm tauri dev`. The app boots with hot reload in under 30 seconds on a typical dev machine.
 
 This document is the developer onboarding checklist. Follow it once on a clean machine; afterward, daily work is `git pull && pnpm install && pnpm tauri dev`.
 
@@ -50,7 +50,33 @@ macOS is a fully supported development platform: the whole Rust suite, the whole
 
 `create-dmg` is not needed — there is no `.dmg` build script in the repo yet. Neither is LibreOffice: no test shells out to it, because no converter uses it (see [supported-formats.md](../03-requirements/supported-formats.md)).
 
-### Optional but recommended (both platforms)
+### Linux (Ubuntu 22.04 or later)
+
+Linux builds and tests the whole app ([ADR-0015](../adr/0015-linux-support.md); Linux is a preview platform). The release builds run on Ubuntu 22.04 (glibc 2.35), so that is the baseline to develop on; Debian 12 and later works with the same packages. The system libraries come from the distribution:
+
+```bash
+sudo apt update
+# Build: Tauri's WebKitGTK 4.1 / GTK 3 stack, D-Bus (tauri's default `dbus`
+# feature: libdbus-sys asks pkg-config for dbus-1) and the AppImage tools.
+sudo apt install -y build-essential curl file pkg-config patchelf \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev
+# Run and test: CUPS with a PDF printer, the HEIF decoders and a virtual
+# display for the render worker's tests on a headless machine.
+sudo apt install -y cups cups-client cups-bsd cups-ipp-utils \
+  printer-driver-cups-pdf libheif-examples imagemagick xvfb
+```
+
+| Tool | Version | Install via |
+|---|---|---|
+| Rust | stable (`rust-version = "1.90"`) | [rustup.rs](https://rustup.rs/) |
+| Node.js | 24 LTS | [nodejs.org](https://nodejs.org/) (the distribution's `nodejs` on 22.04 is too old) |
+| pnpm | 9.x | `corepack enable` |
+
+`libwebkit2gtk-4.1-dev` must be **2.42 or later** (wry 0.57 enables WebKitGTK's `v2_40` API but also calls a 2.41.90 function); Ubuntu 22.04 has it from `jammy-updates`, so run `apt update` first. Neither `libssl-dev` nor `libxdo-dev` is needed: nothing in `Cargo.lock` links OpenSSL or libxdo. `libayatana-appindicator3-dev`, which Tauri's generic prerequisites list, is not needed either: the app does not enable Tauri's tray icon. On Fedora the matching packages are `webkit2gtk4.1-devel`, `gtk3-devel`, `dbus-devel` and `librsvg2-devel` (not tried; only Ubuntu is).
+
+On Ubuntu 22.04 `libheif-examples` is libheif 1.12, which provides `heif-convert` but not `heif-dec` (added in libheif 1.17); either is enough for HEIC. ImageMagick 6 reads HEIC through the same libheif.
+
+### Optional but recommended (every platform)
 
 - **VS Code** with extensions: `rust-lang.rust-analyzer`, `tamasfe.even-better-toml`, `dbaeumer.vscode-eslint`, `esbenp.prettier-vscode`, `bradlc.vscode-tailwindcss`.
 - **JetBrains RustRover** as an alternative IDE if you prefer.
@@ -203,7 +229,7 @@ $env:RUST_LOG = "pluryprint=debug,tauri=info,ureq=warn"
 pnpm tauri dev
 ```
 
-(The HTTP client is `ureq`, not `reqwest`.) The app also writes structured JSONL to its log directory — `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` on Windows, `~/Library/Logs/Pluryprint/` on macOS. About → "Open logs folder" reveals the live path.
+(The HTTP client is `ureq`, not `reqwest`.) The app also writes structured JSONL to its log directory — `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` on Windows, `~/Library/Logs/Pluryprint/` on macOS, `~/.local/share/pluryprint/logs/` on Linux. About → "Open logs folder" reveals the live path.
 
 Module-specific filters: `pluryprint::engine=trace` for very detailed output from the engine module.
 
@@ -211,7 +237,7 @@ Module-specific filters: `pluryprint::engine=trace` for very detailed output fro
 
 **Browser DevTools:**
 
-Right-click anywhere in the app webview → "Inspect Element" (or press F12). This opens Chromium DevTools (Tauri uses WebView2 on Windows, WKWebView on macOS — DevTools work on both).
+Right-click anywhere in the app webview → "Inspect Element" (or press F12). This opens Chromium DevTools (Tauri uses WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux — DevTools work on all three; on Linux they are WebKit's Web Inspector).
 
 In production builds, DevTools are disabled. Set `devtools = true` in `tauri.conf.json` only for dev or rebuild a debug binary.
 
@@ -245,6 +271,10 @@ Get-Printer | Where-Object { $_.Name -eq "Microsoft Print to PDF" }
 
 Install via `brew install cups-pdf`. Outputs `.pdf` to `~/Desktop` by default. macOS equivalent of Microsoft Print to PDF.
 
+### CUPS-PDF (Linux)
+
+`sudo apt install printer-driver-cups-pdf` adds a queue named `PDF` that writes each job to `~/PDF/` (on some distributions `/var/spool/cups-pdf/<user>/`). If no queue appears, add one with `sudo lpadmin -p PDF -E -v cups-pdf:/ -m lsb/usr/cups-pdf/CUPS-PDF_opt.ppd` (`lpinfo -m | grep -i cups-pdf` lists the model name on your system). To test pause, cancel and job tracking without paper, a queue that holds every job is useful: `sudo lpadmin -p Maecly_Hold -E -v cups-pdf:/ -m <the same model> -o job-hold-until-default=indefinite`; `tests/real_printer.rs` and the ignored `engine::print::cups` tests submit to it.
+
 ### A real physical printer
 
 Install the manufacturer's driver. Test with the OS's standard print dialog first to confirm the driver works; then test through Pluryprint.
@@ -266,7 +296,7 @@ pnpm tauri dev
 
 # 3. From the GUI: go to Printers.
 # Expect: your real queues, enumerated from the OS spooler — winspool on
-# Windows, `lpstat`/CUPS on macOS. An empty list on a machine with printers
+# Windows, `lpstat`/CUPS on macOS and Linux. An empty list on a machine with printers
 # means the platform backend failed, not that the screen is a mock.
 
 # 4. Print a PDF or an image (JPG/PNG/TIFF/BMP/WebP — those and PDF are the

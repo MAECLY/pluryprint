@@ -1,10 +1,10 @@
 //! External-dependency detection (FR-058).
 //!
 //! The hybrid engine (ADR-0003) shells out to programs we do not compile: the
-//! final PDF printer on Windows (SumatraPDF) and the best-of-breed converters
-//! the architecture reserves for Office documents (LibreOffice) and, on
-//! Windows, HEIF/HEVC codecs. None of them is guaranteed to exist on a
-//! user's machine, so every one of them is *resolved* before it is *run*, and a
+//! final PDF printer on Windows (SumatraPDF), the best-of-breed converters the
+//! architecture reserves for Office documents (LibreOffice), the HEIF/HEVC
+//! codecs on Windows and, on Linux, an external HEIF decoder (libheif's tools
+//! or ImageMagick). None of them is guaranteed to exist on a user's machine, so every one of them is *resolved* before it is *run*, and a
 //! missing one produces a remediation message instead of an opaque
 //! "failed to spawn" deep inside a job.
 //!
@@ -103,6 +103,27 @@ pub enum Dependency {
     /// only, paid unless the PC maker preinstalled it): HEIC photos are HEVC
     /// inside.
     HevcCodec,
+    /// An external HEIF decoder (Linux only): libheif's `heif-dec` or
+    /// `heif-convert`, or ImageMagick's `magick` or `convert`. Linux has no
+    /// system decoder to ask, so the program is looked for like any other.
+    HeifDecoder,
+}
+
+impl Dependency {
+    /// The stable id the wire and the UI use for this dependency
+    /// (`common:deps.<id>`), the same spelling serde gives it. It is also the
+    /// `dependency_missing` reason a job pauses with (FR-058, FR-092).
+    pub fn id(self) -> &'static str {
+        match self {
+            Dependency::SumatraPdf => "sumatra-pdf",
+            Dependency::LibreOffice => "libre-office",
+            Dependency::Chromium => "chromium",
+            Dependency::Pandoc => "pandoc",
+            Dependency::HeifCodec => "heif-codec",
+            Dependency::HevcCodec => "hevc-codec",
+            Dependency::HeifDecoder => "heif-decoder",
+        }
+    }
 }
 
 /// Every dependency the running app can need, in the order the UI should
@@ -113,6 +134,7 @@ pub const ALL: &[Dependency] = &[
     Dependency::LibreOffice,
     Dependency::HeifCodec,
     Dependency::HevcCodec,
+    Dependency::HeifDecoder,
 ];
 
 /// Which step of the search order produced the hit. Shown in diagnostics so
@@ -229,13 +251,17 @@ pub fn resolve(probe: &Probe<'_>) -> Resolution {
     Resolution::Missing
 }
 
-/// First `dir/exe` that `exists` accepts, scanning directories in order and, in
-/// each, executable names in order.
+/// First `dir/exe` that `exists` accepts, trying executable names in order
+/// and, for each, every directory in order. The names are a preference (best
+/// first), so a better program anywhere on the search path beats a worse one
+/// in an earlier folder: a `magick` in `/usr/local/bin` must not shadow
+/// libheif's `heif-convert` in `/usr/bin` (the HEIF decoder, whose
+/// ImageMagick fallback reaches far more code). Between copies of the same
+/// name the earlier folder still wins, as on a shell's `PATH`.
 fn first_hit(dirs: &[PathBuf], executables: &[&str], exists: fn(&Path) -> bool) -> Option<PathBuf> {
-    dirs.iter().find_map(|dir| {
-        executables
-            .iter()
-            .map(|exe| dir.join(exe))
+    executables.iter().find_map(|exe| {
+        dirs.iter()
+            .map(|dir| dir.join(exe))
             .find(|candidate| exists(candidate))
     })
 }
@@ -533,6 +559,266 @@ const LIBREOFFICE_INSTALL_MACOS: &[InstallRecipe] = &[
     ),
 ];
 
+/// Linux: the distribution's package is the usual route (`apt install
+/// libreoffice`, `dnf install libreoffice`), which Pluryprint does not run for
+/// the user, so the consent dialog offers the vendor's page. The remediation
+/// text names the package.
+const LIBREOFFICE_INSTALL_LINUX: &[InstallRecipe] = &[InstallRecipe::new(
+    InstallMethod::Web,
+    "https://www.libreoffice.org/download/download-libreoffice/",
+)];
+
+/// The program names an external HEIF decoder goes by on Linux, best first:
+/// libheif's own tools (`heif-dec` from libheif 1.17, `heif-convert` before
+/// it), then ImageMagick 7 (`magick`) and 6 (`convert`), which decode HEIF
+/// through libheif too. [`crate::engine::convert::heif`] builds the argument
+/// vector from the name it was given. A `convert` that is not ImageMagick's
+/// is passed over ([`is_heif_decoder`]).
+pub const HEIF_DECODERS_LINUX: &[&str] = &["heif-dec", "heif-convert", "magick", "convert"];
+
+/// How long `convert -version` may take to say what it is
+/// ([`is_heif_decoder`]).
+const VERSION_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// At most this many bytes of `convert -version` are read.
+#[cfg(unix)]
+const VERSION_PROBE_CAP: u64 = 4096;
+
+/// How long a `convert` that has exited may keep its output open (a helper
+/// it left behind holding the pipe) before what it wrote so far is taken
+/// as its answer ([`identifies_as_imagemagick`]).
+#[cfg(unix)]
+const VERSION_PROBE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long [`is_heif_decoder`] keeps a probe that gave no answer (it timed
+/// out or the program could not be started) before running it again: long
+/// enough that a `convert` that hangs does not hold every `app_info` call
+/// for [`VERSION_PROBE_TIMEOUT`], short enough that a busy moment does not
+/// rule ImageMagick out for the rest of the session.
+const NO_ANSWER_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// What identifies one program file for [`is_heif_decoder`]'s cache: its
+/// canonical path, size, modification time, inode and status-change time
+/// (`st_ctime` and its nanoseconds, Unix). A package upgrade that replaces
+/// the file changes at least the inode or a time; one that rewrites it in
+/// place and restores its modification time (`touch -r`, `cp -p`, a
+/// tarball's timestamps) still changes the status-change time, which no
+/// one can set back.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ProgramKey {
+    canonical: PathBuf,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    inode: u64,
+    changed: (i64, i64),
+}
+
+/// What [`is_heif_decoder`] learnt by running a program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// It answered: ImageMagick or not. Kept for the life of the process.
+    Known(bool),
+    /// It did not answer, at this time; trusted for [`NO_ANSWER_TTL`].
+    NoAnswer(std::time::Instant),
+}
+
+/// The verdicts [`is_heif_decoder`] reached by running a program.
+static HEIF_DECODER_VERDICTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<ProgramKey, Verdict>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// The [`ProgramKey`] of the file at `path`; `None` when it cannot be read.
+fn program_key(path: &Path) -> Option<ProgramKey> {
+    let canonical = path.canonicalize().ok()?;
+    let meta = std::fs::metadata(&canonical).ok()?;
+    #[cfg(unix)]
+    let (inode, changed) = {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ino(), (meta.ctime(), meta.ctime_nsec()))
+    };
+    #[cfg(not(unix))]
+    let (inode, changed) = (0, (0, 0));
+    Some(ProgramKey {
+        canonical,
+        len: meta.len(),
+        modified: meta.modified().ok(),
+        inode,
+        changed,
+    })
+}
+
+/// The [`Probe::exists`] for [`Dependency::HeifDecoder`]: a file, and for
+/// `convert`, one that says it is ImageMagick.
+///
+/// `convert` is a common name. GraphicsMagick's compatibility package
+/// installs one, and GraphicsMagick does not read ImageMagick's
+/// `policy.xml`, so it would decode outside the policy the HEIF converter
+/// runs ImageMagick under; other packages ship an unrelated `convert`. So
+/// `convert -version` is run (bounded by [`VERSION_PROBE_TIMEOUT`], at most
+/// [`VERSION_PROBE_CAP`] bytes read) and the program is used only if it
+/// names ImageMagick. `magick` is ImageMagick 7's own name and comes first
+/// in [`HEIF_DECODERS_LINUX`], so it is preferred whenever it is there.
+///
+/// The dependency report (`app_info`, which the UI asks on its main thread)
+/// and every HEIF job run this search, so the answer is kept per program
+/// file ([`ProgramKey`]) for the life of the process: each `convert` is run
+/// once, and again only once it has been replaced. A probe that timed out
+/// or could not start the program is a "no" kept for [`NO_ANSWER_TTL`]
+/// only: a `convert` that hangs costs one [`VERSION_PROBE_TIMEOUT`] a
+/// minute, not one per call, and a busy moment does not rule ImageMagick
+/// out for good.
+pub fn is_heif_decoder(path: &Path) -> bool {
+    heif_decoder_verdict(path, VERSION_PROBE_TIMEOUT)
+}
+
+/// [`is_heif_decoder`], probing for at most `timeout`.
+fn heif_decoder_verdict(path: &Path, timeout: std::time::Duration) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if path.file_name() != Some(std::ffi::OsStr::new("convert")) {
+        return true;
+    }
+    let Some(key) = program_key(path) else {
+        return false;
+    };
+    let verdicts = || {
+        HEIF_DECODER_VERDICTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    match verdicts().get(&key) {
+        Some(Verdict::Known(verdict)) => return *verdict,
+        Some(Verdict::NoAnswer(at)) if at.elapsed() < NO_ANSWER_TTL => return false,
+        _ => {}
+    }
+    // Not under the lock: a probe can take `timeout`, and two threads
+    // probing the same program at once agree anyway.
+    let verdict = match imagemagick_probe(path, timeout) {
+        Some(answer) => Verdict::Known(answer),
+        None => Verdict::NoAnswer(std::time::Instant::now()),
+    };
+    verdicts().insert(key, verdict);
+    verdict == Verdict::Known(true)
+}
+
+/// Whether `program -version` prints `ImageMagick` within `timeout`. A
+/// program that does not start, runs past `timeout` (then killed with its
+/// group), or says anything else is not ImageMagick. Only the first
+/// [`VERSION_PROBE_CAP`] bytes are read; the pipe is then closed, so a
+/// program that keeps writing stops.
+pub fn identifies_as_imagemagick(program: &Path, timeout: std::time::Duration) -> bool {
+    imagemagick_probe(program, timeout) == Some(true)
+}
+
+/// [`identifies_as_imagemagick`], or `None` when the program could not be
+/// started or ran past `timeout`: no answer, rather than a "no".
+///
+/// The output is read on this thread, from a non-blocking pipe polled with
+/// the child: no reader thread is left behind blocked on a pipe that a
+/// helper of the program still holds open. Once the program has exited,
+/// what it wrote within [`VERSION_PROBE_GRACE`] is its answer. Unix only:
+/// the HEIF decoder is looked for on Linux alone, and elsewhere this is
+/// `None`.
+fn imagemagick_probe(program: &Path, timeout: std::time::Duration) -> Option<bool> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        use crate::engine::convert::process::{isolate_process_tree, kill_tree};
+
+        let mut cmd = crate::util::appimage::host_command(program);
+        cmd.arg("-version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().ok()?;
+        let started = Instant::now();
+        let Some(stdout) = child.stdout.take() else {
+            kill_tree(&mut child);
+            return None;
+        };
+        let fd = stdout.as_raw_fd();
+        // SAFETY: fcntl on a descriptor this process owns (`stdout`, alive
+        // for both calls); no memory is passed.
+        let nonblocking = unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == 0
+        };
+        if !nonblocking {
+            kill_tree(&mut child);
+            return None;
+        }
+        let mut pipe = Some(stdout);
+        let mut text = Vec::new();
+        let mut buf = [0u8; 1024];
+        let mut exited: Option<Instant> = None;
+        loop {
+            let mut progressed = false;
+            if let Some(out) = &mut pipe {
+                let room = usize::try_from(VERSION_PROBE_CAP)
+                    .unwrap_or(usize::MAX)
+                    .saturating_sub(text.len())
+                    .min(buf.len());
+                match out.read(&mut buf[..room]) {
+                    Ok(0) => pipe = None,
+                    Ok(n) => {
+                        text.extend_from_slice(&buf[..n]);
+                        progressed = true;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => progressed = true,
+                    Err(_) => pipe = None,
+                }
+                // At the cap the pipe is closed: a writer that goes on gets
+                // SIGPIPE and stops.
+                if text.len() as u64 >= VERSION_PROBE_CAP {
+                    pipe = None;
+                }
+            }
+            if exited.is_none() {
+                match child.try_wait() {
+                    Ok(Some(_)) => exited = Some(Instant::now()),
+                    Ok(None) => {}
+                    Err(_) => {
+                        kill_tree(&mut child);
+                        return None;
+                    }
+                }
+            }
+            match exited {
+                Some(at) if pipe.is_none() || at.elapsed() >= VERSION_PROBE_GRACE => break,
+                Some(_) => {}
+                None if started.elapsed() >= timeout => {
+                    kill_tree(&mut child);
+                    return None;
+                }
+                None => {}
+            }
+            if !progressed {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        Some(String::from_utf8_lossy(&text).contains("ImageMagick"))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (program, timeout);
+        None
+    }
+}
+
+/// The HEIF decoder on Linux: a package from the distribution, so only the
+/// project's page can be offered (see [`LIBREOFFICE_INSTALL_LINUX`]).
+const HEIF_DECODER_INSTALL_LINUX: &[InstallRecipe] = &[InstallRecipe::new(
+    InstallMethod::Web,
+    "https://github.com/strukturag/libheif",
+)];
+
 /// HEIF Image Extensions: free, in the Store, installable by winget.
 const HEIF_INSTALL: &[InstallRecipe] = &[
     InstallRecipe::new(InstallMethod::WingetStore, "9PMMSR1CGPWG").mb(5),
@@ -585,9 +871,13 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
         Dependency::LibreOffice => Spec {
             id: dep,
             name: "LibreOffice",
+            // Linux: the distribution packages and the TDF tarball install
+            // `soffice`; the snap only has `libreoffice`, and a Flatpak is
+            // reachable through its exported launcher, named after the app id.
             executables: match os {
                 Os::Windows => &["soffice.exe"],
-                _ => &["soffice"],
+                Os::MacOs => &["soffice"],
+                Os::Linux => &["soffice", "libreoffice", FLATPAK_LIBREOFFICE],
             },
             codec: false,
             bundle_subdir: "libreoffice",
@@ -602,7 +892,12 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
                     "Office and OpenDocument files cannot be printed until it is \
                      installed. Download it free from https://www.libreoffice.org/download"
                 }
-                _ => {
+                Os::Linux => {
+                    "Office, OpenDocument and RTF files cannot be printed until \
+                     it is installed. Install the libreoffice package from your \
+                     distribution, or download it free from https://www.libreoffice.org/download"
+                }
+                Os::Windows => {
                     "Office, OpenDocument and RTF files cannot be printed until \
                      it is installed. Download it free from https://www.libreoffice.org/download"
                 }
@@ -610,7 +905,7 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
             install: match os {
                 Os::Windows => LIBREOFFICE_INSTALL_WINDOWS,
                 Os::MacOs => LIBREOFFICE_INSTALL_MACOS,
-                Os::Linux => &[],
+                Os::Linux => LIBREOFFICE_INSTALL_LINUX,
             },
         },
         Dependency::Chromium => Spec {
@@ -670,7 +965,54 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
                      Get it from the Microsoft Store (it may be paid)",
             install: if windows { HEVC_INSTALL } else { &[] },
         },
+        Dependency::HeifDecoder => {
+            let linux = os == Os::Linux;
+            Spec {
+                id: dep,
+                name: "HEIF decoder (libheif or ImageMagick)",
+                // macOS has `sips` and Windows asks WIC: nothing to look for.
+                executables: if linux { HEIF_DECODERS_LINUX } else { &[] },
+                codec: false,
+                bundle_subdir: "",
+                blocks: if linux { &["heic", "heif"] } else { &[] },
+                effect: "HEIC/HEIF photos cannot be printed until one is installed. \
+                         Install the libheif tools (libheif-examples on Debian and Ubuntu, \
+                         libheif on Arch; on Fedora, libheif-tools together with \
+                         libheif-freeworld from RPM Fusion, which decodes HEIC) or ImageMagick",
+                install: if linux {
+                    HEIF_DECODER_INSTALL_LINUX
+                } else {
+                    &[]
+                },
+            }
+        }
     }
+}
+
+/// The launcher a Flatpak LibreOffice exports (`flatpak run` under the
+/// app id), found in the Flatpak `exports/bin` directories.
+pub const FLATPAK_LIBREOFFICE: &str = "org.libreoffice.LibreOffice";
+
+/// The `program` folders of LibreOffice versions installed from The Document
+/// Foundation's own packages, which land in `/opt/libreoffice<version>`
+/// instead of on `PATH`. `entries` are the names inside `/opt`; the newest
+/// version comes first, and a bare `libreoffice` (no version) last. Pure.
+pub fn opt_libreoffice_dirs(entries: &[String]) -> Vec<PathBuf> {
+    let version = |name: &str| -> Vec<u32> {
+        name.trim_start_matches("libreoffice")
+            .split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    };
+    let mut names: Vec<&String> = entries
+        .iter()
+        .filter(|name| name.starts_with("libreoffice"))
+        .collect();
+    names.sort_by(|a, b| version(b).cmp(&version(a)).then_with(|| a.cmp(b)));
+    names
+        .into_iter()
+        .map(|name| Path::new("/opt").join(name).join("program"))
+        .collect()
 }
 
 /// Whether the system codec `dep` is installed. Windows asks WIC (HEIF) and
@@ -860,9 +1202,34 @@ pub fn install_dirs(dep: Dependency, os: Os, env: &dyn Fn(&str) -> Option<String
             dirs.push(PathBuf::from("/opt/homebrew/bin"));
             dirs.push(PathBuf::from("/usr/local/bin"));
         }
+        (Dependency::LibreOffice, Os::Linux) => {
+            // The distribution's package puts `soffice` on `PATH` (step 3)
+            // and its program folder here (Debian/Ubuntu, then Fedora). The
+            // TDF packages' `/opt/libreoffice<version>` folders are listed
+            // by [`resolve_on_host`], which reads `/opt`.
+            dirs.push(PathBuf::from("/usr/bin"));
+            dirs.push(PathBuf::from("/usr/lib/libreoffice/program"));
+            dirs.push(PathBuf::from("/usr/lib64/libreoffice/program"));
+            dirs.push(PathBuf::from("/opt/libreoffice/program"));
+            // Sandboxed installs come last: they convert only from a folder
+            // their sandbox can read, which the Office converter arranges
+            // (`office::confined_work_parent`). Flatpak per user, then system
+            // wide; the snap's launcher is in `/snap/bin`.
+            if let Some(home) = env("HOME") {
+                dirs.push(PathBuf::from(home).join(".local/share/flatpak/exports/bin"));
+            }
+            dirs.push(PathBuf::from("/var/lib/flatpak/exports/bin"));
+            dirs.push(PathBuf::from("/snap/bin"));
+        }
+        (Dependency::HeifDecoder, Os::Linux) => {
+            dirs.push(PathBuf::from("/usr/bin"));
+            dirs.push(PathBuf::from("/usr/local/bin"));
+        }
         // Linux installs land on `PATH` (step 3) via the distribution's
         // packages; `/usr/bin` is listed anyway for a `PATH`-less environment.
         (_, Os::Linux) => dirs.push(PathBuf::from("/usr/bin")),
+        // macOS decodes HEIF with `sips` and Windows with WIC.
+        (Dependency::HeifDecoder, _) => {}
         // SumatraPDF does not exist off Windows.
         (Dependency::SumatraPdf, _) => {}
         // Codecs are asked of the OS, not looked for on disk.
@@ -928,17 +1295,41 @@ pub fn resolve_on_host(dep: Dependency, os: Os, configured: Option<&Path>) -> Re
     }
 
     let env = |name: &str| std::env::var(name).ok();
+    // Only the dependencies we bundle are looked for next to our executable:
+    // a HEIF decoder named `convert` must not match an unrelated file there.
     let bundled = current_exe_dir()
+        .filter(|_| !spec.bundle_subdir.is_empty())
         .map(|dir| bundled_dirs(&dir, spec.bundle_subdir))
         .unwrap_or_default();
+    let mut installed = install_dirs(dep, os, &env);
+    if dep == Dependency::LibreOffice && os == Os::Linux {
+        let opt: Vec<String> = std::fs::read_dir("/opt")
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // After the distribution's folders, before the sandboxed launchers.
+        let at = installed
+            .iter()
+            .position(|d| d.ends_with("flatpak/exports/bin"))
+            .unwrap_or(installed.len());
+        installed.splice(at..at, opt_libreoffice_dirs(&opt));
+    }
 
     resolve(&Probe {
         bundled_dirs: &bundled,
         configured,
         path_dirs: &path_dirs(&env),
-        install_dirs: &install_dirs(dep, os, &env),
+        install_dirs: &installed,
         executables: spec.executables,
-        exists: is_file,
+        exists: if dep == Dependency::HeifDecoder {
+            is_heif_decoder
+        } else {
+            is_file
+        },
     })
 }
 
@@ -1060,6 +1451,173 @@ mod tests {
             ..empty_probe(&["msedge.exe", "chrome.exe"])
         });
         assert_eq!(resolution.path().unwrap(), dir.path().join("msedge.exe"));
+    }
+
+    /// A preferred name in a later folder beats a fallback in an earlier
+    /// one: `magick` in `/usr/local/bin` does not shadow libheif's
+    /// `heif-convert` in `/usr/bin`. Copies of one name keep `PATH` order.
+    #[test]
+    fn a_preferred_name_anywhere_beats_a_fallback_earlier_on_path() {
+        let local = tempfile::tempdir().unwrap();
+        let usr = tempfile::tempdir().unwrap();
+        std::fs::write(local.path().join("magick"), b"x").unwrap();
+        std::fs::write(usr.path().join("heif-convert"), b"x").unwrap();
+        std::fs::write(usr.path().join("magick"), b"x").unwrap();
+        let dirs = vec![local.path().to_path_buf(), usr.path().to_path_buf()];
+
+        let resolution = resolve(&Probe {
+            path_dirs: &dirs,
+            ..empty_probe(HEIF_DECODERS_LINUX)
+        });
+        assert_eq!(resolution.path().unwrap(), usr.path().join("heif-convert"));
+
+        let resolution = resolve(&Probe {
+            path_dirs: &dirs,
+            ..empty_probe(&["magick", "convert"])
+        });
+        assert_eq!(resolution.path().unwrap(), local.path().join("magick"));
+    }
+
+    /// NFR-security: GraphicsMagick's `convert` (which ignores ImageMagick's
+    /// `policy.xml`) or any other program of that name is never chosen as
+    /// the HEIF decoder; ImageMagick's is, and `magick` beats it. A `convert`
+    /// that hangs or floods its output is bounded.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_only_imagemagicks_convert_is_a_heif_decoder() {
+        use crate::util::fake_program::script;
+        let resolve_in = |dir: &Path| {
+            resolve(&Probe {
+                path_dirs: &[dir.to_path_buf()],
+                exists: is_heif_decoder,
+                ..empty_probe(HEIF_DECODERS_LINUX)
+            })
+        };
+        let gm = tempfile::tempdir().unwrap();
+        script(
+            gm.path(),
+            "convert",
+            "echo 'GraphicsMagick 1.3.38 2022-03-26 Q16 http://www.GraphicsMagick.org/'",
+        );
+        assert_eq!(resolve_in(gm.path()), Resolution::Missing);
+
+        let im = tempfile::tempdir().unwrap();
+        let convert = script(
+            im.path(),
+            "convert",
+            "echo 'Version: ImageMagick 6.9.11-60 Q16 aarch64 2021-01-25 https://imagemagick.org'",
+        );
+        assert_eq!(resolve_in(im.path()).path(), Some(convert.as_path()));
+        // `magick` is preferred whenever it is there, and not asked.
+        let magick = script(im.path(), "magick", "exit 1");
+        assert_eq!(resolve_in(im.path()).path(), Some(magick.as_path()));
+
+        let odd = tempfile::tempdir().unwrap();
+        let hangs = script(odd.path(), "hangs", "sleep 30");
+        let started = std::time::Instant::now();
+        assert!(!identifies_as_imagemagick(
+            &hangs,
+            std::time::Duration::from_millis(300)
+        ));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // A flood is cut at the cap: the name past it is never seen.
+        let floods = script(
+            odd.path(),
+            "floods",
+            "yes GraphicsMagick | head -c 100000; echo ImageMagick",
+        );
+        assert!(!identifies_as_imagemagick(
+            &floods,
+            std::time::Duration::from_secs(5)
+        ));
+        assert!(!identifies_as_imagemagick(
+            &odd.path().join("missing"),
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    /// The `convert` verdict is kept per program file: the dependency report
+    /// (asked on the UI thread) runs `convert -version` once, not on every
+    /// call, and again once the file is replaced or its status changes. A
+    /// probe that timed out is a "no" kept for [`NO_ANSWER_TTL`] only.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_perf_a_convert_is_asked_what_it_is_once_per_binary() {
+        use crate::util::fake_program::script;
+        let dir = tempfile::tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        let body = |name: &str| {
+            format!(
+                "echo run >> '{}'\necho 'Version: {name} 6.9.11-60 Q16'",
+                runs.display()
+            )
+        };
+        let count = || {
+            std::fs::read_to_string(&runs)
+                .map(|r| r.lines().count())
+                .unwrap_or(0)
+        };
+        let convert = script(dir.path(), "convert", &body("ImageMagick"));
+        assert!(is_heif_decoder(&convert));
+        assert!(is_heif_decoder(&convert));
+        // Through another path to the same file, too.
+        let link = dir.path().join("bin");
+        std::fs::create_dir(&link).unwrap();
+        std::os::unix::fs::symlink(&convert, link.join("convert")).unwrap();
+        assert!(is_heif_decoder(&link.join("convert")));
+        assert_eq!(count(), 1, "convert was run more than once");
+
+        // Same size, time and inode, but its status changed (a chmod; a
+        // rewrite whose modification time was put back): asked again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mode = std::fs::metadata(&convert).unwrap().permissions();
+        std::fs::set_permissions(&convert, mode).unwrap();
+        assert!(is_heif_decoder(&convert));
+        assert_eq!(count(), 2, "a changed ctime was not asked again");
+
+        // Replaced (another size and time): asked again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let convert = script(dir.path(), "convert", &body("GraphicsMagick"));
+        assert!(!is_heif_decoder(&convert));
+        assert!(!is_heif_decoder(&convert));
+        assert_eq!(count(), 3);
+
+        // No answer is a "no" kept for a while, not for good: a convert
+        // that hangs is run once a minute, not on every call.
+        let slow = tempfile::tempdir().unwrap();
+        let hung = slow.path().join("runs");
+        let hangs = script(
+            slow.path(),
+            "convert",
+            &format!("echo run >> '{}'\nsleep 30", hung.display()),
+        );
+        let hung_runs = || {
+            std::fs::read_to_string(&hung)
+                .map(|r| r.lines().count())
+                .unwrap_or(0)
+        };
+        let before = hung_runs();
+        let quick = std::time::Duration::from_secs(1);
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        let started = std::time::Instant::now();
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        assert!(started.elapsed() < quick, "the second call probed again");
+        assert_eq!(hung_runs(), before + 1);
+        let key = program_key(&hangs).unwrap();
+        assert!(matches!(
+            HEIF_DECODER_VERDICTS.lock().unwrap().get(&key),
+            Some(Verdict::NoAnswer(_))
+        ));
+        // Once it is older than the TTL, it is asked again.
+        let stale = std::time::Instant::now()
+            .checked_sub(NO_ANSWER_TTL + std::time::Duration::from_secs(1))
+            .unwrap();
+        HEIF_DECODER_VERDICTS
+            .lock()
+            .unwrap()
+            .insert(key, Verdict::NoAnswer(stale));
+        assert!(!heif_decoder_verdict(&hangs, quick));
+        assert_eq!(hung_runs(), before + 2);
     }
 
     #[test]
@@ -1207,6 +1765,10 @@ mod tests {
                 ][..],
             ),
             (Os::MacOs, &[Dependency::LibreOffice][..]),
+            (
+                Os::Linux,
+                &[Dependency::LibreOffice, Dependency::HeifDecoder][..],
+            ),
         ] {
             for dep in deps {
                 let report = from_resolution(&spec(*dep, os), &Resolution::Missing);
@@ -1276,6 +1838,110 @@ mod tests {
         assert_eq!(cask.args(), ["install", "--cask", "libreoffice"]);
         let options = install_options(&[*cask], &|_| true);
         assert_eq!(options[0].command, "brew install --cask libreoffice");
+    }
+
+    /// The wire id, the reason a paused job carries and the i18n key are one
+    /// spelling: serde's.
+    #[test]
+    fn fr_058_dependency_id_is_the_serde_spelling() {
+        for dep in ALL
+            .iter()
+            .chain(&[Dependency::Chromium, Dependency::Pandoc])
+        {
+            let wire = serde_json::to_value(dep).unwrap();
+            assert_eq!(wire, dep.id(), "{dep:?}");
+        }
+    }
+
+    /// FR-052/058 on Linux: HEIC/HEIF go through an external decoder that is
+    /// looked for like a program, blocks exactly those two formats while
+    /// missing, and names the distribution packages that provide it. It is
+    /// never a concern on macOS (`sips`) or Windows (WIC).
+    #[test]
+    fn fr_058_linux_heif_decoder_is_a_program_with_package_hints() {
+        let linux = spec(Dependency::HeifDecoder, Os::Linux);
+        assert!(linux.applicable() && !linux.codec);
+        assert_eq!(
+            linux.executables,
+            ["heif-dec", "heif-convert", "magick", "convert"]
+        );
+        assert_eq!(linux.blocks, ["heic", "heif"]);
+        let text = linux.remediation();
+        for package in [
+            "libheif-examples",
+            "libheif-tools",
+            "libheif-freeworld",
+            "ImageMagick",
+        ] {
+            assert!(text.contains(package), "{text}");
+        }
+        let report = from_resolution(&linux, &Resolution::Missing);
+        assert_eq!(report.install.len(), 1);
+        assert_eq!(report.install[0].method, InstallMethod::Web);
+        for os in [Os::Windows, Os::MacOs] {
+            let report = from_resolution(&spec(Dependency::HeifDecoder, os), &Resolution::Missing);
+            assert!(!report.applicable && report.remediation.is_none(), "{os:?}");
+        }
+        // Found anywhere on PATH, and in /usr/bin for a PATH-less start.
+        let dirs = install_dirs(Dependency::HeifDecoder, Os::Linux, &|_| None);
+        assert!(dirs.contains(&PathBuf::from("/usr/bin")));
+        assert!(install_dirs(Dependency::HeifDecoder, Os::MacOs, &|_| None).is_empty());
+    }
+
+    /// FR-053 on Linux: LibreOffice is found as the distribution installs it,
+    /// as The Document Foundation's own packages install it (`/opt`), and, last,
+    /// as a Flatpak or a snap. RTF goes through it, so its message says so.
+    #[test]
+    fn fr_053_linux_libreoffice_is_found_where_each_package_puts_it() {
+        let s = spec(Dependency::LibreOffice, Os::Linux);
+        assert_eq!(
+            s.executables,
+            ["soffice", "libreoffice", FLATPAK_LIBREOFFICE]
+        );
+        assert!(s.blocks.contains(&"rtf") && s.effect.contains("RTF"));
+        assert!(s.effect.contains("libreoffice package"), "{}", s.effect);
+        assert_eq!(s.install[0].method, InstallMethod::Web);
+
+        let env = |name: &str| (name == "HOME").then(|| "/home/ada".to_string());
+        let dirs = install_dirs(Dependency::LibreOffice, Os::Linux, &env);
+        let at = |p: &str| {
+            dirs.iter()
+                .position(|d| d == Path::new(p))
+                .unwrap_or_else(|| panic!("{p} not in {dirs:?}"))
+        };
+        assert!(at("/usr/bin") < at("/usr/lib/libreoffice/program"));
+        assert!(
+            at("/usr/lib64/libreoffice/program") < at("/home/ada/.local/share/flatpak/exports/bin")
+        );
+        assert!(at("/var/lib/flatpak/exports/bin") < at("/snap/bin"));
+        assert_eq!(dirs.last().unwrap(), Path::new("/snap/bin"));
+        // Without HOME the per-user Flatpak folder is simply not a candidate.
+        let bare = install_dirs(Dependency::LibreOffice, Os::Linux, &|_| None);
+        assert_eq!(bare.len(), dirs.len() - 1);
+    }
+
+    #[test]
+    fn fr_053_tdf_packages_in_opt_are_searched_newest_first() {
+        let entries: Vec<String> = [
+            "google",
+            "libreoffice7.6",
+            "libreoffice",
+            "libreoffice24.8",
+            "libreoffice25.2",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            opt_libreoffice_dirs(&entries),
+            [
+                PathBuf::from("/opt/libreoffice25.2/program"),
+                PathBuf::from("/opt/libreoffice24.8/program"),
+                PathBuf::from("/opt/libreoffice7.6/program"),
+                PathBuf::from("/opt/libreoffice/program"),
+            ]
+        );
+        assert!(opt_libreoffice_dirs(&[]).is_empty());
     }
 
     #[test]

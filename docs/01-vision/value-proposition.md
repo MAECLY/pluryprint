@@ -68,7 +68,7 @@ The only ceiling is what your printer can absorb. We will warn you if you queue 
 
 MVP format coverage targets the formats users *actually batch-print*:
 
-- **PDF** (printed by SumatraPDF on Windows and CUPS on macOS — never Adobe Reader), encrypted ones included after the user types the password.
+- **PDF** (printed by SumatraPDF on Windows and CUPS on macOS and Linux — never Adobe Reader), encrypted ones included after the user types the password.
 - **Microsoft Office and OpenDocument**: DOCX, XLSX, PPTX (and legacy DOC/XLS/PPT), ODT, ODS, ODP via headless LibreOffice.
 - **Images**: JPG, PNG, TIFF, BMP, WebP, HEIC, and SVG as vector pages. GIF is deliberately not supported.
 - **Plain text, RTF and Markdown**, converted inside the app.
@@ -94,7 +94,7 @@ The Tauri 2 + Rust foundation is what makes this realistic. We are not shipping 
 - **No telemetry by default.** No analytics SDK is even compiled into release builds. Opt-in diagnostic uploads may be added later, gated behind an explicit Settings toggle.
 - **No cloud dependency.** The application works fully offline. The only network traffic is print job submission to network printers on your LAN.
 - **No account.** No sign-in, no license key, no activation server.
-- **Cross-platform path.** Windows 10/11 (x64 and ARM64) at MVP. macOS 13+ (Apple Silicon and Intel) targeted as the next platform, sharing the Rust core and React UI, swapping the shell integration layer for Finder Quick Actions / Services.
+- **Cross-platform path.** Windows 10/11 (x64 and ARM64) at MVP. macOS 13+ (Apple Silicon and Intel) next, sharing the Rust core and React UI, swapping the shell integration layer for Finder Quick Actions / Services. Linux (x86_64 and ARM64; Ubuntu 22.04+, Debian 12+, Fedora 38+) from 0.0.5 as a preview, with "Open with" and Dolphin / Nemo actions as its shell integration ([ADR-0015](../adr/0015-linux-support.md)).
 
 ## Head-to-Head Pitches
 

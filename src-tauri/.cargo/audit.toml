@@ -14,13 +14,21 @@
 
 [advisories]
 ignore = [
-  # glib 0.18 — unsound `VariantStrIter`. Linux-only: it comes in through
-  # Tauri's GTK/WebKitGTK stack (muda, tao, wry), which is never compiled for
-  # the targets we ship (Windows and macOS). Fixed in glib 0.20, which only a
-  # Tauri release moving off gtk-rs 0.18 can bring in.
+  # glib 0.18 — unsound `VariantStrIter` (its `Iterator` and
+  # `DoubleEndedIterator` impls can read through a null pointer). Linux only,
+  # and shipped there since the Linux builds (the ADR that supersedes D20): it
+  # comes in through Tauri's GTK/WebKitGTK stack (muda, tao, wry). Nothing
+  # that ships reaches the unsound code: tao, wry, muda and tauri never call
+  # `Variant::str_array_iter` or name `VariantStrIter` (searched in their
+  # sources at the locked versions, November 2026), and neither does
+  # src-tauri/src; Linux code added there must keep it that way. Fixed in
+  # glib 0.20, which only a Tauri release moving off gtk-rs 0.18 can bring
+  # in: drop this then.
   "RUSTSEC-2024-0429",
-  # proc-macro-error 1.0 — unmaintained. Linux-only and build-time only: a
-  # proc-macro of glib-macros in the same GTK stack as above.
+  # proc-macro-error 1.0 — unmaintained (no known vulnerability). Linux only
+  # and build-time only: a proc-macro of glib-macros in the same GTK stack as
+  # above, run by the compiler and never part of a shipped binary. Goes with
+  # glib 0.18.
   "RUSTSEC-2024-0370",
   # paste 1.0 — unmaintained (finished, no known issue). Build-time only: a
   # proc-macro of specta, which tauri-specta pins to an exact release

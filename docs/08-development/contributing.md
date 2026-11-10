@@ -40,10 +40,10 @@ This avoids the painful situation where you spend a weekend on a PR that the mai
 Use the **Bug report** issue template. Include:
 
 - Pluryprint version (`pluryprint --version` or in the About page).
-- OS version (Windows 10 22H2, macOS 14.4, etc.).
+- OS version (Windows 10 22H2, macOS 14.4, Ubuntu 24.04, etc.). On Linux also the package (AppImage or `.deb`), the desktop environment and whether the session is X11 or Wayland.
 - Reproduction steps. Be specific. "It doesn't work" is not a reproduction.
 - Expected vs actual behavior.
-- Logs from `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` (Windows) or `~/Library/Logs/Pluryprint/` (macOS). Redact filenames if sensitive.
+- Logs from `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` (Windows), `~/Library/Logs/Pluryprint/` (macOS) or `~/.local/share/pluryprint/logs/` (Linux). Redact filenames if sensitive.
 - Screenshots if it's a UI issue.
 
 ### Feature requests

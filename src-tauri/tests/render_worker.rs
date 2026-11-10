@@ -2,10 +2,13 @@
 //! binary prints HTML, Markdown, text (and RTF on macOS) through the system
 //! web view, with no Edge, Chrome, Pandoc or LibreOffice.
 //!
-//! Runs on Windows and macOS (the platforms with a system web view the
-//! worker drives); elsewhere every test returns early.
+//! Runs on Windows, macOS and Linux (the platforms with a system web view the
+//! worker drives). On Linux the web view needs a display: under CI (`CI` set)
+//! a missing one fails the run, so `xvfb-run` cannot be forgotten; on a
+//! developer machine without one (an SSH session) the tests that render say
+//! so and return early.
 
-#![cfg(any(windows, target_os = "macos"))]
+#![cfg(any(windows, target_os = "macos", target_os = "linux"))]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -21,6 +24,21 @@ fn setup() {
     ONCE.call_once(|| {
         std::env::set_var("PLURYPRINT_WORKER_EXE", env!("CARGO_BIN_EXE_pluryprint"));
     });
+}
+
+/// Whether this run can render at all: always on Windows and macOS; on
+/// Linux only with a display (module docs). Under CI a missing display is
+/// a failure, not a skip.
+fn can_render() -> bool {
+    if pluryprint_lib::render::display_available() {
+        return true;
+    }
+    assert!(
+        std::env::var_os("CI").is_none(),
+        "the render worker needs a display: run the tests under xvfb-run"
+    );
+    eprintln!("no DISPLAY or WAYLAND_DISPLAY: skipping a real render");
+    false
 }
 
 const TIMEOUT: Option<Duration> = Some(Duration::from_secs(120));
@@ -128,6 +146,9 @@ impl Tripwire {
 
 #[test]
 fn fr_055_html_renders_without_browser() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("img")).unwrap();
     red_png(&dir.path().join("img").join("red dot.png"));
@@ -153,6 +174,13 @@ fn fr_055_html_renders_without_browser() {
     );
     assert_eq!(first_page_size(&pdf), (595, 842), "A4 from the job");
     assert!(images(&pdf) >= 1, "the relative image loads");
+    // Nothing is lost at the page breaks: the first and the last paragraph
+    // are both in the text.
+    if let Some(text) = pdf_text(&pdf) {
+        for needle in ["Título", "Paragraph 1 of", "Paragraph 200 of"] {
+            assert!(text.contains(needle), "{needle} is printed: {text}");
+        }
+    }
 }
 
 /// Security finding: nothing on the page reaches the network or a file
@@ -160,6 +188,9 @@ fn fr_055_html_renders_without_browser() {
 /// frame all point at a listener that must stay untouched.
 #[test]
 fn fr_055_remote_resources_blocked() {
+    if !can_render() {
+        return;
+    }
     let wire = Tripwire::new();
     let port = wire.port();
     let dir = tempfile::tempdir().unwrap();
@@ -191,6 +222,9 @@ fn fr_055_remote_resources_blocked() {
 
 #[test]
 fn fr_055_page_size_from_pagesetup() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let html = dir.path().join("letter.html");
     std::fs::write(&html, "<p>letter landscape</p>").unwrap();
@@ -203,6 +237,9 @@ fn fr_055_page_size_from_pagesetup() {
 
 #[test]
 fn fr_056_markdown_no_pandoc_real_render() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     red_png(&dir.path().join("pic.png"));
     let md = dir.path().join("README.md");
@@ -220,6 +257,9 @@ fn fr_056_markdown_no_pandoc_real_render() {
 
 #[test]
 fn fr_057_txt_real_render_utf16_and_long() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let txt = dir.path().join("notas año.txt");
     let body: String = (1..=300)
@@ -233,11 +273,19 @@ fn fr_057_txt_real_render_utf16_and_long() {
     let pdf = convert(&txt, &PageSetup::default()).unwrap();
     assert!(pages(&pdf) > 1, "300 lines span pages");
     assert_eq!(first_page_size(&pdf), (612, 792), "Letter when auto");
+    if let Some(text) = pdf_text(&pdf) {
+        for needle in ["Línea 1: ñandú", "Línea 300: ñandú, acción, café"] {
+            assert!(text.contains(needle), "{needle} is printed: {text}");
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn fr_057_rtf_macos_textutil() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let rtf = dir.path().join("memo.rtf");
     std::fs::write(
@@ -266,6 +314,17 @@ fn some_font() -> Option<(PathBuf, &'static str)> {
             (r"C:\Windows\Fonts\consola.ttf", "Consolas"),
             (r"C:\Windows\Fonts\cour.ttf", "Courier"),
         ]
+    } else if cfg!(target_os = "linux") {
+        &[
+            (
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                "DejaVuSansMono",
+            ),
+            (
+                "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+                "DejaVuSerif",
+            ),
+        ]
     } else {
         &[
             (
@@ -290,6 +349,9 @@ fn some_font() -> Option<(PathBuf, &'static str)> {
 /// the private stage folder.
 #[test]
 fn fr_055_same_folder_fonts_use_and_relative_base_load() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("fonts")).unwrap();
     std::fs::create_dir_all(dir.path().join("assets")).unwrap();
@@ -342,6 +404,9 @@ fn fr_055_same_folder_fonts_use_and_relative_base_load() {
 /// swallows the page's policy, and a share reference is never followed.
 #[test]
 fn nfr_security_commented_head_and_share_refs_render_safely() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let html = dir.path().join("commented.html");
     std::fs::write(
@@ -447,6 +512,9 @@ fn image_sizes(pdf: &Path) -> Vec<(i64, i64)> {
 /// a running instance or waits on one, and a second one in parallel works.
 #[test]
 fn nfr_worker_not_single_instance_and_no_ipc() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let a = dir.path().join("a.html");
     let b = dir.path().join("b.html");
@@ -465,6 +533,9 @@ fn nfr_worker_not_single_instance_and_no_ipc() {
 /// print). Printed, and only bounded loosely.
 #[test]
 fn nfr_001_worker_startup_time_is_measured() {
+    if !can_render() {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let html = dir.path().join("tiny.html");
     std::fs::write(&html, "<p>tiny</p>").unwrap();
@@ -483,6 +554,9 @@ fn nfr_001_worker_startup_time_is_measured() {
 /// stay untouched, and the page still prints.
 #[test]
 fn nfr_security_network_layer_blocks_every_reference_form() {
+    if !can_render() {
+        return;
+    }
     let wire = Tripwire::new();
     let port = wire.port();
     let dir = tempfile::tempdir().unwrap();
@@ -526,6 +600,9 @@ fn nfr_security_network_layer_blocks_every_reference_form() {
 /// folder does.
 #[test]
 fn nfr_security_only_the_document_folder_is_readable() {
+    if !can_render() {
+        return;
+    }
     let root = tempfile::tempdir().unwrap();
     let parent = root.path().canonicalize().unwrap();
     let doc = parent.join("doc");
@@ -587,6 +664,9 @@ fn png_of(path: &Path, rgb: [u8; 3]) {
 #[cfg(unix)]
 #[test]
 fn nfr_security_a_symlink_in_the_document_folder_cannot_escape_it() {
+    if !can_render() {
+        return;
+    }
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();
     let parent = root.path().canonicalize().unwrap();
@@ -666,4 +746,372 @@ fn nfr_security_a_symlink_in_the_document_folder_cannot_escape_it() {
         images(&missing_pdf),
         "no picture behind an escaping link loads"
     );
+}
+
+/// The text of `pdf` as `pdftotext` (Poppler) extracts it, or `None` when
+/// the tool is not installed (the text checks are then skipped; the page
+/// counts and sizes still run).
+fn pdf_text(pdf: &Path) -> Option<String> {
+    // `-layout` keeps each printed line together. Without it pdftotext
+    // guesses a reading order, and on WebView2's PDFs (every word placed on
+    // its own) it reads them column by column: "Línea Línea … 1: 2: …".
+    // The runs of spaces `-layout` pads with are folded to one, so a needle
+    // matches whatever the column widths.
+    let out = std::process::Command::new("pdftotext")
+        .args(["-layout", "-enc", "UTF-8"])
+        .arg(pdf)
+        .arg("-")
+        .output()
+        .ok()?;
+    out.status.success().then(|| {
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+/// The size of every page, in points.
+fn page_sizes(pdf: &Path) -> Vec<(i64, i64)> {
+    let doc = lopdf::Document::load(pdf).unwrap();
+    doc.get_pages()
+        .values()
+        .map(|id| {
+            let mut dict = doc.get_dictionary(*id).unwrap();
+            let mb = loop {
+                if let Ok(mb) = dict.get(b"MediaBox") {
+                    break mb.as_array().unwrap().clone();
+                }
+                let parent = dict.get(b"Parent").unwrap().as_reference().unwrap();
+                dict = doc.get_dictionary(parent).unwrap();
+            };
+            let n = |o: &lopdf::Object| {
+                o.as_float()
+                    .map(f64::from)
+                    .or_else(|_| o.as_i64().map(|v| v as f64))
+                    .unwrap()
+            };
+            (
+                (n(&mb[2]) - n(&mb[0])).round() as i64,
+                (n(&mb[3]) - n(&mb[1])).round() as i64,
+            )
+        })
+        .collect()
+}
+
+/// Text in scripts other than Latin prints in all three web-view formats:
+/// the words come back out of the PDF as text (not as pictures of glyphs),
+/// so the fonts the web view picked cover them and are embedded. Cyrillic
+/// and Greek are checked word for word (avoiding μ, which some fonts map to
+/// the micro sign, U+00B5, so it extracts as another character); right-to-left scripts and CJK are
+/// printed too, but extraction tools reorder or decompose them, so they are
+/// only required not to break the render (CJK is checked when this system
+/// has a font for it).
+#[test]
+fn fr_055_non_latin_text_prints_as_text_in_html_markdown_and_txt() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let words = "Привет мир · Καλησπέρα Ελλάδα · ñandú çà · مرحبا بالعالم · שלום עולם · 你好世界 · こんにちは";
+    let html = dir.path().join("scripts.html");
+    std::fs::write(
+        &html,
+        format!(
+            "<!doctype html><html lang=und><head><meta charset=utf-8><title>t</title></head>\
+             <body><h1>Ελληνικά</h1><p>{words}</p><p dir=rtl>مرحبا بالعالم</p></body></html>"
+        ),
+    )
+    .unwrap();
+    let md = dir.path().join("scripts.md");
+    std::fs::write(
+        &md,
+        format!("# Ελληνικά\n\n{words}\n\n| Кириллица | Ελληνικά |\n|---|---|\n| да | ναι |\n"),
+    )
+    .unwrap();
+    let txt = dir.path().join("scripts.txt");
+    std::fs::write(&txt, format!("Ελληνικά\n{words}\n")).unwrap();
+
+    let cjk_font = cfg!(not(target_os = "linux"))
+        || std::process::Command::new("fc-list")
+            .arg(":lang=zh")
+            .output()
+            .is_ok_and(|o| !o.stdout.is_empty());
+    for input in [&html, &md, &txt] {
+        let pdf = convert(input, &a4()).unwrap();
+        assert_eq!(pages(&pdf), 1, "{}", input.display());
+        assert_eq!(first_page_size(&pdf), (595, 842), "{}", input.display());
+        let Some(text) = pdf_text(&pdf) else {
+            continue;
+        };
+        for needle in ["Привет", "мир", "Καλησπέρα", "Ελλάδα", "Ελληνικά", "ñandú"]
+        {
+            assert!(
+                text.contains(needle),
+                "{}: {needle} is printed as text: {text}",
+                input.display()
+            );
+        }
+        if cjk_font {
+            assert!(
+                text.contains("你好世界"),
+                "{}: CJK is printed as text: {text}",
+                input.display()
+            );
+        }
+    }
+}
+
+/// A page that declares no charset prints in the encoding its bytes are
+/// in: UTF-8 when they are valid UTF-8, Windows-1252 otherwise. The staged
+/// copy is re-encoded as UTF-8 with a BOM, and the private scheme answers
+/// with the sniffed charset as well; this pins the end result on every
+/// platform (a review fed the bare Linux worker such a page and got Latin-1
+/// mojibake, because the scheme's answer then dropped the charset).
+#[test]
+fn fr_057_a_page_without_meta_charset_prints_in_its_own_encoding() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let utf8 = dir.path().join("utf8.html");
+    std::fs::write(
+        &utf8,
+        "<!doctype html><p>café Ελληνικά naïve</p>".as_bytes(),
+    )
+    .unwrap();
+    let latin = dir.path().join("cp1252.html");
+    std::fs::write(&latin, b"<!doctype html><p>caf\xe9 na\xefve \x80uro</p>").unwrap();
+    for (input, needles) in [
+        (&utf8, &["café", "Ελληνικά", "naïve"][..]),
+        (&latin, &["café", "naïve", "€uro"][..]),
+    ] {
+        let pdf = convert(input, &a4()).unwrap();
+        let Some(text) = pdf_text(&pdf) else {
+            continue;
+        };
+        for needle in needles {
+            assert!(
+                text.contains(needle),
+                "{}: {needle} is printed as text: {text}",
+                input.display()
+            );
+        }
+    }
+}
+
+/// A long document of each web-view format paginates onto many pages of
+/// the job's paper, every page the same size, with its last line printed.
+#[test]
+fn fr_055_long_documents_paginate_on_the_jobs_paper() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let html = dir.path().join("long.html");
+    let paragraphs: String = (1..=600)
+        .map(|i| format!("<p>Párrafo número {i} de un documento largo.</p>"))
+        .collect();
+    std::fs::write(
+        &html,
+        format!("<!doctype html><html><head><meta charset=utf-8></head><body>{paragraphs}</body></html>"),
+    )
+    .unwrap();
+    let md = dir.path().join("long.md");
+    let sections: String = (1..=120)
+        .map(|i| {
+            format!("## Sección {i}\n\nTexto de la sección {i}, con *énfasis*.\n\n- uno\n- dos\n\n")
+        })
+        .collect();
+    std::fs::write(&md, sections).unwrap();
+    let txt = dir.path().join("long.txt");
+    let lines: String = (1..=1000).map(|i| format!("Renglón {i}\n")).collect();
+    std::fs::write(&txt, lines).unwrap();
+
+    for (input, last) in [
+        (&html, "Párrafo número 600 de"),
+        (&md, "Sección 120"),
+        (&txt, "Renglón 1000"),
+    ] {
+        let pdf = convert(input, &a4()).unwrap();
+        let sizes = page_sizes(&pdf);
+        assert!(
+            sizes.len() >= 5,
+            "{}: {} pages",
+            input.display(),
+            sizes.len()
+        );
+        assert!(
+            sizes.iter().all(|s| *s == (595, 842)),
+            "{}: every page is A4: {sizes:?}",
+            input.display()
+        );
+        if let Some(text) = pdf_text(&pdf) {
+            assert!(
+                text.contains(last),
+                "{}: {last} is printed",
+                input.display()
+            );
+        }
+    }
+}
+
+/// Linux: with no X11 or Wayland session the worker does not try to start
+/// GTK; it fails at once, with the usage-free failure code and the marker
+/// the engine can tell a missing display by.
+#[cfg(target_os = "linux")]
+#[test]
+fn fr_055_without_a_display_the_worker_fails_fast_and_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("page.html");
+    std::fs::write(&page, "<p>x</p>").unwrap();
+    let started = Instant::now();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pluryprint"))
+        .args(["--worker", "render-pdf", "--page"])
+        .arg(&page)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--out")
+        .arg(dir.path().join("out.pdf"))
+        .arg("--data")
+        .arg(dir.path().join("webview"))
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains(pluryprint_lib::render::NO_DISPLAY_MARKER),
+        "{stderr}"
+    );
+    assert!(!dir.path().join("out.pdf").exists());
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+/// A 1-bit greyscale PNG of `side` × `side` blank pixels: a few dozen KB on
+/// disk, `side`² × 4 bytes once the web view decodes it.
+#[cfg(target_os = "linux")]
+fn png_bomb(path: &Path, side: u32) {
+    use std::io::Write;
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let mut crc = flate2::Crc::new();
+        crc.update(kind);
+        crc.update(data);
+        out.extend_from_slice(&crc.sum().to_be_bytes());
+    }
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&side.to_be_bytes());
+    ihdr.extend_from_slice(&side.to_be_bytes());
+    ihdr.extend_from_slice(&[1, 0, 0, 0, 0]); // 1-bit greyscale
+    let row = vec![0u8; 1 + (side as usize).div_ceil(8)];
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    for _ in 0..side {
+        z.write_all(&row).unwrap();
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    chunk(&mut png, b"IHDR", &ihdr);
+    chunk(&mut png, b"IDAT", &z.finish().unwrap());
+    chunk(&mut png, b"IEND", &[]);
+    std::fs::write(path, png).unwrap();
+}
+
+/// The page every memory test prints: a 20 000 px square image, which the
+/// web process decodes into 1.6 GB and holds twice over while it paints
+/// (measured: 3.2 GB of resident set, under Xvfb). Scripts are off in the
+/// worker, so a page cannot allocate from JavaScript; an image is how a page
+/// takes memory without one.
+#[cfg(target_os = "linux")]
+fn memory_bomb_page(dir: &Path) -> PathBuf {
+    png_bomb(&dir.join("bomb.png"), 20_000);
+    let page = dir.join("bomb.html");
+    std::fs::write(
+        &page,
+        "<!doctype html><meta charset=\"utf-8\"><p>bomb</p>\
+         <img src=\"bomb.png\" style=\"width:20000px;height:20000px\">",
+    )
+    .unwrap();
+    page
+}
+
+/// ADR-0014, round 7, on Linux, with the real worker: a page whose web
+/// process outgrows the render cap is stopped by the engine's watchdog over
+/// the worker's tree (the web process is the worker's child, not the worker
+/// itself) and the job fails with the terminal `page_too_large`, naming the
+/// cap, in well under the conversion timeout.
+#[cfg(target_os = "linux")]
+#[test]
+fn nfr_security_a_page_over_the_render_cap_is_stopped_as_page_too_large() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let page = memory_bomb_page(dir.path());
+    let started = Instant::now();
+    let err = convert(&page, &a4()).unwrap_err();
+    match &err {
+        EngineError::ConversionFailed(f) => {
+            assert_eq!(f.reason, Some("page_too_large"), "{f:?}");
+            assert_eq!(f.params["limit"], "2048", "{f:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(60));
+}
+
+/// The same page, with the worker started by hand under a 1 GB cap and no
+/// engine watching it (a crashed app): WebKit's own limit, which the worker
+/// sets to its cap, kills the web process, and the worker says it ran out of
+/// memory in the words the engine reads as `page_too_large`.
+#[cfg(target_os = "linux")]
+#[test]
+fn nfr_security_webkits_own_limit_holds_the_web_process_without_a_watchdog() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let page = memory_bomb_page(dir.path());
+    // The bare worker serves the page from its stage path: the image needs
+    // the document folder as its base, which the engine's staging adds.
+    let html = std::fs::read_to_string(&page).unwrap().replace(
+        "<p>bomb",
+        &format!(
+            "<base href=\"{}\"><p>bomb",
+            pluryprint_lib::render::base_href(dir.path())
+        ),
+    );
+    std::fs::write(&page, html).unwrap();
+    let started = Instant::now();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pluryprint"))
+        .args(["--worker", "render-pdf", "--page"])
+        .arg(&page)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--out")
+        .arg(dir.path().join("out.pdf"))
+        .arg("--data")
+        .arg(dir.path().join("webview"))
+        .env(
+            pluryprint_lib::engine::convert::process::MEMORY_CAP_ENV,
+            (1024u64 * 1024 * 1024).to_string(),
+        )
+        .env("PLURYPRINT_RENDER_TRACE", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("memory allocation of") && stderr.contains("failed"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("web process memory limit: 1024 MB"),
+        "{stderr}"
+    );
+    assert!(!dir.path().join("out.pdf").exists());
+    assert!(started.elapsed() < Duration::from_secs(60));
 }
