@@ -136,16 +136,42 @@ const STAGED_NAME: &str = "input.heic";
 /// flag and the deadline.
 const STAGE_CHUNK: usize = 64 * 1024;
 
+/// The staging ceiling when the configured `max_file_size_mb` is 0 or
+/// otherwise unusable: the largest limit the settings accept (4096 MiB).
+const STAGE_HARD_CEILING: u64 =
+    crate::settings::ENGINE_LIMITS.max_file_size_mb.max as u64 * 1024 * 1024;
+
+/// The most bytes [`stage_input`] copies: the configured
+/// `max_file_size_mb`, read as the queue reads it on submit (`sanitized()`,
+/// MiB, [`crate::queue::exceeds_size_limit`]'s units), so a file that grew
+/// past the limit after it was accepted, or a CLI or folder path that never
+/// asked, cannot fill the temporary folder. A limit of 0 (which
+/// `sanitized()` already turns into the default) falls back to
+/// [`STAGE_HARD_CEILING`].
+fn stage_ceiling() -> u64 {
+    match crate::settings::Config::load_or_default()
+        .engine
+        .sanitized()
+        .max_file_size_mb
+    {
+        0 => STAGE_HARD_CEILING,
+        mb => u64::from(mb) * 1024 * 1024,
+    }
+}
+
 /// What stops [`stage_input`] early: the job's cancel flag (a user cancel, a
-/// pause, or the dispatcher's conversion timeout) and the converter's own
+/// pause, or the dispatcher's conversion timeout), the converter's own
 /// `timeout`, counted from when staging started, as
-/// [`super::process::run_capped`] counts it for the decoder.
+/// [`super::process::run_capped`] counts it for the decoder, and the byte
+/// `ceiling` ([`stage_ceiling`]).
 struct StageStop<'a> {
     cancel: &'a AtomicBool,
     timeout: Option<Duration>,
     started: Instant,
     /// The decoder's name, for the timeout message.
     label: &'a str,
+    /// The most bytes the copy may hold.
+    ceiling: u64,
 }
 
 impl StageStop<'_> {
@@ -182,7 +208,8 @@ fn read_some(source: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result
 /// once ([`header::open_regular`]: a FIFO or a device named `.heic` would
 /// block the copy or never end it), and from that one handle:
 ///
-/// 1. its size is taken, from the handle's own metadata;
+/// 1. its size is taken, from the handle's own metadata, and a size over
+///    `stop.ceiling` is refused before anything is read or written;
 /// 2. at most [`header::PREFIX_LEN`] bytes are read and checked
 ///    ([`header::check_prefix`]); a file that is not HEIF is refused
 ///    (`heif_decode_failed`) before anything is written;
@@ -190,25 +217,45 @@ fn read_some(source: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result
 ///    [`STAGE_CHUNK`] pieces with a look at `stop` between two, and never
 ///    more bytes than the size of step 1.
 ///
-/// A file that yields more or fewer bytes than its size said (one written
-/// to while it is copied, or a `/proc` file whose size is 0 and whose
-/// reading never ends) is refused as `cannot_read_input`, as is one that
-/// cannot be opened or read; a copy that cannot be written is
-/// `workdir_failed`; a cancel or a timeout is what
-/// [`super::process::run_capped`] would return. Whatever the failure, the
-/// copy is removed.
+/// A size of 0 is not believed: FUSE file systems that do not know a
+/// file's size until it is read (gvfs, MTP phones) report 0 for a real
+/// photo. Such a file is copied as a stream until it ends, and refused once
+/// it yields more than `stop.ceiling` bytes; a `/proc` file whose size is 0
+/// and whose reading never ends either fails the header check or meets the
+/// ceiling, and a genuinely empty file fails the header check.
+///
+/// A file whose size was known and that yields more or fewer bytes than it
+/// said (one written to while it is copied) is refused as
+/// `cannot_read_input`, as is one over the ceiling or one that cannot be
+/// opened or read; a copy that cannot be written is `workdir_failed`; a
+/// cancel or a timeout is what [`super::process::run_capped`] would return.
+/// Whatever the failure, the copy is removed.
 fn stage_input(input: &Path, work: &WorkDir, stop: &StageStop) -> Result<PathBuf, EngineError> {
     let source = header::open_regular(input).map_err(|e| header::unreadable(input, &e))?;
     let len = source
         .metadata()
         .map_err(|e| header::unreadable(input, &e))?
         .len();
+    if len > stop.ceiling {
+        return Err(too_large(input, stop.ceiling));
+    }
     stage_from(source, len, input, work, stop)
 }
 
+/// The `cannot_read_input` failure for `input`, larger than `ceiling` bytes.
+fn too_large(input: &Path, ceiling: u64) -> EngineError {
+    header::unreadable(
+        input,
+        &std::io::Error::other(format!(
+            "it is larger than the {} MB limit",
+            ceiling / (1024 * 1024)
+        )),
+    )
+}
+
 /// [`stage_input`] from steps 2 on: `source` is `input` opened, and `len`
-/// its size when it was. Separate so a test can change the file between the
-/// two.
+/// its size when it was (0 when unknown). Separate so a test can change the
+/// file between the two, or hand it a source whose size is unknown.
 fn stage_from(
     mut source: impl std::io::Read,
     len: u64,
@@ -231,6 +278,9 @@ fn stage_from(
             format!("cannot prepare the conversion folder: {e}"),
         ))
     };
+    if len > stop.ceiling {
+        return Err(too_large(input, stop.ceiling));
+    }
     stop.check()?;
     let mut prefix = Vec::with_capacity(header::PREFIX_LEN);
     (&mut source)
@@ -238,9 +288,17 @@ fn stage_from(
         .read_to_end(&mut prefix)
         .map_err(unreadable)?;
     header::check_prefix(&prefix).map_err(|why| header::not_heif(input, why))?;
-    let Some(mut left) = len.checked_sub(prefix.len() as u64) else {
-        return Err(changed());
+    // A size of 0 is unknown, not empty: copy until the end, up to the
+    // ceiling.
+    let streaming = len == 0;
+    let mut left = if streaming {
+        stop.ceiling.saturating_sub(prefix.len() as u64)
+    } else {
+        len.checked_sub(prefix.len() as u64).ok_or_else(changed)?
     };
+    if prefix.len() as u64 > stop.ceiling {
+        return Err(too_large(input, stop.ceiling));
+    }
 
     let staged = work.path().join(STAGED_NAME);
     let mut copy = std::fs::OpenOptions::new()
@@ -256,15 +314,24 @@ fn stage_from(
             let want = usize::try_from(left).map_or(STAGE_CHUNK, |l| l.min(STAGE_CHUNK));
             let n = read_some(&mut source, &mut buf[..want]).map_err(unreadable)?;
             if n == 0 {
+                if streaming {
+                    // The end of a file whose size was unknown.
+                    return Ok(());
+                }
                 // Shorter than its size said: it shrank.
                 return Err(changed());
             }
             copy.write_all(&buf[..n]).map_err(workdir_failed)?;
             left -= n as u64;
         }
-        // Longer than its size said: it grew, or it never ends.
+        // Longer than its size said (it grew), or, size unknown, longer
+        // than the ceiling (or it never ends).
         if read_some(&mut source, &mut buf[..1]).map_err(unreadable)? != 0 {
-            return Err(changed());
+            return Err(if streaming {
+                too_large(input, stop.ceiling)
+            } else {
+                changed()
+            });
         }
         Ok(())
     })();
@@ -380,6 +447,7 @@ pub(super) fn convert_with_external(
         timeout,
         started: Instant::now(),
         label: kind.label(),
+        ceiling: stage_ceiling(),
     };
     let staged = stage_input(input, work, &stop)?;
     let png = work.path().join("heif.png");
@@ -1151,7 +1219,9 @@ cp '{png}' "$2""#,
     /// is 0 and whose reading never ends (`/proc/self/pagemap`) is refused
     /// at once and leaves nothing in the conversion folder. Staging used to
     /// copy the whole file before the header check, without bound: this one
-    /// filled the temporary folder.
+    /// filled the temporary folder. Its first bytes are not a HEIF header
+    /// (`heif_decode_failed`), or, on a kernel that does not let this
+    /// process read it, it cannot be read at all (`cannot_read_input`).
     #[cfg(target_os = "linux")]
     #[test]
     fn nfr_security_a_heic_linked_to_an_endless_proc_file_is_refused_at_once() {
@@ -1179,7 +1249,8 @@ cp '{png}' "$2""#,
         let err = r.unwrap_err();
         assert!(
             matches!(&err, EngineError::ConversionFailed(f)
-                if f.reason == Some("heif_decode_failed") && f.contains("IMG.heic")),
+                if matches!(f.reason, Some("heif_decode_failed" | "cannot_read_input"))
+                    && f.contains("IMG.heic")),
             "{err:?}"
         );
         assert_eq!(left, 0, "something was written to {}", work_dir.display());
@@ -1203,6 +1274,7 @@ cp '{png}' "$2""#,
             timeout: None,
             started: Instant::now(),
             label: "libheif",
+            ceiling: STAGE_HARD_CEILING,
         };
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("IMG_0005.HEIC");
@@ -1265,6 +1337,125 @@ cp '{png}' "$2""#,
         .unwrap_err();
         assert!(matches!(err, EngineError::Cancelled), "{err:?}");
         assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+    }
+
+    /// NFR-security: a `.heic` whose size is over the configured
+    /// `max_file_size_mb` (here a sparse 1 TiB file with a real HEIF
+    /// header, over the largest limit the settings accept) is refused from
+    /// its size alone, at once: nothing is copied, nothing is left in the
+    /// conversion folder and no decoder is started.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_a_heic_over_the_size_limit_is_refused_before_staging() {
+        let dir = tempfile::tempdir().unwrap();
+        let decoder = fake_decoder(dir.path(), "heif-convert");
+        let input = dir.path().join("IMG_HUGE.HEIC");
+        std::fs::write(&input, b"\0\0\0\x18ftypheic\0\0\0\0mif1heic").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&input)
+            .unwrap()
+            .set_len(1 << 40)
+            .unwrap();
+        let work = WorkDir::new("huge").unwrap();
+        let out = dir.path().join("o.pdf");
+        let started = Instant::now();
+        let err = convert_with_external(
+            &decoder,
+            &input,
+            &out,
+            &work,
+            &AtomicBool::new(false),
+            None,
+            &|_| {},
+        )
+        .unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("MB limit")),
+            "{err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+        assert!(!dir.path().join("ran").exists(), "a decoder was started");
+    }
+
+    /// A file whose size is reported as 0 (a FUSE mount such as gvfs or MTP
+    /// that does not know it) is copied as a stream, byte for byte, as long
+    /// as it stays within the ceiling; past it, or never ending, it is
+    /// refused with nothing left behind.
+    #[test]
+    fn nfr_security_a_heic_of_unknown_size_is_streamed_up_to_the_ceiling() {
+        use std::io::Read;
+        let header = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+        let mut body = header.to_vec();
+        body.extend((0..3 * STAGE_CHUNK + 17).map(|i| (i % 251) as u8));
+        let flag = AtomicBool::new(false);
+        let stop = StageStop {
+            cancel: &flag,
+            timeout: None,
+            started: Instant::now(),
+            label: "libheif",
+            ceiling: body.len() as u64,
+        };
+        let input = Path::new("/gvfs/IMG_0006.HEIC");
+
+        // Exactly the ceiling: accepted, copied whole.
+        let work = WorkDir::new("unknown-size").unwrap();
+        let staged = stage_from(std::io::Cursor::new(&body), 0, input, &work, &stop).unwrap();
+        assert_eq!(std::fs::read(&staged).unwrap(), body);
+
+        // One byte over: refused, nothing left behind.
+        let mut over = body.clone();
+        over.push(0);
+        let work = WorkDir::new("unknown-size-over").unwrap();
+        let err = stage_from(std::io::Cursor::new(&over), 0, input, &work, &stop).unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("MB limit")),
+            "{err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+
+        // Never ending: stops at the ceiling.
+        let endless = std::io::Cursor::new(header.to_vec()).chain(std::io::repeat(7));
+        let work = WorkDir::new("unknown-size-endless").unwrap();
+        let err = stage_from(endless, 0, input, &work, &stop).unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("MB limit")),
+            "{err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+
+        // A known size over the ceiling is refused before anything is read.
+        let work = WorkDir::new("known-size-over").unwrap();
+        let err = stage_from(
+            std::io::Cursor::new(&over),
+            over.len() as u64,
+            input,
+            &work,
+            &stop,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("MB limit")),
+            "{err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+    }
+
+    /// The staging ceiling is the configured `max_file_size_mb`, never 0.
+    #[test]
+    fn the_staging_ceiling_is_the_configured_size_limit() {
+        let c = stage_ceiling();
+        assert!((1024 * 1024..=STAGE_HARD_CEILING).contains(&c), "{c}");
+        assert_eq!(c % (1024 * 1024), 0);
     }
 
     /// The policy closes every domain before opening the one use, in the
