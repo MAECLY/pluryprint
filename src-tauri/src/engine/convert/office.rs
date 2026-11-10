@@ -31,6 +31,13 @@
 //!   (OLE, DDE) are off, and LibreOffice's own HTTP(S) traffic is pointed at
 //!   a dead proxy on loopback.
 //!
+//! - **A folder a sandboxed LibreOffice can read** (Linux). A snap or a
+//!   Flatpak LibreOffice has a private `/tmp` and cannot see the system temp
+//!   folder the job's work directory normally lives in, so for those the work
+//!   directory goes where the sandbox always has access: the snap's
+//!   `~/snap/<name>/common` or the Flatpak's `~/.var/app/<id>/cache`
+//!   ([`confined_work_parent`]).
+//!
 //! Plain text no longer comes here (FR-057, [`super::text`]); the
 //! `--infilter` branch stays for a caller that still sends a `.txt`.
 
@@ -85,6 +92,28 @@ pub fn harden_profile(profile_dir: &Path) -> std::io::Result<()> {
     let user = profile_dir.join("user");
     std::fs::create_dir_all(&user)?;
     std::fs::write(user.join("registrymodifications.xcu"), HARDENING_XCU)
+}
+
+/// Where the work directory of a conversion by `soffice` must live, when that
+/// LibreOffice runs in a sandbox that cannot read the system temp folder.
+/// `None` for an ordinary install. Pure.
+///
+/// - A **snap** is started through its launcher in `/snap/bin/<snap>[.<app>]`
+///   and can always read and write `~/snap/<snap>/common`.
+/// - A **Flatpak** is started through the launcher it exports (named after
+///   its app id, [`crate::engine::deps::FLATPAK_LIBREOFFICE`]) and always
+///   has its own `~/.var/app/<app id>` at the same path inside the sandbox.
+pub fn confined_work_parent(soffice: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    let home = home?;
+    let name = soffice.file_name()?.to_str()?;
+    if soffice.starts_with("/snap/bin") {
+        let snap = name.split('.').next().filter(|s| !s.is_empty())?;
+        return Some(home.join("snap").join(snap).join("common"));
+    }
+    if name == crate::engine::deps::FLATPAK_LIBREOFFICE {
+        return Some(home.join(".var").join("app").join(name).join("cache"));
+    }
+    None
 }
 
 /// The argument vector for one conversion (everything after the program).
@@ -163,6 +192,44 @@ pub fn convert_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FR-053 on Linux: a sandboxed LibreOffice converts from a folder its
+    /// sandbox can read; an ordinary install keeps the system temp folder.
+    #[test]
+    fn fr_053_sandboxed_libreoffice_converts_inside_its_own_folder() {
+        let home = Path::new("/home/ada");
+        assert_eq!(
+            confined_work_parent(Path::new("/snap/bin/libreoffice"), Some(home)),
+            Some(PathBuf::from("/home/ada/snap/libreoffice/common"))
+        );
+        assert_eq!(
+            confined_work_parent(Path::new("/snap/bin/libreoffice.soffice"), Some(home)),
+            Some(PathBuf::from("/home/ada/snap/libreoffice/common"))
+        );
+        for flatpak in [
+            "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice",
+            "/home/ada/.local/share/flatpak/exports/bin/org.libreoffice.LibreOffice",
+        ] {
+            assert_eq!(
+                confined_work_parent(Path::new(flatpak), Some(home)),
+                Some(PathBuf::from(
+                    "/home/ada/.var/app/org.libreoffice.LibreOffice/cache"
+                ))
+            );
+        }
+        for plain in [
+            "/usr/bin/soffice",
+            "/usr/lib/libreoffice/program/soffice",
+            "/opt/libreoffice25.2/program/soffice",
+            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        ] {
+            assert_eq!(confined_work_parent(Path::new(plain), Some(home)), None);
+        }
+        assert_eq!(
+            confined_work_parent(Path::new("/snap/bin/libreoffice"), None),
+            None
+        );
+    }
 
     #[test]
     fn fr_053_soffice_args_use_a_private_profile_and_headless_convert() {

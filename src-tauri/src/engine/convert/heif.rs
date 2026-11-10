@@ -1,8 +1,9 @@
-//! HEIC/HEIF → PDF through the operating system's own decoder (FR-052).
+//! HEIC/HEIF → PDF through a decoder the system already has (FR-052).
 //!
 //! The `image` crate has no HEIF decoder at any feature combination, and
 //! bundling `libheif` would drag a native build (and HEVC patent questions)
-//! into the app. Both target OSes already ship a decoder, so we use theirs:
+//! into the app. macOS and Windows ship a decoder, so we use theirs, and on
+//! Linux we use a program the distribution packages:
 //!
 //! - **macOS**: `sips -s format png <in> --out <work>/heif.png` (part of the
 //!   base system, `/usr/bin/sips`), then the regular image → PDF path.
@@ -10,8 +11,14 @@
 //!   Microsoft Store *HEIF Image Extensions* (and, for HEIC, *HEVC Video
 //!   Extensions*) are installed; without them the decoder lookup fails and the
 //!   job pauses with a [`EngineError::DependencyMissing`] that names them.
-//! - **Linux**: no system decoder we can rely on, so the same
-//!   `DependencyMissing` explains it.
+//! - **Linux**: an external decoder found like any other dependency
+//!   ([`crate::engine::deps::Dependency::HeifDecoder`]): libheif's
+//!   `heif-dec`/`heif-convert` (`libheif-examples` on Debian and Ubuntu,
+//!   `libheif-tools` on Fedora) or ImageMagick's `magick`/`convert`, which
+//!   decode through libheif as well. It writes a PNG into the work directory
+//!   ([`convert_with_external`]), bounded and cancellable like every
+//!   converter process; without one the job pauses with the
+//!   `heif-decoder` remediation.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +41,9 @@ Extensions\" for .heic) from the Microsoft Store, then retry the job";
 pub const WINDOWS_HEVC_MISSING: &str = "The HEVC video decoder this HEIC photo needs is \
 missing — install \"HEVC Video Extensions\" from the Microsoft Store, then retry the job";
 
-/// FR-058 message on an OS with no system HEIF decoder.
+/// FR-058 message on an OS with no system HEIF decoder. No build emits it
+/// any more (Linux looks for an external decoder); the reason stays valid for
+/// a `queue.json` that still names it.
 pub const NO_SYSTEM_DECODER: &str = "No HEIF image decoder is available on this system — \
 convert the photo to JPEG or PNG first";
 
@@ -52,6 +61,117 @@ pub fn sips_args(input: &Path, png: &Path) -> Vec<String> {
         "--out".to_string(),
         png.to_string_lossy().into_owned(),
     ]
+}
+
+/// The kind of external HEIF decoder a program is, by its name (Linux).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalDecoder {
+    /// libheif's `heif-dec` (1.17+) or `heif-convert`: `<in> <out>`.
+    Libheif,
+    /// ImageMagick's `magick` (7) or `convert` (6).
+    ImageMagick,
+}
+
+impl ExternalDecoder {
+    /// Which decoder `program` is, from its file name; `None` for a program
+    /// that is neither. Pure.
+    pub fn of(program: &Path) -> Option<Self> {
+        match program.file_name()?.to_str()? {
+            "heif-dec" | "heif-convert" => Some(Self::Libheif),
+            "magick" | "convert" => Some(Self::ImageMagick),
+            _ => None,
+        }
+    }
+
+    /// The name used in messages and as the converter's label (`{{tool}}`).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Libheif => "libheif",
+            Self::ImageMagick => "ImageMagick",
+        }
+    }
+
+    /// The argument vector converting `input` to the PNG `png`. Never a shell
+    /// string. Pure.
+    ///
+    /// Both paths are absolute (the engine only receives canonical paths), so
+    /// neither can be read as an option. libheif 1.12, still the version on
+    /// Ubuntu 22.04, takes no `--`. ImageMagick decodes only the first image
+    /// of the file (`[0]`) and is told the output format explicitly (`png:`),
+    /// whatever the name ends in. Neither is asked to rotate: libheif already
+    /// applies the HEIF orientation while decoding, and rotating again by the
+    /// EXIF tag would turn the photo twice.
+    pub fn args(self, input: &Path, png: &Path) -> Vec<String> {
+        let input = input.to_string_lossy().into_owned();
+        let png = png.to_string_lossy().into_owned();
+        match self {
+            Self::Libheif => vec![input, png],
+            Self::ImageMagick => vec![format!("{input}[0]"), format!("png:{png}")],
+        }
+    }
+}
+
+/// The PNG an external decoder wrote for `png`. libheif writes one file per
+/// top-level image and numbers them (`heif-1.png`, `heif-2.png`…) when the
+/// file holds more than one; the first is the photo. `None` when it wrote
+/// nothing.
+fn decoded_png(png: &Path) -> Option<std::path::PathBuf> {
+    if png.is_file() {
+        return Some(png.to_path_buf());
+    }
+    let stem = png.file_stem()?.to_str()?;
+    let first = png.with_file_name(format!("{stem}-1.png"));
+    first.is_file().then_some(first)
+}
+
+/// Convert with the external decoder at `decoder` (Linux), writing the PDF
+/// to `output`.
+///
+/// A decoder that disappeared between being found and being started pauses
+/// the job like a missing one (`heif-decoder`); one that runs and writes no
+/// image could not read the file (`heif_decode_failed`).
+pub fn convert_with_external(
+    decoder: &Path,
+    input: &Path,
+    output: &Path,
+    work: &WorkDir,
+    cancel: &AtomicBool,
+    timeout: Option<Duration>,
+    progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<(), EngineError> {
+    // Anything that is not a known decoder is treated as libheif's
+    // interface, the simplest one.
+    let kind = ExternalDecoder::of(decoder).unwrap_or(ExternalDecoder::Libheif);
+    let png = work.path().join("heif.png");
+    let mut cmd = std::process::Command::new(decoder);
+    cmd.args(kind.args(input, &png)).current_dir(work.path());
+    let log = work.path().join("heif-decoder.log");
+    progress(0.0);
+    super::process::run_bounded(cmd, kind.label(), cancel, timeout, &log).map_err(|e| match e {
+        EngineError::DependencyMissing(f) if f.reason.is_none() => EngineError::DependencyMissing(
+            Failure::new(crate::engine::deps::Dependency::HeifDecoder.id(), f.detail),
+        ),
+        other => other,
+    })?;
+    let Some(decoded) = decoded_png(&png) else {
+        let detail = super::process::log_tail(&log, 400);
+        return Err(EngineError::ConversionFailed(
+            Failure::new(
+                "heif_decode_failed",
+                if detail.is_empty() {
+                    format!("{} could not read this HEIC/HEIF file", kind.label())
+                } else {
+                    format!(
+                        "{} could not read this HEIC/HEIF file: {detail}",
+                        kind.label()
+                    )
+                },
+            )
+            .param("tool", kind.label()),
+        ));
+    };
+    progress(0.5);
+    super::image::to_pdf(&decoded, output, progress)
 }
 
 /// How far Windows Imaging Component got before it failed.
@@ -186,8 +306,12 @@ pub fn convert_with_sips(
     super::image::to_pdf(&png, output, progress)
 }
 
-/// Convert `input` to a PDF at `output` with this OS's decoder.
+/// Convert `input` to a PDF at `output` with this OS's decoder. `decoder` is
+/// the external decoder the engine resolved on Linux
+/// ([`crate::engine::deps::Dependency::HeifDecoder`]); macOS and Windows
+/// ignore it.
 pub fn convert(
+    decoder: Option<&Path>,
     input: &Path,
     output: &Path,
     work: &WorkDir,
@@ -197,6 +321,7 @@ pub fn convert(
 ) -> Result<(), EngineError> {
     #[cfg(target_os = "macos")]
     {
+        let _ = decoder;
         let sips = Path::new("/usr/bin/sips");
         if !sips.is_file() {
             return Err(EngineError::DependencyMissing(Failure::new(
@@ -208,7 +333,7 @@ pub fn convert(
     }
     #[cfg(windows)]
     {
-        let _ = work;
+        let _ = (decoder, work);
         progress(0.0);
         // WIC decodes in-process and cannot be interrupted, so it runs on a
         // thread the job can walk away from on cancel or timeout.
@@ -223,11 +348,15 @@ pub fn convert(
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (input, output, work, cancel, timeout, progress);
-        Err(EngineError::DependencyMissing(Failure::new(
-            "no-heif-decoder",
-            NO_SYSTEM_DECODER,
-        )))
+        use crate::engine::deps::{self, Dependency};
+        let Some(decoder) = decoder else {
+            let spec = deps::spec(Dependency::HeifDecoder, deps::Os::current());
+            return Err(EngineError::DependencyMissing(Failure::new(
+                Dependency::HeifDecoder.id(),
+                spec.remediation(),
+            )));
+        };
+        convert_with_external(decoder, input, output, work, cancel, timeout, progress)
     }
 }
 
@@ -396,6 +525,44 @@ mod tests {
         );
     }
 
+    /// FR-052 on Linux: each external decoder gets its own argument vector,
+    /// chosen by name, never a shell string.
+    #[test]
+    fn fr_052_external_decoder_args_by_program_name() {
+        let input = Path::new("/p/IMG 1.HEIC");
+        let png = Path::new("/w/heif.png");
+        for name in ["heif-dec", "heif-convert"] {
+            let kind = ExternalDecoder::of(&Path::new("/usr/bin").join(name)).unwrap();
+            assert_eq!(kind, ExternalDecoder::Libheif);
+            assert_eq!(kind.args(input, png), ["/p/IMG 1.HEIC", "/w/heif.png"]);
+        }
+        for name in ["magick", "convert"] {
+            let kind = ExternalDecoder::of(&Path::new("/usr/bin").join(name)).unwrap();
+            assert_eq!(kind, ExternalDecoder::ImageMagick);
+            assert_eq!(
+                kind.args(input, png),
+                ["/p/IMG 1.HEIC[0]", "png:/w/heif.png"]
+            );
+        }
+        assert_eq!(ExternalDecoder::of(Path::new("/usr/bin/sips")), None);
+        assert_eq!(ExternalDecoder::Libheif.label(), "libheif");
+    }
+
+    /// libheif numbers its output when a file holds several images; the
+    /// first one is the photo.
+    #[test]
+    fn fr_052_a_numbered_libheif_output_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("heif.png");
+        assert_eq!(decoded_png(&png), None);
+        std::fs::write(dir.path().join("heif-2.png"), b"x").unwrap();
+        assert_eq!(decoded_png(&png), None);
+        std::fs::write(dir.path().join("heif-1.png"), b"x").unwrap();
+        assert_eq!(decoded_png(&png), Some(dir.path().join("heif-1.png")));
+        std::fs::write(&png, b"x").unwrap();
+        assert_eq!(decoded_png(&png), Some(png));
+    }
+
     #[test]
     fn fr_058_windows_codec_message_names_the_store_extension() {
         assert!(WINDOWS_CODEC_MISSING.contains("HEIF Image Extensions"));
@@ -479,6 +646,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let work = WorkDir::new("heif-test").unwrap();
         let err = convert(
+            None,
             &heic,
             &dir.path().join("o.pdf"),
             &work,
