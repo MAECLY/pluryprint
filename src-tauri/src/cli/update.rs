@@ -19,6 +19,12 @@
 //! so the result is printed from the hand-off hook ([`Handoff`]) instead of
 //! after `install` returns, and the installer is told not to relaunch the CLI's
 //! own command line.
+//!
+//! On Linux the windowless app still opens a GTK connection to the display,
+//! and a `.deb` update asks for the administrator password in a dialog, so
+//! `install` needs a graphical session: without `DISPLAY` or
+//! `WAYLAND_DISPLAY` (SSH, a text console) it refuses at once with a clear
+//! message ([`refuse_install_without_display`]) instead of failing inside GTK.
 
 use crate::cli::args::UpdateCmd;
 use crate::cli::exit::{CliError, ExitCode};
@@ -186,6 +192,28 @@ pub fn refuse_install_while_app_runs(
     }
 }
 
+/// Refuse `update install` on Linux when there is no graphical session to
+/// open the updater in. Pure; `display` and `wayland` are the values of
+/// `DISPLAY` and `WAYLAND_DISPLAY` (an empty one counts as unset).
+pub fn refuse_install_without_display(
+    linux: bool,
+    display: Option<&std::ffi::OsStr>,
+    wayland: Option<&std::ffi::OsStr>,
+) -> Result<(), CliError> {
+    let set = |v: Option<&std::ffi::OsStr>| v.is_some_and(|v| !v.is_empty());
+    if !linux || set(display) || set(wayland) {
+        return Ok(());
+    }
+    Err(IpcError::UpdateInstallFailed(
+        "`update install` needs a graphical session on Linux (neither DISPLAY nor \
+         WAYLAND_DISPLAY is set): the updater opens a hidden window, and a .deb update asks \
+         for the administrator password in a dialog — nothing was installed. Run it from a \
+         terminal on the desktop, or download the release from the releases page"
+            .to_string(),
+    )
+    .into())
+}
+
 fn print_result(emitter: Emitter, result: &crate::update::install::UpdateInstallResult) {
     emitter.emit(result, || {
         match (&result.installed, result.restart_required) {
@@ -206,6 +234,11 @@ fn install(paths: &Paths, emitter: Emitter, yes: bool) -> Result<(), CliError> {
     refuse_install_while_app_runs(
         cfg!(windows),
         &crate::cli::instance::state(&crate::cli::instance::lock_path_for(&paths.queue)),
+    )?;
+    refuse_install_without_display(
+        cfg!(target_os = "linux"),
+        std::env::var_os("DISPLAY").as_deref(),
+        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
     )?;
 
     let app = crate::headless_updater_app().map_err(|e| {
@@ -391,6 +424,25 @@ mod tests {
         assert!(text.contains("could not check"), "{text}");
         assert!(text.contains("nothing was installed"), "{text}");
         assert!(refuse_install_while_app_runs(false, &unknown).is_ok());
+    }
+
+    /// Linux: without a display the updater cannot start; `update install`
+    /// says so up front (exit 11, nothing installed) instead of failing inside
+    /// GTK. Any display server will do, and other OSes are never refused.
+    #[test]
+    fn fr_009_install_on_linux_needs_a_graphical_session() {
+        use std::ffi::OsStr;
+        let err = refuse_install_without_display(true, None, None).unwrap_err();
+        assert_eq!(err.exit, ExitCode::UpdateInstallFailed);
+        let text = err.error.to_string();
+        assert!(
+            text.contains("DISPLAY") && text.contains("nothing was installed"),
+            "{text}"
+        );
+        assert!(refuse_install_without_display(true, Some(OsStr::new("")), None).is_err());
+        assert!(refuse_install_without_display(true, Some(OsStr::new(":0")), None).is_ok());
+        assert!(refuse_install_without_display(true, None, Some(OsStr::new("wayland-0"))).is_ok());
+        assert!(refuse_install_without_display(false, None, None).is_ok());
     }
 
     /// FR-010: the result is reported exactly once, whether from the

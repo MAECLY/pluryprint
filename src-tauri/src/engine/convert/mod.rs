@@ -208,22 +208,38 @@ pub struct WorkDir(tempfile::TempDir);
 impl WorkDir {
     /// Create a fresh scratch directory in the OS temp folder.
     pub fn new(job_id: &str) -> Result<Self, EngineError> {
+        Self::create(job_id, None)
+    }
+
+    /// Create a fresh scratch directory inside `parent` (created if needed),
+    /// for a converter that cannot read the OS temp folder.
+    pub fn new_in(job_id: &str, parent: &Path) -> Result<Self, EngineError> {
+        Self::create(job_id, Some(parent))
+    }
+
+    fn create(job_id: &str, parent: Option<&Path>) -> Result<Self, EngineError> {
         // Job ids are UUIDs; anything else is reduced to a safe prefix.
         let tag: String = job_id
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .take(40)
             .collect();
-        tempfile::Builder::new()
-            .prefix(&format!("pluryprint-convert-{tag}-"))
-            .tempdir()
-            .map(WorkDir)
-            .map_err(|e| {
-                EngineError::ConversionFailed(Failure::new(
-                    "workdir_failed",
-                    format!("cannot create a conversion folder: {e}"),
-                ))
-            })
+        let prefix = format!("pluryprint-convert-{tag}-");
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(&prefix);
+        match parent {
+            Some(parent) => {
+                std::fs::create_dir_all(parent).and_then(|()| builder.tempdir_in(parent))
+            }
+            None => builder.tempdir(),
+        }
+        .map(WorkDir)
+        .map_err(|e| {
+            EngineError::ConversionFailed(Failure::new(
+                "workdir_failed",
+                format!("cannot create a conversion folder: {e}"),
+            ))
+        })
     }
 
     /// The directory's path.
@@ -314,6 +330,11 @@ pub fn convert_to_pdf(
     // text converters resolve whatever they need themselves.
     let tools = match route {
         Route::Office if !rtf_natively(&ext) => vec![locate(Dependency::LibreOffice)?],
+        // Linux has no system HEIF decoder: an external one is a program
+        // like LibreOffice (macOS uses `sips`, Windows WIC).
+        Route::Heif if deps::Os::current() == deps::Os::Linux => {
+            vec![locate(Dependency::HeifDecoder)?]
+        }
         _ => Vec::new(),
     };
 
@@ -384,11 +405,20 @@ fn run_route(
         Route::Image => image::to_pdf(input, output, progress),
         Route::Heif => {
             let work = WorkDir::new(job_id)?;
-            heif::convert(input, output, &work, cancel, timeout, progress)
+            let decoder = tools.first().map(PathBuf::as_path);
+            heif::convert(decoder, input, output, &work, cancel, timeout, progress)
         }
         Route::Svg => svg::convert(input, output, cancel, timeout, progress),
         Route::Office => {
-            let work = WorkDir::new(job_id)?;
+            // A sandboxed LibreOffice (snap, Flatpak) cannot read the system
+            // temp folder: its conversion folder goes where it can.
+            let work = match tools
+                .first()
+                .and_then(|t| office::confined_work_parent(t, home_dir().as_deref()))
+            {
+                Some(parent) => WorkDir::new_in(job_id, &parent)?,
+                None => WorkDir::new(job_id)?,
+            };
             progress(0.0);
             if rtf_natively(ext) {
                 #[cfg(target_os = "macos")]
@@ -428,10 +458,18 @@ pub fn locate(dep: Dependency) -> Result<PathBuf, EngineError> {
     let os = deps::Os::current();
     match deps::resolve_on_host(dep, os, None) {
         deps::Resolution::Found { path, .. } => Ok(path),
-        deps::Resolution::Missing => Err(EngineError::DependencyMissing(
-            deps::spec(dep, os).remediation().into(),
-        )),
+        // The dependency's id is the reason, so the paused job says the
+        // shared `common:deps.<id>` remediation and offers its install.
+        deps::Resolution::Missing => Err(EngineError::DependencyMissing(Failure::new(
+            dep.id(),
+            deps::spec(dep, os).remediation(),
+        ))),
     }
+}
+
+/// The user's home folder, for the converters that must work inside it.
+fn home_dir() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
 }
 
 /// Move a converter's `produced` PDF to `output`, after checking it really is

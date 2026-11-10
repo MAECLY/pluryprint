@@ -6,7 +6,9 @@
 //! minisign signature against the public key embedded in `tauri.conf.json`
 //! (`plugins.updater.pubkey`) **before** anything touches the disk, and runs
 //! the platform installer — the per-user NSIS setup on Windows (no admin,
-//! FR-083), an in-place `.app` swap on macOS.
+//! FR-083), an in-place `.app` swap on macOS, and on Linux either an in-place
+//! swap of the AppImage file or `pkexec dpkg -i` for the `.deb` (the user is
+//! asked for the administrator password, as for any package).
 //!
 //! This module owns the policy around it, as pure functions with co-located
 //! tests, so the GUI command ([`crate::ipc::update::install_update`]) and the
@@ -17,9 +19,11 @@
 //!   local end-to-end testing.
 //! - [`is_major_bump`] — FR-087: a major version jump is never installed
 //!   without an explicit, separate opt-in.
-//! - [`check_installable_location`] — refuse to "update" a binary that is not
-//!   an installed app (a dev build in `target/`), which on macOS would replace
-//!   the directory the binary happens to live in.
+//! - [`check_installable_location`] / [`check_linux_install`] — refuse to
+//!   "update" a binary that is not an installed app (a dev build in
+//!   `target/`), which on macOS would replace the directory the binary
+//!   happens to live in, and on Linux would be overwritten as if it were an
+//!   AppImage. [`check_running_copy`] applies the right one to this process.
 //! - [`classify_error`] — a tampered or unsigned artifact surfaces as
 //!   [`IpcError::UpdateSignatureInvalid`] with a message that says nothing was
 //!   installed, never as a generic failure.
@@ -196,6 +200,117 @@ pub fn check_installable_location(os: &str, exe: &Path) -> Result<(), String> {
     }
 }
 
+/// How the running copy was installed on Linux, which is what decides how the
+/// updater replaces it (the bundler stamps it into the main executable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinuxPackage {
+    /// A `.AppImage` file: the updater writes the new one over it, in place.
+    AppImage,
+    /// The `.deb` package: the updater installs the new one with
+    /// `pkexec dpkg -i`.
+    Deb,
+    /// An `.rpm` package (`pkexec rpm -U`). Not published, but a build of
+    /// ours packaged that way updates like the `.deb`.
+    Rpm,
+    /// Not stamped: a `cargo` build, a binary copied out of a package, or
+    /// `pluryprint-cli` (only the main executable is stamped).
+    Unknown,
+}
+
+/// Refuse to update a Linux copy the updater would damage or miss. Pure.
+///
+/// The updater treats anything that is not a package as an AppImage and
+/// writes the update over it. That is right only for a real AppImage, named
+/// by the `APPIMAGE` variable its runtime sets (the executable itself runs
+/// from a temporary mount). A package install must be the file the package
+/// put there (`packaged`, which asks `dpkg`/`rpm`), or the package manager
+/// would update a different copy than the one running.
+pub fn check_linux_install(
+    package: LinuxPackage,
+    exe: &Path,
+    appimage: Option<&Path>,
+    packaged: &dyn Fn(&Path) -> bool,
+) -> Result<(), String> {
+    match package {
+        LinuxPackage::AppImage => match appimage {
+            Some(file) if file.is_absolute() => Ok(()),
+            _ => Err(
+                "this copy of Pluryprint was started from inside its AppImage, not from the \
+                 .AppImage file, so it cannot update itself; start the .AppImage file, or \
+                 download the release from the releases page instead"
+                    .to_string(),
+            ),
+        },
+        LinuxPackage::Deb | LinuxPackage::Rpm => {
+            if packaged(exe) {
+                Ok(())
+            } else {
+                let kind = if package == LinuxPackage::Deb {
+                    ".deb"
+                } else {
+                    ".rpm"
+                };
+                Err(format!(
+                    "this copy of Pluryprint ({}) is not the one the {kind} package installed, \
+                     so it cannot update itself; run the installed Pluryprint, or download \
+                     the release from the releases page instead",
+                    exe.display()
+                ))
+            }
+        }
+        LinuxPackage::Unknown => Err(format!(
+            "this copy of Pluryprint ({}) is neither an AppImage nor the program a package \
+             installed, so it cannot update itself (with the .deb, update from the app or \
+             with `pluryprint update install`); download the release from the releases \
+             page instead",
+            exe.display()
+        )),
+    }
+}
+
+/// [`check_installable_location`] or, on Linux, [`check_linux_install`],
+/// for this process.
+pub fn check_running_copy(exe: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::utils::config::BundleType;
+        let package = match tauri::utils::platform::bundle_type() {
+            Some(BundleType::AppImage) => LinuxPackage::AppImage,
+            Some(BundleType::Deb) => LinuxPackage::Deb,
+            Some(BundleType::Rpm) => LinuxPackage::Rpm,
+            _ => LinuxPackage::Unknown,
+        };
+        let appimage = std::env::var_os("APPIMAGE").map(std::path::PathBuf::from);
+        check_linux_install(package, exe, appimage.as_deref(), &|file| {
+            package_owns(package, file)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        check_installable_location(std::env::consts::OS, exe)
+    }
+}
+
+/// Whether the package manager of `package` lists `file` as installed by a
+/// package (`dpkg-query -S`, `rpm -qf`).
+#[cfg(target_os = "linux")]
+fn package_owns(package: LinuxPackage, file: &Path) -> bool {
+    let (program, args): (&str, &[&str]) = match package {
+        LinuxPackage::Deb => ("dpkg-query", &["-S"]),
+        LinuxPackage::Rpm => ("rpm", &["-qf"]),
+        _ => return false,
+    };
+    std::process::Command::new(program)
+        .args(args)
+        .arg(file)
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// The user-facing message for an artifact that failed verification.
 pub const SIGNATURE_REJECTED: &str =
     "the downloaded update failed its signature check and was NOT installed. \
@@ -233,6 +348,57 @@ pub fn classify_error(err: &tauri_plugin_updater::Error) -> IpcError {
                 format!("the release does not offer an update for this platform yet ({err})"),
             )
         }
+        // The manifest names a file of the wrong kind for how this copy was
+        // installed (an AppImage for a .deb, or the reverse): a release
+        // problem, and nothing was touched.
+        E::InvalidUpdaterFormat | E::BinaryNotFoundInArchive => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "wrong_package_format",
+            format!(
+                "the update published for this platform is not the kind of package this \
+                 copy was installed from, so nothing was installed; download the release \
+                 from the releases page instead ({err})"
+            ),
+        ),
+        // AppImage: no folder on the AppImage's file system could be written
+        // to, so the file could not be swapped.
+        E::TempDirNotOnSameMountPoint => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "appimage_not_writable",
+            format!(
+                "the update could not replace the AppImage because its folder cannot be \
+                 written to; move the .AppImage to a folder you own (such as \
+                 ~/Applications) and try again ({err})"
+            ),
+        ),
+        // .deb: the administrator password prompt was dismissed or failed.
+        E::AuthenticationFailed => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "auth_cancelled",
+            format!(
+                "the update was not installed: the administrator password prompt was \
+                 cancelled or failed, and nothing was changed ({err})"
+            ),
+        ),
+        E::DebInstallFailed | E::PackageInstallFailed => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "package_install_failed",
+            format!(
+                "the system package manager could not install the update; install the \
+                 package from the releases page instead ({err})"
+            ),
+        ),
+        E::PreviousAppNotRestored(path) => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "previous_app_not_restored",
+            format!("{err}; move it back, or reinstall from the releases page"),
+        )
+        .with_param("path", path.display()),
+        E::Io(_) | E::TempDirNotFound => IpcError::localized(
+            IpcErrorCode::UpdateInstallFailed,
+            "install_failed",
+            format!("the update could not be installed ({err})"),
+        ),
         other => IpcError::UpdateInstallFailed(other.to_string()),
     }
 }
@@ -242,8 +408,8 @@ pub fn classify_error(err: &tauri_plugin_updater::Error) -> IpcError {
 pub struct UpdateInstallResult {
     /// The version that was installed, or `None` when there was nothing newer.
     pub installed: Option<String>,
-    /// The new version runs only after a restart (macOS). On Windows the
-    /// installer restarts the app itself and this process exits.
+    /// The new version runs only after a restart (macOS, Linux). On Windows
+    /// the installer restarts the app itself and this process exits.
     pub restart_required: bool,
 }
 
@@ -363,7 +529,7 @@ where
 
     let exe = std::env::current_exe()
         .map_err(|e| IpcError::UpdateInstallFailed(format!("cannot locate the app: {e}")))?;
-    check_installable_location(std::env::consts::OS, &exe).map_err(|msg| {
+    check_running_copy(&exe).map_err(|msg| {
         IpcError::localized(
             IpcErrorCode::UpdateInstallFailed,
             "not_an_installed_app",
@@ -522,6 +688,90 @@ mod tests {
         // Windows hands over to the per-user installer wherever the exe is.
         let win = PathBuf::from(r"C:\dev\target\debug\pluryprint.exe");
         assert!(check_installable_location("windows", &win).is_ok());
+    }
+
+    /// FR-083 on Linux: only a real AppImage (named by `APPIMAGE`) or the file
+    /// a package installed may update itself; anything else, which the
+    /// updater would overwrite as if it were an AppImage, is refused.
+    #[test]
+    fn fr_083_linux_updates_only_an_appimage_or_a_packaged_install() {
+        let mounted = PathBuf::from("/tmp/.mount_PluryAbc/usr/bin/pluryprint");
+        let file = PathBuf::from("/home/ada/Applications/Pluryprint_0.0.5_linux_x64.AppImage");
+        let never = |_: &Path| -> bool { panic!("an AppImage asks no package manager") };
+        assert!(check_linux_install(LinuxPackage::AppImage, &mounted, Some(&file), &never).is_ok());
+        for appimage in [None, Some(Path::new("Pluryprint.AppImage"))] {
+            let err = check_linux_install(LinuxPackage::AppImage, &mounted, appimage, &never)
+                .unwrap_err();
+            assert!(err.contains("start the .AppImage file"), "{err}");
+        }
+
+        let installed = PathBuf::from("/usr/bin/pluryprint");
+        let dpkg = |p: &Path| p == Path::new("/usr/bin/pluryprint");
+        assert!(check_linux_install(LinuxPackage::Deb, &installed, None, &dpkg).is_ok());
+        assert!(check_linux_install(LinuxPackage::Rpm, &installed, None, &dpkg).is_ok());
+        let copy = PathBuf::from("/home/ada/bin/pluryprint");
+        let err = check_linux_install(LinuxPackage::Deb, &copy, None, &dpkg).unwrap_err();
+        assert!(
+            err.contains("not the one the .deb package installed"),
+            "{err}"
+        );
+
+        // A cargo build, even with a stray APPIMAGE in the environment.
+        let dev = PathBuf::from("/home/ada/src/pluryprint/src-tauri/target/debug/pluryprint");
+        let err = check_linux_install(LinuxPackage::Unknown, &dev, Some(&file), &dpkg).unwrap_err();
+        assert!(err.contains("neither an AppImage nor"), "{err}");
+    }
+
+    /// The running test binary is no installed app on any OS: a cargo build
+    /// must never update itself.
+    #[test]
+    fn fr_083_a_cargo_build_refuses_to_update_itself() {
+        let exe = std::env::current_exe().unwrap();
+        if cfg!(windows) {
+            // Windows hands over to the per-user installer from anywhere.
+            assert!(check_running_copy(&exe).is_ok());
+        } else {
+            assert!(check_running_copy(&exe).is_err(), "{}", exe.display());
+        }
+    }
+
+    /// Every Linux install failure the updater can report reads as what it
+    /// is, with its own reason, instead of the plugin's bare error text.
+    #[test]
+    fn fr_082_linux_install_failures_are_readable() {
+        use tauri_plugin_updater::Error as E;
+        for (err, reason) in [
+            (E::InvalidUpdaterFormat, "wrong_package_format"),
+            (E::BinaryNotFoundInArchive, "wrong_package_format"),
+            (E::TempDirNotOnSameMountPoint, "appimage_not_writable"),
+            (E::AuthenticationFailed, "auth_cancelled"),
+            (E::DebInstallFailed, "package_install_failed"),
+            (E::PackageInstallFailed, "package_install_failed"),
+            (E::TempDirNotFound, "install_failed"),
+            (
+                E::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+                "install_failed",
+            ),
+            (
+                E::TargetsNotFound(vec!["linux-x86_64-deb".into()]),
+                "no_platform_update",
+            ),
+        ] {
+            let got = classify_error(&err);
+            assert_eq!(got.code(), IpcErrorCode::UpdateInstallFailed, "{err:?}");
+            assert_eq!(got.reason(), Some(reason), "{err:?}");
+        }
+        let kept = classify_error(&E::PreviousAppNotRestored(PathBuf::from("/tmp/x/app")));
+        assert_eq!(kept.reason(), Some("previous_app_not_restored"));
+        assert!(kept.message().contains("/tmp/x/app"), "{kept:?}");
+        let targets = classify_error(&E::TargetsNotFound(vec![
+            "linux-aarch64-deb".into(),
+            "linux-aarch64".into(),
+        ]));
+        assert!(
+            targets.message().contains("linux-aarch64-deb"),
+            "{targets:?}"
+        );
     }
 
     #[test]

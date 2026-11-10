@@ -406,6 +406,141 @@ done"#,
             .unwrap();
         assert_eq!(pages_of(&output), 1);
     }
+
+    /// A fake external HEIF decoder named `name` that records its argv and
+    /// "decodes" by copying a real PNG to `target(argv)`, a shell expression.
+    fn fake_heif_decoder(dir: &Path, name: &str, argv_log: &Path, target: &str) -> PathBuf {
+        let png = dir.join("real.png");
+        ::image::RgbImage::from_pixel(4, 3, ::image::Rgb([10, 200, 10]))
+            .save_with_format(&png, ::image::ImageFormat::Png)
+            .unwrap();
+        script(
+            dir,
+            name,
+            &format!(
+                r#"printf '%s\n' "$@" > '{log}'
+cp '{png}' {target}"#,
+                log = argv_log.display(),
+                png = png.display(),
+            ),
+        )
+    }
+
+    /// FR-052 on Linux: libheif's tool gets `<in> <out>`, ImageMagick gets
+    /// the first frame and an explicit PNG output, and either PNG becomes a
+    /// one-page PDF.
+    #[test]
+    fn fr_052_external_heif_decoders_turn_their_png_into_a_one_page_pdf() {
+        for (name, target, expect_in, expect_out) in [
+            ("heif-convert", r#""$2""#, "{in}", "{png}"),
+            ("magick", r#""${2#png:}""#, "{in}[0]", "png:{png}"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let log = dir.path().join("argv");
+            let decoder = fake_heif_decoder(dir.path(), name, &log, target);
+            let heic = dir.path().join("IMG 0001.HEIC");
+            std::fs::write(&heic, b"\0\0\0\x18ftypheic").unwrap();
+            let output = dir.path().join("o.pdf");
+            let work = WorkDir::new("job").unwrap();
+            heif::convert_with_external(
+                &decoder,
+                &heic,
+                &output,
+                &work,
+                &AtomicBool::new(false),
+                None,
+                &no_progress(),
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(pages_of(&output), 1, "{name}");
+            let png = work.path().join("heif.png").display().to_string();
+            let input = heic.display().to_string();
+            let argv: Vec<String> = std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .map(String::from)
+                .collect();
+            assert_eq!(
+                argv,
+                [
+                    expect_in.replace("{in}", &input),
+                    expect_out.replace("{png}", &png)
+                ],
+                "{name}"
+            );
+        }
+    }
+
+    /// A decoder that runs and writes nothing could not read the file: a
+    /// conversion failure naming the tool, not a paused job.
+    #[test]
+    fn fr_052_an_external_decoder_that_writes_nothing_is_a_decode_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let decoder = script(dir.path(), "heif-convert", "echo 'bad file' >&2");
+        let heic = dir.path().join("x.heic");
+        std::fs::write(&heic, b"x").unwrap();
+        let work = WorkDir::new("job").unwrap();
+        let err = heif::convert_with_external(
+            &decoder,
+            &heic,
+            &dir.path().join("o.pdf"),
+            &work,
+            &AtomicBool::new(false),
+            None,
+            &no_progress(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("heif_decode_failed")
+                    && f.params["tool"] == "libheif"
+                    && f.contains("bad file")),
+            "{err:?}"
+        );
+    }
+
+    /// A decoder that vanished between being found and being started pauses
+    /// the job with the `heif-decoder` remediation (FR-058).
+    #[test]
+    fn fr_058_a_vanished_external_decoder_pauses_with_its_remediation() {
+        let dir = tempfile::tempdir().unwrap();
+        let heic = dir.path().join("x.heic");
+        std::fs::write(&heic, b"x").unwrap();
+        let work = WorkDir::new("job").unwrap();
+        let err = heif::convert_with_external(
+            &dir.path().join("heif-dec"),
+            &heic,
+            &dir.path().join("o.pdf"),
+            &work,
+            &AtomicBool::new(false),
+            None,
+            &no_progress(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::DependencyMissing(f) if f.reason == Some("heif-decoder")),
+            "{err:?}"
+        );
+        assert!(crate::util::reasons::is_job_reason(
+            "dependency_missing",
+            "heif-decoder"
+        ));
+    }
+
+    /// FR-053 on Linux: a conversion folder can live outside the system temp
+    /// folder (for a sandboxed LibreOffice), is created when missing, and is
+    /// removed with the job like any other.
+    #[test]
+    fn fr_053_a_work_dir_in_a_given_folder_is_created_and_cleaned_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("snap").join("libreoffice").join("common");
+        let work = WorkDir::new_in("job-1", &parent).unwrap();
+        let path = work.path().to_path_buf();
+        assert!(path.starts_with(&parent) && path.is_dir());
+        drop(work);
+        assert!(!path.exists());
+        assert!(parent.is_dir());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -575,6 +710,115 @@ fn fr_052_real_heic_made_by_sips_converts_to_one_page() {
     }
     let pdf = convert_real(&heic, &dir.path().join("cache"), "real-heic");
     assert_eq!(pages_of(&pdf), 1);
+}
+
+/// FR-052 on Linux with a real decoder: a HEIC encoded in-test (by
+/// ImageMagick, which writes HEIF through libheif) prints as one page through
+/// whichever decoder the engine finds. Skips without a decoder, or when the
+/// local ImageMagick cannot encode HEIC.
+#[cfg(target_os = "linux")]
+#[test]
+fn fr_052_real_heic_converts_through_the_linux_decoder() {
+    if tool_or_skip(Dependency::HeifDecoder, "heic").is_none() {
+        return;
+    }
+    let Some(heic) = linux_heic_fixture() else {
+        return;
+    };
+    let pdf = convert_real(&heic.1, &heic.0.path().join("cache"), "real-heic-linux");
+    assert_eq!(pages_of(&pdf), 1);
+}
+
+/// FR-052 on Linux, each decoder on its own: libheif's tool and ImageMagick
+/// both turn a real HEIC into a one-page PDF. A decoder that is not installed
+/// is skipped with a note.
+#[cfg(target_os = "linux")]
+#[test]
+fn fr_052_each_real_linux_decoder_converts_a_heic() {
+    let Some((dir, heic)) = linux_heic_fixture() else {
+        return;
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut ran = 0;
+    for name in crate::engine::deps::HEIF_DECODERS_LINUX {
+        let Some(decoder) = std::env::split_paths(&path)
+            .map(|d| d.join(name))
+            .find(|p| p.is_file())
+        else {
+            eprintln!("SKIPPED {name}: not installed");
+            continue;
+        };
+        let output = dir.path().join(format!("{name}.pdf"));
+        let work = WorkDir::new(name).unwrap();
+        heif::convert_with_external(
+            &decoder,
+            &heic,
+            &output,
+            &work,
+            &AtomicBool::new(false),
+            REAL_TIMEOUT,
+            &no_progress(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(pages_of(&output), 1, "{name}");
+        ran += 1;
+    }
+    eprintln!("{ran} real HEIF decoder(s) exercised");
+}
+
+/// A HEIC photo made in-test with ImageMagick (`convert`/`magick`), with the
+/// directory that holds it. `None`, with a note, when it cannot be made.
+#[cfg(target_os = "linux")]
+fn linux_heic_fixture() -> Option<(tempfile::TempDir, PathBuf)> {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("photo.png");
+    let mut img = ::image::RgbImage::new(64, 48);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        *px = ::image::Rgb([(x * 4) as u8, (y * 5) as u8, 90]);
+    }
+    img.save_with_format(&png, ::image::ImageFormat::Png)
+        .unwrap();
+    let heic = dir.path().join("photo.HEIC");
+    let made = ["magick", "convert"].iter().any(|tool| {
+        std::process::Command::new(tool)
+            .arg(&png)
+            .arg(format!("heic:{}", heic.display()))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+            && heic.is_file()
+    });
+    if !made {
+        eprintln!("SKIPPED heic: no ImageMagick here can encode HEIC");
+        return None;
+    }
+    Some((dir, heic))
+}
+
+/// A damaged HEIC fails the conversion on Linux too, leaving nothing behind.
+#[cfg(target_os = "linux")]
+#[test]
+fn fr_052_corrupt_heic_fails_on_linux_without_leaving_a_pdf() {
+    if tool_or_skip(Dependency::HeifDecoder, "corrupt heic").is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let heic = dir.path().join("broken.heic");
+    std::fs::write(&heic, b"\0\0\0\x18ftypheic-not-really").unwrap();
+    let err = convert_to_pdf(
+        &heic,
+        &dir.path().join("cache"),
+        "bad-heic-linux",
+        &AtomicBool::new(false),
+        &no_progress(),
+        REAL_TIMEOUT,
+        &PageSetup::default(),
+        None,
+    )
+    .unwrap_err();
+    assert!(matches!(err, EngineError::ConversionFailed(_)), "{err:?}");
+    assert!(!dir.path().join("cache").join("bad-heic-linux.pdf").exists());
 }
 
 #[cfg(target_os = "macos")]

@@ -1,10 +1,10 @@
 //! External-dependency detection (FR-058).
 //!
 //! The hybrid engine (ADR-0003) shells out to programs we do not compile: the
-//! final PDF printer on Windows (SumatraPDF) and the best-of-breed converters
-//! the architecture reserves for Office documents (LibreOffice) and, on
-//! Windows, HEIF/HEVC codecs. None of them is guaranteed to exist on a
-//! user's machine, so every one of them is *resolved* before it is *run*, and a
+//! final PDF printer on Windows (SumatraPDF), the best-of-breed converters the
+//! architecture reserves for Office documents (LibreOffice), the HEIF/HEVC
+//! codecs on Windows and, on Linux, an external HEIF decoder (libheif's tools
+//! or ImageMagick). None of them is guaranteed to exist on a user's machine, so every one of them is *resolved* before it is *run*, and a
 //! missing one produces a remediation message instead of an opaque
 //! "failed to spawn" deep inside a job.
 //!
@@ -103,6 +103,27 @@ pub enum Dependency {
     /// only, paid unless the PC maker preinstalled it): HEIC photos are HEVC
     /// inside.
     HevcCodec,
+    /// An external HEIF decoder (Linux only): libheif's `heif-dec` or
+    /// `heif-convert`, or ImageMagick's `magick` or `convert`. Linux has no
+    /// system decoder to ask, so the program is looked for like any other.
+    HeifDecoder,
+}
+
+impl Dependency {
+    /// The stable id the wire and the UI use for this dependency
+    /// (`common:deps.<id>`), the same spelling serde gives it. It is also the
+    /// `dependency_missing` reason a job pauses with (FR-058, FR-092).
+    pub fn id(self) -> &'static str {
+        match self {
+            Dependency::SumatraPdf => "sumatra-pdf",
+            Dependency::LibreOffice => "libre-office",
+            Dependency::Chromium => "chromium",
+            Dependency::Pandoc => "pandoc",
+            Dependency::HeifCodec => "heif-codec",
+            Dependency::HevcCodec => "hevc-codec",
+            Dependency::HeifDecoder => "heif-decoder",
+        }
+    }
 }
 
 /// Every dependency the running app can need, in the order the UI should
@@ -113,6 +134,7 @@ pub const ALL: &[Dependency] = &[
     Dependency::LibreOffice,
     Dependency::HeifCodec,
     Dependency::HevcCodec,
+    Dependency::HeifDecoder,
 ];
 
 /// Which step of the search order produced the hit. Shown in diagnostics so
@@ -533,6 +555,29 @@ const LIBREOFFICE_INSTALL_MACOS: &[InstallRecipe] = &[
     ),
 ];
 
+/// Linux: the distribution's package is the usual route (`apt install
+/// libreoffice`, `dnf install libreoffice`), which Pluryprint does not run for
+/// the user, so the consent dialog offers the vendor's page. The remediation
+/// text names the package.
+const LIBREOFFICE_INSTALL_LINUX: &[InstallRecipe] = &[InstallRecipe::new(
+    InstallMethod::Web,
+    "https://www.libreoffice.org/download/download-libreoffice/",
+)];
+
+/// The program names an external HEIF decoder goes by on Linux, best first:
+/// libheif's own tools (`heif-dec` from libheif 1.17, `heif-convert` before
+/// it), then ImageMagick 7 (`magick`) and 6 (`convert`), which decode HEIF
+/// through libheif too. [`crate::engine::convert::heif`] builds the argument
+/// vector from the name it was given.
+pub const HEIF_DECODERS_LINUX: &[&str] = &["heif-dec", "heif-convert", "magick", "convert"];
+
+/// The HEIF decoder on Linux: a package from the distribution, so only the
+/// project's page can be offered (see [`LIBREOFFICE_INSTALL_LINUX`]).
+const HEIF_DECODER_INSTALL_LINUX: &[InstallRecipe] = &[InstallRecipe::new(
+    InstallMethod::Web,
+    "https://github.com/strukturag/libheif",
+)];
+
 /// HEIF Image Extensions: free, in the Store, installable by winget.
 const HEIF_INSTALL: &[InstallRecipe] = &[
     InstallRecipe::new(InstallMethod::WingetStore, "9PMMSR1CGPWG").mb(5),
@@ -585,9 +630,13 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
         Dependency::LibreOffice => Spec {
             id: dep,
             name: "LibreOffice",
+            // Linux: the distribution packages and the TDF tarball install
+            // `soffice`; the snap only has `libreoffice`, and a Flatpak is
+            // reachable through its exported launcher, named after the app id.
             executables: match os {
                 Os::Windows => &["soffice.exe"],
-                _ => &["soffice"],
+                Os::MacOs => &["soffice"],
+                Os::Linux => &["soffice", "libreoffice", FLATPAK_LIBREOFFICE],
             },
             codec: false,
             bundle_subdir: "libreoffice",
@@ -602,7 +651,12 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
                     "Office and OpenDocument files cannot be printed until it is \
                      installed. Download it free from https://www.libreoffice.org/download"
                 }
-                _ => {
+                Os::Linux => {
+                    "Office, OpenDocument and RTF files cannot be printed until \
+                     it is installed. Install the libreoffice package from your \
+                     distribution, or download it free from https://www.libreoffice.org/download"
+                }
+                Os::Windows => {
                     "Office, OpenDocument and RTF files cannot be printed until \
                      it is installed. Download it free from https://www.libreoffice.org/download"
                 }
@@ -610,7 +664,7 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
             install: match os {
                 Os::Windows => LIBREOFFICE_INSTALL_WINDOWS,
                 Os::MacOs => LIBREOFFICE_INSTALL_MACOS,
-                Os::Linux => &[],
+                Os::Linux => LIBREOFFICE_INSTALL_LINUX,
             },
         },
         Dependency::Chromium => Spec {
@@ -670,7 +724,53 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
                      Get it from the Microsoft Store (it may be paid)",
             install: if windows { HEVC_INSTALL } else { &[] },
         },
+        Dependency::HeifDecoder => {
+            let linux = os == Os::Linux;
+            Spec {
+                id: dep,
+                name: "HEIF decoder (libheif or ImageMagick)",
+                // macOS has `sips` and Windows asks WIC: nothing to look for.
+                executables: if linux { HEIF_DECODERS_LINUX } else { &[] },
+                codec: false,
+                bundle_subdir: "",
+                blocks: if linux { &["heic", "heif"] } else { &[] },
+                effect: "HEIC/HEIF photos cannot be printed until one is installed. \
+                         Install the libheif tools (libheif-examples on Debian and Ubuntu, \
+                         libheif-tools on Fedora, libheif on Arch) or ImageMagick",
+                install: if linux {
+                    HEIF_DECODER_INSTALL_LINUX
+                } else {
+                    &[]
+                },
+            }
+        }
     }
+}
+
+/// The launcher a Flatpak LibreOffice exports (`flatpak run` under the
+/// app id), found in the Flatpak `exports/bin` directories.
+pub const FLATPAK_LIBREOFFICE: &str = "org.libreoffice.LibreOffice";
+
+/// The `program` folders of LibreOffice versions installed from The Document
+/// Foundation's own packages, which land in `/opt/libreoffice<version>`
+/// instead of on `PATH`. `entries` are the names inside `/opt`; the newest
+/// version comes first, and a bare `libreoffice` (no version) last. Pure.
+pub fn opt_libreoffice_dirs(entries: &[String]) -> Vec<PathBuf> {
+    let version = |name: &str| -> Vec<u32> {
+        name.trim_start_matches("libreoffice")
+            .split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect()
+    };
+    let mut names: Vec<&String> = entries
+        .iter()
+        .filter(|name| name.starts_with("libreoffice"))
+        .collect();
+    names.sort_by(|a, b| version(b).cmp(&version(a)).then_with(|| a.cmp(b)));
+    names
+        .into_iter()
+        .map(|name| Path::new("/opt").join(name).join("program"))
+        .collect()
 }
 
 /// Whether the system codec `dep` is installed. Windows asks WIC (HEIF) and
@@ -860,9 +960,34 @@ pub fn install_dirs(dep: Dependency, os: Os, env: &dyn Fn(&str) -> Option<String
             dirs.push(PathBuf::from("/opt/homebrew/bin"));
             dirs.push(PathBuf::from("/usr/local/bin"));
         }
+        (Dependency::LibreOffice, Os::Linux) => {
+            // The distribution's package puts `soffice` on `PATH` (step 3)
+            // and its program folder here (Debian/Ubuntu, then Fedora). The
+            // TDF packages' `/opt/libreoffice<version>` folders are listed
+            // by [`resolve_on_host`], which reads `/opt`.
+            dirs.push(PathBuf::from("/usr/bin"));
+            dirs.push(PathBuf::from("/usr/lib/libreoffice/program"));
+            dirs.push(PathBuf::from("/usr/lib64/libreoffice/program"));
+            dirs.push(PathBuf::from("/opt/libreoffice/program"));
+            // Sandboxed installs come last: they convert only from a folder
+            // their sandbox can read, which the Office converter arranges
+            // (`office::confined_work_parent`). Flatpak per user, then system
+            // wide; the snap's launcher is in `/snap/bin`.
+            if let Some(home) = env("HOME") {
+                dirs.push(PathBuf::from(home).join(".local/share/flatpak/exports/bin"));
+            }
+            dirs.push(PathBuf::from("/var/lib/flatpak/exports/bin"));
+            dirs.push(PathBuf::from("/snap/bin"));
+        }
+        (Dependency::HeifDecoder, Os::Linux) => {
+            dirs.push(PathBuf::from("/usr/bin"));
+            dirs.push(PathBuf::from("/usr/local/bin"));
+        }
         // Linux installs land on `PATH` (step 3) via the distribution's
         // packages; `/usr/bin` is listed anyway for a `PATH`-less environment.
         (_, Os::Linux) => dirs.push(PathBuf::from("/usr/bin")),
+        // macOS decodes HEIF with `sips` and Windows with WIC.
+        (Dependency::HeifDecoder, _) => {}
         // SumatraPDF does not exist off Windows.
         (Dependency::SumatraPdf, _) => {}
         // Codecs are asked of the OS, not looked for on disk.
@@ -928,15 +1053,35 @@ pub fn resolve_on_host(dep: Dependency, os: Os, configured: Option<&Path>) -> Re
     }
 
     let env = |name: &str| std::env::var(name).ok();
+    // Only the dependencies we bundle are looked for next to our executable:
+    // a HEIF decoder named `convert` must not match an unrelated file there.
     let bundled = current_exe_dir()
+        .filter(|_| !spec.bundle_subdir.is_empty())
         .map(|dir| bundled_dirs(&dir, spec.bundle_subdir))
         .unwrap_or_default();
+    let mut installed = install_dirs(dep, os, &env);
+    if dep == Dependency::LibreOffice && os == Os::Linux {
+        let opt: Vec<String> = std::fs::read_dir("/opt")
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // After the distribution's folders, before the sandboxed launchers.
+        let at = installed
+            .iter()
+            .position(|d| d.ends_with("flatpak/exports/bin"))
+            .unwrap_or(installed.len());
+        installed.splice(at..at, opt_libreoffice_dirs(&opt));
+    }
 
     resolve(&Probe {
         bundled_dirs: &bundled,
         configured,
         path_dirs: &path_dirs(&env),
-        install_dirs: &install_dirs(dep, os, &env),
+        install_dirs: &installed,
         executables: spec.executables,
         exists: is_file,
     })
@@ -1207,6 +1352,10 @@ mod tests {
                 ][..],
             ),
             (Os::MacOs, &[Dependency::LibreOffice][..]),
+            (
+                Os::Linux,
+                &[Dependency::LibreOffice, Dependency::HeifDecoder][..],
+            ),
         ] {
             for dep in deps {
                 let report = from_resolution(&spec(*dep, os), &Resolution::Missing);
@@ -1276,6 +1425,105 @@ mod tests {
         assert_eq!(cask.args(), ["install", "--cask", "libreoffice"]);
         let options = install_options(&[*cask], &|_| true);
         assert_eq!(options[0].command, "brew install --cask libreoffice");
+    }
+
+    /// The wire id, the reason a paused job carries and the i18n key are one
+    /// spelling: serde's.
+    #[test]
+    fn fr_058_dependency_id_is_the_serde_spelling() {
+        for dep in ALL
+            .iter()
+            .chain(&[Dependency::Chromium, Dependency::Pandoc])
+        {
+            let wire = serde_json::to_value(dep).unwrap();
+            assert_eq!(wire, dep.id(), "{dep:?}");
+        }
+    }
+
+    /// FR-052/058 on Linux: HEIC/HEIF go through an external decoder that is
+    /// looked for like a program, blocks exactly those two formats while
+    /// missing, and names the distribution packages that provide it. It is
+    /// never a concern on macOS (`sips`) or Windows (WIC).
+    #[test]
+    fn fr_058_linux_heif_decoder_is_a_program_with_package_hints() {
+        let linux = spec(Dependency::HeifDecoder, Os::Linux);
+        assert!(linux.applicable() && !linux.codec);
+        assert_eq!(
+            linux.executables,
+            ["heif-dec", "heif-convert", "magick", "convert"]
+        );
+        assert_eq!(linux.blocks, ["heic", "heif"]);
+        let text = linux.remediation();
+        for package in ["libheif-examples", "libheif-tools", "ImageMagick"] {
+            assert!(text.contains(package), "{text}");
+        }
+        let report = from_resolution(&linux, &Resolution::Missing);
+        assert_eq!(report.install.len(), 1);
+        assert_eq!(report.install[0].method, InstallMethod::Web);
+        for os in [Os::Windows, Os::MacOs] {
+            let report = from_resolution(&spec(Dependency::HeifDecoder, os), &Resolution::Missing);
+            assert!(!report.applicable && report.remediation.is_none(), "{os:?}");
+        }
+        // Found anywhere on PATH, and in /usr/bin for a PATH-less start.
+        let dirs = install_dirs(Dependency::HeifDecoder, Os::Linux, &|_| None);
+        assert!(dirs.contains(&PathBuf::from("/usr/bin")));
+        assert!(install_dirs(Dependency::HeifDecoder, Os::MacOs, &|_| None).is_empty());
+    }
+
+    /// FR-053 on Linux: LibreOffice is found as the distribution installs it,
+    /// as The Document Foundation's own packages install it (`/opt`), and, last,
+    /// as a Flatpak or a snap. RTF goes through it, so its message says so.
+    #[test]
+    fn fr_053_linux_libreoffice_is_found_where_each_package_puts_it() {
+        let s = spec(Dependency::LibreOffice, Os::Linux);
+        assert_eq!(
+            s.executables,
+            ["soffice", "libreoffice", FLATPAK_LIBREOFFICE]
+        );
+        assert!(s.blocks.contains(&"rtf") && s.effect.contains("RTF"));
+        assert!(s.effect.contains("libreoffice package"), "{}", s.effect);
+        assert_eq!(s.install[0].method, InstallMethod::Web);
+
+        let env = |name: &str| (name == "HOME").then(|| "/home/ada".to_string());
+        let dirs = install_dirs(Dependency::LibreOffice, Os::Linux, &env);
+        let at = |p: &str| {
+            dirs.iter()
+                .position(|d| d == Path::new(p))
+                .unwrap_or_else(|| panic!("{p} not in {dirs:?}"))
+        };
+        assert!(at("/usr/bin") < at("/usr/lib/libreoffice/program"));
+        assert!(
+            at("/usr/lib64/libreoffice/program") < at("/home/ada/.local/share/flatpak/exports/bin")
+        );
+        assert!(at("/var/lib/flatpak/exports/bin") < at("/snap/bin"));
+        assert_eq!(dirs.last().unwrap(), Path::new("/snap/bin"));
+        // Without HOME the per-user Flatpak folder is simply not a candidate.
+        let bare = install_dirs(Dependency::LibreOffice, Os::Linux, &|_| None);
+        assert_eq!(bare.len(), dirs.len() - 1);
+    }
+
+    #[test]
+    fn fr_053_tdf_packages_in_opt_are_searched_newest_first() {
+        let entries: Vec<String> = [
+            "google",
+            "libreoffice7.6",
+            "libreoffice",
+            "libreoffice24.8",
+            "libreoffice25.2",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            opt_libreoffice_dirs(&entries),
+            [
+                PathBuf::from("/opt/libreoffice25.2/program"),
+                PathBuf::from("/opt/libreoffice24.8/program"),
+                PathBuf::from("/opt/libreoffice7.6/program"),
+                PathBuf::from("/opt/libreoffice/program"),
+            ]
+        );
+        assert!(opt_libreoffice_dirs(&[]).is_empty());
     }
 
     #[test]
