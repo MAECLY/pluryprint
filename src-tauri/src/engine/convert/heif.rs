@@ -177,7 +177,7 @@ pub fn convert_with_external(
     let kind = ExternalDecoder::of(decoder).unwrap_or(ExternalDecoder::Libheif);
     let png = work.path().join("heif.png");
     let staged = kind.stage_input(input, work)?;
-    let mut cmd = std::process::Command::new(decoder);
+    let mut cmd = crate::util::appimage::host_command(decoder);
     cmd.args(kind.args(&staged, &png)).current_dir(work.path());
     let log = work.path().join("heif-decoder.log");
     progress(0.0);

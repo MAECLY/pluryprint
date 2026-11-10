@@ -43,8 +43,6 @@ use super::PrinterCaps;
 
 #[cfg(unix)]
 use anyhow::Context;
-#[cfg(unix)]
-use std::process::Command;
 
 /// The option flags for a printer whose capabilities are not known — see
 /// [`lp_opts_for`].
@@ -373,7 +371,7 @@ pub fn spool(
     let staged = stage_named(pdf, title);
     let pdf = staged.as_ref().map_or(pdf, |(_, link)| link.as_path());
     let args = lp_args_for(printer, pdf, settings, caps, title);
-    let mut child = Command::new("lp")
+    let mut child = crate::util::appimage::host_command("lp")
         .args(&args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -635,7 +633,7 @@ pub fn job_state(os_job_id: &str) -> Result<super::OsJobState, super::TrackError
     // The test is named by its absolute path and the child runs in the temp
     // folder, so nothing in the caller's working directory is consulted.
     let workdir = test.path().parent().map(Path::to_path_buf);
-    let mut ipptool = Command::new("ipptool");
+    let mut ipptool = crate::util::appimage::host_command("ipptool");
     ipptool
         .args(ipptool_args(number, test.path()))
         .env("LC_ALL", "C")
@@ -663,7 +661,7 @@ pub fn job_state(os_job_id: &str) -> Result<super::OsJobState, super::TrackError
         .map(|(d, _)| d)
         .unwrap_or(os_job_id);
     let lpstat = |which: &str| -> Result<String, TrackError> {
-        let out = Command::new("lpstat")
+        let out = crate::util::appimage::host_command("lpstat")
             .args(["-W", which, "-o", dest])
             .env("LC_ALL", "C")
             .env("LANG", "C")
@@ -687,7 +685,7 @@ pub fn job_state(os_job_id: &str) -> Result<super::OsJobState, super::TrackError
 /// Best-effort cancellation of a CUPS job by its id (`cancel <id>`).
 #[cfg(unix)]
 pub fn cancel(os_job_id: &str) -> anyhow::Result<()> {
-    let status = Command::new("cancel")
+    let status = crate::util::appimage::host_command("cancel")
         .arg(os_job_id)
         .status()
         .with_context(|| format!("failed to run `cancel {os_job_id}`"))?;
@@ -1163,7 +1161,7 @@ mod tests {
     #[test]
     fn embedded_ipptool_test_reports_an_unknown_job_as_gone() {
         let file = job_state_test_file().unwrap();
-        let out = match Command::new("ipptool")
+        let out = match crate::util::appimage::host_command("ipptool")
             .args(ipptool_args(999_999_999, file.path()))
             .env("LC_ALL", "C")
             .output()

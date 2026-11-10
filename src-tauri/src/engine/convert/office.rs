@@ -42,7 +42,6 @@
 //! `--infilter` branch stays for a caller that still sends a `.txt`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -166,7 +165,7 @@ pub fn convert_with(
             ))
         })?;
 
-    let mut cmd = Command::new(soffice);
+    let mut cmd = crate::util::appimage::host_command(soffice);
     cmd.args(soffice_args(&profile, &out_dir, &staged, &ext))
         .current_dir(work.path());
     run_bounded(

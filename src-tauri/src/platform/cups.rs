@@ -17,7 +17,8 @@
 //! scan that could not run.
 
 use std::collections::HashMap;
-use std::process::Command;
+
+use crate::util::appimage::host_command;
 
 use anyhow::Context;
 
@@ -27,7 +28,7 @@ use crate::util::error::{IpcErrorCode, LocalizedError};
 
 /// Run a CLI in the C locale and return its stdout (lossy UTF-8).
 fn lc_run(program: &str, args: &[&str]) -> anyhow::Result<String> {
-    let out = Command::new(program)
+    let out = host_command(program)
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -40,7 +41,7 @@ fn lc_run(program: &str, args: &[&str]) -> anyhow::Result<String> {
 /// the tests' queue clean-up).
 #[cfg(any(test, target_os = "macos"))]
 fn run_ok(program: &str, args: &[&str]) -> anyhow::Result<()> {
-    let status = Command::new(program)
+    let status = host_command(program)
         .args(args)
         .status()
         .with_context(|| format!("failed to spawn `{program}`"))?;
@@ -60,7 +61,7 @@ fn run_ok(program: &str, args: &[&str]) -> anyhow::Result<()> {
 /// A tool that cannot even be started means CUPS itself is not answering
 /// (`cups_unavailable`).
 fn run_ok_capture(program: &str, args: &[&str], reason: &'static str) -> anyhow::Result<()> {
-    let out = Command::new(program)
+    let out = host_command(program)
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -277,7 +278,7 @@ const LAUNCH_GRACE: std::time::Duration = std::time::Duration::from_millis(1500)
 ///
 /// Inside an AppImage the environment points GTK and GIO at the libraries
 /// bundled with Pluryprint; a system tool must not load them, so those
-/// variables are cleaned first ([`host_env`]).
+/// variables are cleaned first ([`crate::util::appimage::host_env`]).
 #[cfg(not(target_os = "macos"))]
 fn launch_detached(
     program: &str,
@@ -285,18 +286,16 @@ fn launch_detached(
     appdir: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     use std::process::Stdio;
-    let mut cmd = Command::new(program);
+    let mut cmd = std::process::Command::new(program);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if let Some(appdir) = appdir {
-        for (key, value) in host_env(appdir, std::env::vars_os()) {
-            match value {
-                Some(value) => cmd.env(key, value),
-                None => cmd.env_remove(key),
-            };
-        }
+        crate::util::appimage::apply(
+            &mut cmd,
+            &crate::util::appimage::host_env(appdir, std::env::vars_os()),
+        );
     }
     let mut child = cmd
         .spawn()
@@ -313,39 +312,6 @@ fn launch_detached(
         let _ = child.wait();
     });
     Ok(())
-}
-
-/// The environment changes that keep a host program from loading what an
-/// AppImage mounted at `appdir` bundles. Pure.
-///
-/// A list variable (`PATH`, `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`...) loses its
-/// entries inside `appdir` and is removed when nothing is left; any other
-/// variable whose value points inside `appdir` (`GTK_PATH`,
-/// `GDK_PIXBUF_MODULE_FILE`, `GIO_MODULE_DIR`...) is removed, and so are
-/// `APPDIR`, `APPIMAGE` and `ARGV0` themselves. `None` means "remove".
-#[cfg(any(test, not(target_os = "macos")))]
-fn host_env(
-    appdir: &std::path::Path,
-    vars: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
-) -> Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> {
-    let inside = |p: &std::path::Path| !appdir.as_os_str().is_empty() && p.starts_with(appdir);
-    let mut changes = Vec::new();
-    for (key, value) in vars {
-        if ["APPDIR", "APPIMAGE", "ARGV0"].iter().any(|k| key == *k) {
-            changes.push((key, None));
-            continue;
-        }
-        let entries: Vec<std::path::PathBuf> = std::env::split_paths(&value).collect();
-        if !entries.iter().any(|e| inside(e)) {
-            continue;
-        }
-        let kept: Vec<&std::path::PathBuf> = entries.iter().filter(|e| !inside(e)).collect();
-        let joined = std::env::join_paths(kept.iter().filter(|e| !e.as_os_str().is_empty()))
-            .ok()
-            .filter(|v| !v.is_empty());
-        changes.push((key, if entries.len() > 1 { joined } else { None }));
-    }
-    changes
 }
 
 // ----------------------------------------------------------------------------
@@ -504,7 +470,7 @@ pub fn default_printer() -> anyhow::Result<Option<String>> {
 /// painted as "no printers found" (which is what `unwrap_or_default()` used to
 /// do).
 fn run_ippfind(args: &[&str]) -> anyhow::Result<String> {
-    let out = match Command::new("ippfind")
+    let out = match host_command("ippfind")
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -900,7 +866,7 @@ pub fn engine_caps(p: &Printer) -> crate::engine::print::PrinterCaps {
 
 /// `lpoptions -p <name> -l`, or `None` when it could not run or failed.
 fn capability_probe(name: &str) -> Option<String> {
-    Command::new("lpoptions")
+    host_command("lpoptions")
         .args(["-p", name, "-l"])
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -1620,36 +1586,6 @@ mod tests {
             let kde = list.iter().find(|(p, _)| *p == "kcmshell5").unwrap();
             assert_eq!(kde.1, ["kcm_printer_manager"]);
         }
-    }
-
-    /// Inside an AppImage, a host program loses every variable that points
-    /// into the mounted image, and keeps the rest.
-    #[test]
-    fn host_programs_do_not_inherit_the_appimage_libraries() {
-        use std::ffi::OsString;
-        let appdir = std::path::Path::new("/tmp/.mount_PluryX");
-        let vars = [
-            ("PATH", "/tmp/.mount_PluryX/usr/bin:/usr/bin:/bin"),
-            ("GTK_PATH", "/tmp/.mount_PluryX/usr/lib/gtk-3.0"),
-            ("LD_LIBRARY_PATH", "/tmp/.mount_PluryX/usr/lib"),
-            ("HOME", "/home/ada"),
-            ("APPDIR", "/tmp/.mount_PluryX"),
-            ("APPIMAGE", "/home/ada/Pluryprint.AppImage"),
-        ]
-        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
-        let changes = host_env(appdir, vars.into_iter());
-        let get = |k: &str| {
-            changes
-                .iter()
-                .find(|(key, _)| key == k)
-                .map(|(_, v)| v.clone())
-        };
-        assert_eq!(get("PATH"), Some(Some(OsString::from("/usr/bin:/bin"))));
-        assert_eq!(get("GTK_PATH"), Some(None));
-        assert_eq!(get("LD_LIBRARY_PATH"), Some(None));
-        assert_eq!(get("APPDIR"), Some(None));
-        assert_eq!(get("APPIMAGE"), Some(None));
-        assert_eq!(get("HOME"), None, "untouched");
     }
 
     #[test]
