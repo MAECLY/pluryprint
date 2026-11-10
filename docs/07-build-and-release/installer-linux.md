@@ -144,7 +144,8 @@ Checked on 2026-11-09 in an Ubuntu 22.04 arm64 container (WebKitGTK 2.50.4, GTK 
 - **16 KiB pages.** Asahi Linux and some other ARM64 kernels use 16 KiB pages, which libraries built for 4 KiB pages may not load in; the AppImage carries Ubuntu's.
 - **Icons.** The PNGs are the macOS tile with its inset ([icons/README.md](../../src-tauri/icons/README.md)), not a full-bleed Linux icon. tauri installs `128x128@2x.png` as `hicolor/256x256@2/`, a folder icon themes do not read; the 512 px icon covers that size.
 - **Distribution channels.** No apt or dnf repository, Flathub, Snap or AUR. A `.deb` user gets updates through the app or a new download.
-- **Runner lifetime.** GitHub retires runner images around their upstream end of life; moving the baseline to 24.04 raises the glibc floor and needs `NO_STRIP=true` for linuxdeploy.
+- **Runner lifetime.** GitHub has deprecated the `ubuntu-22.04` and `ubuntu-22.04-arm` images (reported as from 17 September 2026, with scheduled brownouts and removal on 17 April 2027; check actions/runner-images issue #14254). A tag pushed during a brownout fails the Linux builds and blocks the draft until they are re-run. The way out that keeps the glibc 2.35 floor is to run the build jobs on `ubuntu-24.04`/`ubuntu-24.04-arm` inside an `ubuntu:22.04` container (installing `sudo`, `curl`, `git` and the toolchain in it); moving the baseline itself to 24.04 raises the glibc floor and needs `NO_STRIP=true` for linuxdeploy. Neither is done for 0.0.5.
+- **Unpinned AppImage tooling.** linuxdeploy, its GTK and AppImage plug-ins and the type2-runtime are fetched from GitHub's "continuous" releases at build time, and the runtime ends up inside the shipped AppImage; every other release input is pinned. `appimage-sources.sh` now records the runtime commit each release shipped. Pinning means pre-seeding `~/.cache/tauri/` with checked copies (`sha256sum -c`) before `tauri build`; not done for 0.0.5.
 
 ## See also
 

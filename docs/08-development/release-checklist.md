@@ -116,6 +116,7 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 - [ ] Each macOS artifact passes `codesign --verify --deep --strict --verbose=2 <artifact>`.
 - [ ] Each macOS `.pkg` and `.dmg` passes `spctl --assess --verbose <artifact>`.
 - [ ] Each macOS artifact passes `stapler validate <artifact>`.
+- [ ] Linux: the draft carries `Pluryprint_X.Y.Z_linux_{x64,arm64}.{AppImage,deb}`, their `.sig` files and `Pluryprint_X.Y.Z_linux_{x64,arm64}_appimage-sources.txt` (each naming its type2-runtime commit), and `latest.json` has `linux-x86_64`, `linux-aarch64` (→ `.AppImage`) and `linux-x86_64-deb`, `linux-aarch64-deb` (→ `.deb`).
 - [ ] Linux has no OS signature to check. Each `.deb` lists the expected contents and dependencies (`dpkg-deb --info` / `--contents`: `Depends: cups-client, libc6 (>= 2.35), libwebkit2gtk-4.1-0 (>= 2.42)` plus the unversioned WebKitGTK and GTK entries Tauri adds, `Recommends: cups-ipp-utils, libheif-examples`, no `Suggests` (Tauri cannot set one), the `.desktop` entry, the Dolphin and Nemo entries), and each AppImage starts with `--version` on its own architecture.
 
 ## Release day (T-0)
