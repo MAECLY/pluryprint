@@ -47,14 +47,11 @@ fn no_progress() -> impl Fn(f32) + Send + Sync {
 #[cfg(unix)]
 mod fakes {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
-    /// Write an executable `/bin/sh` script to `dir/name`.
+    /// Write an executable `/bin/sh` script to `dir/name`, returned once it
+    /// can be started (no `ETXTBSY`: [`crate::util::fake_program`]).
     pub fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-        let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
+        crate::util::fake_program::script(dir, name, body)
     }
 
     /// A fake `soffice` that records its argv and writes `<outdir>/<stem>.pdf`.

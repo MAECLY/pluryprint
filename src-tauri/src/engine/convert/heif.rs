@@ -793,58 +793,26 @@ mod tests {
     /// behind when it is started, records `MAGICK_CONFIGURE_PATH`,
     /// `MAGICK_TEMPORARY_PATH`, `HOME`, `XDG_CONFIG_HOME` and the policy it
     /// names into `<dir>/env`, and "decodes" by copying a real PNG
-    /// to its last argument (without ImageMagick's `png:` prefix).
-    ///
-    /// It is returned once it can be started: on Linux a test thread that
-    /// forks while the script is still open for writing holds it open in the
-    /// child until that child execs, and starting the script then fails with
-    /// `ETXTBSY`. A probe run (`FAKE_PROBE`, which exits before leaving any
-    /// trace) is retried until it starts.
+    /// to its last argument (without ImageMagick's `png:` prefix). Returned
+    /// once it can be started ([`crate::util::fake_program`]).
     #[cfg(unix)]
     fn fake_decoder(dir: &Path, name: &str) -> PathBuf {
         let png = dir.join("real.png");
         ::image::RgbImage::from_pixel(4, 3, ::image::Rgb([10, 200, 10]))
             .save_with_format(&png, ::image::ImageFormat::Png)
             .unwrap();
-        let path = dir.join(name);
         let body = format!(
-            r#"#!/bin/sh
-[ -n "$FAKE_PROBE" ] && exit 0
-: > '{ran}'
+            r#": > '{ran}'
 printf '%s\n' "${{MAGICK_CONFIGURE_PATH:-unset}}" "${{MAGICK_TEMPORARY_PATH:-unset}}" \
   "${{HOME:-unset}}" "${{XDG_CONFIG_HOME:-unset}}" > '{env}'
 [ -n "$MAGICK_CONFIGURE_PATH" ] && cat "$MAGICK_CONFIGURE_PATH/policy.xml" >> '{env}'
 for last in "$@"; do :; done
-cp '{png}' "${{last#png:}}"
-"#,
+cp '{png}' "${{last#png:}}""#,
             ran = dir.join("ran").display(),
             env = dir.join("env").display(),
             png = png.display(),
         );
-        write_fake(&path, &body)
-    }
-
-    /// Write the `/bin/sh` script `body` (which must exit at once, leaving
-    /// nothing behind, when `FAKE_PROBE` is set) to `path` as an executable,
-    /// and return `path` once it can be started (see [`fake_decoder`]).
-    #[cfg(unix)]
-    fn write_fake(path: &Path, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(path, body).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        for _ in 0..100 {
-            match std::process::Command::new(path)
-                .env("FAKE_PROBE", "1")
-                .status()
-            {
-                Ok(status) if status.success() => return path.to_path_buf(),
-                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                other => panic!("{} does not start: {other:?}", path.display()),
-            }
-        }
-        panic!("{} stayed busy", path.display());
+        crate::util::fake_program::script(dir, name, &body)
     }
 
     /// A `.heic` that is really something else, or no HEIF at all.
@@ -980,16 +948,14 @@ cp '{png}' "${{last#png:}}"
         ::image::RgbImage::from_pixel(2, 2, ::image::Rgb([1, 2, 3]))
             .save_with_format(&png, ::image::ImageFormat::Png)
             .unwrap();
-        let decoder = write_fake(
-            &dir.path().join("heif-convert"),
+        let decoder = crate::util::fake_program::script(
+            dir.path(),
+            "heif-convert",
             &format!(
-                r#"#!/bin/sh
-[ -n "$FAKE_PROBE" ] && exit 0
-printf '<svg/>' > '{input}'
+                r#"printf '<svg/>' > '{input}'
 printf '%s\n' "$1" > '{argv}'
 cp "$1" '{seen}'
-cp '{png}' "$2"
-"#,
+cp '{png}' "$2""#,
                 input = input.display(),
                 argv = dir.path().join("argv").display(),
                 seen = dir.path().join("seen").display(),
