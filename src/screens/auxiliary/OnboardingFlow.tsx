@@ -8,7 +8,7 @@ import { useModalFocus } from '@/components/useModal';
 import { useT } from '@/i18n/I18nProvider';
 import { cliProgram } from '@/lib/format';
 import {
-  appImageFileName,
+  appImageNameOf,
   linuxMenuKey,
   rememberedHostInfo,
   useHostPlatform,
@@ -55,7 +55,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const hostInfo = rememberedHostInfo();
   const program = cliProgram(host.os, {
     linuxPackage: host.linuxPackage,
-    appImage: appImageFileName(hostInfo?.version, hostInfo?.arch),
+    appImage: appImageNameOf(hostInfo),
   });
   const params = {
     name: findProfileIn(profiles, null).name,

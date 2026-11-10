@@ -824,9 +824,19 @@ dependencies?: DependencyReport[];
  * CLI (FR-008). The installers do not put it on `PATH`, so a command the
  * UI offers to copy has to name this path for the paste to work.
  * `None` when the OS will not say (the UI then explains the requirement
- * instead of offering a command that cannot run).
+ * instead of offering a command that cannot run). Inside a Linux
+ * AppImage it is the AppImage file itself (`$APPIMAGE`), wherever it
+ * was saved and whatever it is called now, never the temporary mount
+ * the binary runs from.
  */
-executable?: string | null }
+executable?: string | null; 
+/**
+ * The package this build was bundled as, from Tauri's own stamp
+ * (`tauri::utils::platform::bundle_type`): `"appimage"`, `"deb"`,
+ * `"rpm"`, `"nsis"`, `"msi"` or `"app"`; `None` for a build that was
+ * not bundled (`cargo run`). The updater reads the same stamp.
+ */
+bundle_type?: string | null }
 /**
  * The subset of [`Config`] exposed to the frontend as one bundle by
  * `get_app_settings` / `set_app_settings`. Deliberately excludes `printers`

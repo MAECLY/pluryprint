@@ -146,6 +146,24 @@ export function appImageFileName(
   return `Pluryprint_${version}_linux_${label}.AppImage`;
 }
 
+/**
+ * The AppImage's file name for `info`: the real one when the backend reports
+ * the AppImage file as the executable (it does from `$APPIMAGE`, so a file
+ * renamed by the user or an integrator, or one that updated itself in place
+ * and kept its old name, is still named right), else the published name
+ * ({@link appImageFileName}). A name with characters a shell would split or
+ * expand falls back to the published one, since commands put it after `./`
+ * unquoted.
+ */
+export function appImageNameOf(info: HostInfo | null | undefined): string {
+  const exe = info?.executable ?? '';
+  if (info && linuxPackageOf(info) === 'appimage' && !isAppImageMount(exe)) {
+    const name = exe.slice(exe.lastIndexOf('/') + 1);
+    if (/^[\w.+-]+$/.test(name)) return name;
+  }
+  return appImageFileName(info?.version, info?.arch);
+}
+
 // ---------------------------------------------------------------------------
 // The remembered host (fed by every `app_info` answer)
 // ---------------------------------------------------------------------------

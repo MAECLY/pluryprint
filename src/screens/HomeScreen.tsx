@@ -26,7 +26,7 @@ import {
 } from '@/lib/format';
 import { fetchAppInfo, isTauri, openLogsFolder } from '@/lib/ipc';
 import {
-  appImageFileName,
+  appImageNameOf,
   linuxMenuKey,
   rememberedHostInfo,
   useHostPlatform,
@@ -178,7 +178,7 @@ export function HomeScreen({ onAction }: HomeScreenProps) {
   const hostInfo = rememberedHostInfo();
   const cliLinux = {
     linuxPackage: host.linuxPackage,
-    appImage: appImageFileName(hostInfo?.version, hostInfo?.arch),
+    appImage: appImageNameOf(hostInfo),
   };
   const cliCommand = cliPrintCommand({
     executable: exe.path,

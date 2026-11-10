@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   appImageFileName,
+  appImageNameOf,
   hostOs,
   hostPlatform,
   isAppImageMount,
@@ -125,6 +126,42 @@ describe('isAppImageMount', () => {
     expect(isAppImageMount('/home/ana/Pluryprint.AppImage')).toBe(false);
     expect(isAppImageMount('/usr/bin/pluryprint')).toBe(false);
     expect(isAppImageMount(null)).toBe(false);
+  });
+});
+
+describe('appImageNameOf', () => {
+  const linux = { os: 'linux', version: '0.0.6', arch: 'x86_64' };
+  it('names the AppImage file the backend reports, even after an in-place update', () => {
+    expect(
+      appImageNameOf({
+        ...linux,
+        bundle_type: 'appimage',
+        executable: '/home/u/Apps/Pluryprint_0.0.5_linux_x64.AppImage',
+      }),
+    ).toBe('Pluryprint_0.0.5_linux_x64.AppImage');
+    expect(
+      appImageNameOf({
+        ...linux,
+        bundle_type: 'appimage',
+        executable: '/home/u/Applications/pluryprint',
+      }),
+    ).toBe('pluryprint');
+  });
+  it('falls back to the published name for a mount, a shell-unsafe name or no info', () => {
+    expect(
+      appImageNameOf({
+        ...linux,
+        executable: '/tmp/.mount_abc/usr/bin/pluryprint',
+      }),
+    ).toBe('Pluryprint_0.0.6_linux_x64.AppImage');
+    expect(
+      appImageNameOf({
+        ...linux,
+        bundle_type: 'appimage',
+        executable: '/home/u/My Apps/Pluryprint (1).AppImage',
+      }),
+    ).toBe('Pluryprint_0.0.6_linux_x64.AppImage');
+    expect(appImageNameOf(null)).toBe('Pluryprint_*.AppImage');
   });
 });
 

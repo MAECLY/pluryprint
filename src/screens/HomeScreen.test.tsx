@@ -324,6 +324,37 @@ describe('HomeScreen', () => {
     }
   });
 
+  it('FR-008: an AppImage that updated itself in place is named by its real file', async () => {
+    mockIPC((cmd) => {
+      if (cmd === 'app_info') {
+        return {
+          ...fixtureAppInfo,
+          os: 'linux',
+          arch: 'x86_64',
+          version: '0.0.6',
+          bundle_type: 'appimage',
+          executable: '/home/ada/Apps/Pluryprint_0.0.5_linux_x64.AppImage',
+        };
+      }
+      return null;
+    });
+    try {
+      renderHome();
+      const card = screen.getByRole('button', { name: /run from cli/i });
+      await vi.waitFor(() =>
+        expect(card).toHaveAttribute(
+          'title',
+          "/home/ada/Apps/Pluryprint_0.0.5_linux_x64.AppImage print --files '*.pdf' --profile Quick",
+        ),
+      );
+      expect(card).not.toHaveTextContent('0.0.6_linux');
+    } finally {
+      clearMocks();
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      delete (window as unknown as Record<string, unknown>).__TAURI__;
+    }
+  });
+
   it('FR-008: from an AppImage, the command runs the AppImage file, never its temporary mount', async () => {
     mockIPC((cmd) => {
       if (cmd === 'app_info') {
