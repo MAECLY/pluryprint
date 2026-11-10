@@ -16,8 +16,8 @@ ISOLATIONAWARE_MANIFEST_RESOURCE_ID RT_MANIFEST "shellext.manifest"
 #define VFT2_UNKNOWN      0x00000000L
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,0,4,0
-  PRODUCTVERSION  0,0,4,0
+  FILEVERSION     0,0,5,0
+  PRODUCTVERSION  0,0,5,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          VOS_NT_WINDOWS32
@@ -30,12 +30,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "Maecly"
       VALUE "FileDescription",  "Pluryprint Explorer context menu"
-      VALUE "FileVersion",      "0.0.4.0"
+      VALUE "FileVersion",      "0.0.5.0"
       VALUE "InternalName",     "shell_ext_win"
       VALUE "LegalCopyright",   "AGPL-3.0-only"
       VALUE "OriginalFilename", "shell_ext_win.dll"
       VALUE "ProductName",      "Pluryprint"
-      VALUE "ProductVersion",   "0.0.4.0"
+      VALUE "ProductVersion",   "0.0.5.0"
     END
   END
   BLOCK "VarFileInfo"
