@@ -1,0 +1,46 @@
+name: Landing
+
+# Redeploys the landing page (https://pluryprint.maecly.com) when a release is
+# published. The landing lives in its own repository, MAECLY/pluryprint-landing,
+# and Vercel builds it from that repository's main branch, filling in the
+# version, date, download links and file sizes of this repository's latest
+# published release. Drafts and pre-releases are never "latest", so the run a
+# pre-release starts is harmless: it rebuilds the landing on the stable
+# release it already shows.
+#
+# This workflow only calls the Vercel Deploy Hook kept in the
+# LANDING_DEPLOY_HOOK secret. The hook deploys the landing repository's main
+# branch; nothing here is checked out, built or uploaded, and the job needs no
+# token. A release published with GITHUB_TOKEN would not trigger this at all;
+# ours are published by a person, and Run workflow redeploys by hand.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# The hook's URL is the only credential, and it comes from a secret.
+permissions: {}
+
+concurrency:
+  group: landing
+  cancel-in-progress: false
+
+jobs:
+  redeploy:
+    name: Redeploy the landing
+    runs-on: ubuntu-latest
+    steps:
+      # The URL reaches the shell through the environment and is never
+      # printed: anyone holding it can start a deployment. --fail-with-body
+      # turns a refused hook into a failed run that shows Vercel's answer.
+      - name: Call the Vercel Deploy Hook
+        env:
+          LANDING_DEPLOY_HOOK: ${{ secrets.LANDING_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$LANDING_DEPLOY_HOOK" ]; then
+            echo "::error::The LANDING_DEPLOY_HOOK secret is not set: add the Vercel Deploy Hook URL of MAECLY/pluryprint-landing (branch main) to this repository's Actions secrets."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --retry 3 \
+            --request POST "$LANDING_DEPLOY_HOOK"
+          echo

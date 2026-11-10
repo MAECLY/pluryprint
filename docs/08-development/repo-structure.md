@@ -30,7 +30,7 @@ pluryprint/
 │   │   ├── ci.yml               # PR gate: lint, typecheck, tests (see ci-cd.md)
 │   │   ├── release.yml          # Signed draft release on a v* tag
 │   │   ├── release-channels.yml # Moves the beta manifest on publish
-│   │   └── pages.yml            # The landing page
+│   │   └── landing.yml          # Redeploys the landing (MAECLY/pluryprint-landing) on publish
 │   ├── ISSUE_TEMPLATE/          # bug_report.yml, feature_request.yml, config.yml
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── CODEOWNERS
@@ -96,7 +96,7 @@ Standard top-level metadata for any open source repo. GitHub renders `README.md`
 
 GitHub-specific configuration. Treated as code: changes go through PR review.
 
-- `workflows/`: `ci.yml` (the pull-request gate: frontend lint, typecheck, format and tests; Rust fmt, clippy and tests on Windows and macOS), `release.yml` (signed draft release on a `v*` tag), `release-channels.yml` (beta manifest) and `pages.yml` (landing page). There is no sign-off check; contributions come in under the [CLA](../../CLA.md), which `PULL_REQUEST_TEMPLATE.md` asks for. There is **no `nightly.yml`**; see [ci-cd.md](../07-build-and-release/ci-cd.md).
+- `workflows/`: `ci.yml` (the pull-request gate: frontend lint, typecheck, format and tests; Rust fmt, clippy and tests on Windows and macOS), `release.yml` (signed draft release on a `v*` tag), `release-channels.yml` (beta manifest) and `landing.yml` (calls the Vercel Deploy Hook that redeploys the landing page, which lives in [`MAECLY/pluryprint-landing`](https://github.com/MAECLY/pluryprint-landing), when a release is published). There is no sign-off check; contributions come in under the [CLA](../../CLA.md), which `PULL_REQUEST_TEMPLATE.md` asks for. There is **no `nightly.yml`**; see [ci-cd.md](../07-build-and-release/ci-cd.md).
 - `ISSUE_TEMPLATE/`: structured templates for bug reports, feature requests, security issues.
 - `PULL_REQUEST_TEMPLATE.md`: required checklist when opening PRs.
 - `CODEOWNERS`: maps file paths to maintainers for auto-requested review.
