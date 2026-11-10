@@ -277,7 +277,11 @@ pub(crate) fn render_system_capped(
     cmd.arg(crate::worker::WORKER_FLAG)
         .arg(crate::worker::WorkerKind::RenderPdf.as_arg())
         .args(request.to_args())
-        .current_dir(work.path());
+        .current_dir(worker_cwd(
+            work.path(),
+            std::env::var_os("APPDIR").as_deref(),
+            cfg!(target_os = "linux"),
+        ));
     let log = work.path().join("render.log");
     match run_capped(
         cmd,
@@ -322,6 +326,29 @@ pub(crate) fn render_system_capped(
         Err(CappedError::Engine(other)) => return Err(other),
     }
     super::take_output(&produced, output, RENDERER_LABEL, &log)
+}
+
+/// The folder the render worker starts in: the job's private work folder,
+/// except inside a Linux AppImage. There linuxdeploy rewrites the paths
+/// WebKitGTK spawns its helper processes from (`WebKitNetworkProcess`,
+/// `WebKitWebProcess`) to `././/lib/<triplet>/webkit2gtk-4.1/…`, relative to
+/// the current folder, and the AppImage's AppRun starts the app in
+/// `$APPDIR/usr` so they resolve. A worker started anywhere else aborts with
+/// "Unable to spawn a new child process" before it loads the page, so it
+/// starts in `$APPDIR/usr` too. Every path the worker uses is absolute, so the
+/// folder changes nothing else. Pure: `appdir` is the `APPDIR` the AppImage
+/// runtime sets, `linux` whether this is Linux.
+pub(crate) fn worker_cwd(work: &Path, appdir: Option<&std::ffi::OsStr>, linux: bool) -> PathBuf {
+    if linux {
+        if let Some(usr) = appdir
+            .filter(|d| !d.is_empty())
+            .map(|d| Path::new(d).join("usr"))
+            .filter(|usr| usr.is_dir())
+        {
+            return usr;
+        }
+    }
+    work.to_path_buf()
 }
 
 /// The Content-Security-Policy every staged page carries: no script, plugin,
@@ -778,6 +805,30 @@ mod tests {
         std::fs::write(dir.join(gui), b"app").unwrap();
         assert_eq!(worker_exe_for(&dir.join(cli)).unwrap(), dir.join(gui));
         assert_eq!(worker_exe_for(&dir.join(gui)).unwrap(), dir.join(gui));
+    }
+
+    /// Inside a Linux AppImage the worker starts in `$APPDIR/usr`, where
+    /// WebKitGTK's relative helper paths resolve; everywhere else (and when
+    /// `APPDIR` is unset, empty or not an AppImage) in the job's work folder.
+    #[test]
+    fn fr_055_render_worker_starts_where_the_appimage_webkit_finds_its_helpers() {
+        let work = tempfile::tempdir().unwrap();
+        let appdir = tempfile::tempdir().unwrap();
+        let usr = appdir.path().join("usr");
+        std::fs::create_dir(&usr).unwrap();
+        let ad = Some(appdir.path().as_os_str());
+        assert_eq!(worker_cwd(work.path(), ad, true), usr);
+        assert_eq!(worker_cwd(work.path(), ad, false), work.path());
+        assert_eq!(worker_cwd(work.path(), None, true), work.path());
+        assert_eq!(
+            worker_cwd(work.path(), Some(std::ffi::OsStr::new("")), true),
+            work.path()
+        );
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(
+            worker_cwd(work.path(), Some(bare.path().as_os_str()), true),
+            work.path()
+        );
     }
 
     /// A worker with no graphical session to start its web view in (Linux)
