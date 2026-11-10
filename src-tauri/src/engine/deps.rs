@@ -583,6 +583,33 @@ const VERSION_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// At most this many bytes of `convert -version` are read.
 const VERSION_PROBE_CAP: u64 = 4096;
 
+/// How long a `convert` that has exited may keep its output open (a helper
+/// it left behind holding the pipe) before what it wrote so far is taken
+/// as its answer ([`identifies_as_imagemagick`]).
+const VERSION_PROBE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What identifies one program file for [`is_heif_decoder`]'s cache: its
+/// canonical path, size, modification time and inode. A package upgrade
+/// that replaces the file changes at least the inode or the time.
+type ProgramKey = (PathBuf, u64, Option<std::time::SystemTime>, u64);
+
+/// The verdicts [`is_heif_decoder`] reached by running a program, for the
+/// life of the process.
+static HEIF_DECODER_VERDICTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<ProgramKey, bool>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// The [`ProgramKey`] of the file at `path`; `None` when it cannot be read.
+fn program_key(path: &Path) -> Option<ProgramKey> {
+    let canonical = path.canonicalize().ok()?;
+    let meta = std::fs::metadata(&canonical).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((canonical, meta.len(), meta.modified().ok(), inode))
+}
+
 /// The [`Probe::exists`] for [`Dependency::HeifDecoder`]: a file, and for
 /// `convert`, one that says it is ImageMagick.
 ///
@@ -594,10 +621,40 @@ const VERSION_PROBE_CAP: u64 = 4096;
 /// [`VERSION_PROBE_CAP`] bytes read) and the program is used only if it
 /// names ImageMagick. `magick` is ImageMagick 7's own name and comes first
 /// in [`HEIF_DECODERS_LINUX`], so it is preferred whenever it is there.
+///
+/// The dependency report (`app_info`, which the UI asks on its main thread)
+/// and every HEIF job run this search, so the answer is kept per program
+/// file ([`ProgramKey`]) for the life of the process: each `convert` is run
+/// once, and again only once it has been replaced. A probe that timed out
+/// or could not start the program is not kept, so a busy moment does not
+/// rule ImageMagick out for good.
 pub fn is_heif_decoder(path: &Path) -> bool {
-    path.is_file()
-        && (path.file_name() != Some(std::ffi::OsStr::new("convert"))
-            || identifies_as_imagemagick(path, VERSION_PROBE_TIMEOUT))
+    if !path.is_file() {
+        return false;
+    }
+    if path.file_name() != Some(std::ffi::OsStr::new("convert")) {
+        return true;
+    }
+    let Some(key) = program_key(path) else {
+        return false;
+    };
+    let verdicts = || {
+        HEIF_DECODER_VERDICTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    };
+    if let Some(&verdict) = verdicts().get(&key) {
+        return verdict;
+    }
+    // Not under the lock: a probe can take VERSION_PROBE_TIMEOUT, and two
+    // threads probing the same program at once agree anyway.
+    match imagemagick_probe(path, VERSION_PROBE_TIMEOUT) {
+        Some(verdict) => {
+            verdicts().insert(key, verdict);
+            verdict
+        }
+        None => false,
+    }
 }
 
 /// Whether `program -version` prints `ImageMagick` within `timeout`. A
@@ -606,40 +663,108 @@ pub fn is_heif_decoder(path: &Path) -> bool {
 /// [`VERSION_PROBE_CAP`] bytes are read; the pipe is then closed, so a
 /// program that keeps writing stops.
 pub fn identifies_as_imagemagick(program: &Path, timeout: std::time::Duration) -> bool {
-    use std::io::Read;
-    use std::process::Stdio;
-    use wait_timeout::ChildExt;
+    imagemagick_probe(program, timeout) == Some(true)
+}
 
-    let mut cmd = crate::util::appimage::host_command(program);
-    cmd.arg("-version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    crate::engine::convert::process::isolate_process_tree(&mut cmd);
-    let Ok(mut child) = cmd.spawn() else {
-        return false;
-    };
-    let Some(stdout) = child.stdout.take() else {
-        crate::engine::convert::process::kill_tree(&mut child);
-        return false;
-    };
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut text = Vec::new();
-        let _ = stdout.take(VERSION_PROBE_CAP).read_to_end(&mut text);
-        let _ = tx.send(text);
-    });
-    match child.wait_timeout(timeout) {
-        Ok(Some(_)) => {}
-        _ => {
-            crate::engine::convert::process::kill_tree(&mut child);
-            return false;
+/// [`identifies_as_imagemagick`], or `None` when the program could not be
+/// started or ran past `timeout`: no answer, rather than a "no".
+///
+/// The output is read on this thread, from a non-blocking pipe polled with
+/// the child: no reader thread is left behind blocked on a pipe that a
+/// helper of the program still holds open. Once the program has exited,
+/// what it wrote within [`VERSION_PROBE_GRACE`] is its answer. Unix only:
+/// the HEIF decoder is looked for on Linux alone, and elsewhere this is
+/// `None`.
+fn imagemagick_probe(program: &Path, timeout: std::time::Duration) -> Option<bool> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        use crate::engine::convert::process::{isolate_process_tree, kill_tree};
+
+        let mut cmd = crate::util::appimage::host_command(program);
+        cmd.arg("-version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().ok()?;
+        let started = Instant::now();
+        let Some(stdout) = child.stdout.take() else {
+            kill_tree(&mut child);
+            return None;
+        };
+        let fd = stdout.as_raw_fd();
+        // SAFETY: fcntl on a descriptor this process owns (`stdout`, alive
+        // for both calls); no memory is passed.
+        let nonblocking = unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == 0
+        };
+        if !nonblocking {
+            kill_tree(&mut child);
+            return None;
         }
+        let mut pipe = Some(stdout);
+        let mut text = Vec::new();
+        let mut buf = [0u8; 1024];
+        let mut exited: Option<Instant> = None;
+        loop {
+            let mut progressed = false;
+            if let Some(out) = &mut pipe {
+                let room = usize::try_from(VERSION_PROBE_CAP)
+                    .unwrap_or(usize::MAX)
+                    .saturating_sub(text.len())
+                    .min(buf.len());
+                match out.read(&mut buf[..room]) {
+                    Ok(0) => pipe = None,
+                    Ok(n) => {
+                        text.extend_from_slice(&buf[..n]);
+                        progressed = true;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => progressed = true,
+                    Err(_) => pipe = None,
+                }
+                // At the cap the pipe is closed: a writer that goes on gets
+                // SIGPIPE and stops.
+                if text.len() as u64 >= VERSION_PROBE_CAP {
+                    pipe = None;
+                }
+            }
+            if exited.is_none() {
+                match child.try_wait() {
+                    Ok(Some(_)) => exited = Some(Instant::now()),
+                    Ok(None) => {}
+                    Err(_) => {
+                        kill_tree(&mut child);
+                        return None;
+                    }
+                }
+            }
+            match exited {
+                Some(at) if pipe.is_none() || at.elapsed() >= VERSION_PROBE_GRACE => break,
+                Some(_) => {}
+                None if started.elapsed() >= timeout => {
+                    kill_tree(&mut child);
+                    return None;
+                }
+                None => {}
+            }
+            if !progressed {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        Some(String::from_utf8_lossy(&text).contains("ImageMagick"))
     }
-    // The reader ends at the cap or when the last writer is gone; a helper
-    // the program left holding the pipe is not waited on.
-    rx.recv_timeout(std::time::Duration::from_secs(1))
-        .is_ok_and(|text| String::from_utf8_lossy(&text).contains("ImageMagick"))
+    #[cfg(not(unix))]
+    {
+        let _ = (program, timeout);
+        None
+    }
 }
 
 /// The HEIF decoder on Linux: a package from the distribution, so only the
@@ -1364,6 +1489,55 @@ mod tests {
             &odd.path().join("missing"),
             std::time::Duration::from_secs(5)
         ));
+    }
+
+    /// The `convert` verdict is kept per program file: the dependency report
+    /// (asked on the UI thread) runs `convert -version` once, not on every
+    /// call, and again once the file is replaced. A probe that timed out is
+    /// not kept.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_perf_a_convert_is_asked_what_it_is_once_per_binary() {
+        use crate::util::fake_program::script;
+        let dir = tempfile::tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        let body = |name: &str| {
+            format!(
+                "echo run >> '{}'\necho 'Version: {name} 6.9.11-60 Q16'",
+                runs.display()
+            )
+        };
+        let count = || {
+            std::fs::read_to_string(&runs)
+                .map(|r| r.lines().count())
+                .unwrap_or(0)
+        };
+        let convert = script(dir.path(), "convert", &body("ImageMagick"));
+        assert!(is_heif_decoder(&convert));
+        assert!(is_heif_decoder(&convert));
+        // Through another path to the same file, too.
+        let link = dir.path().join("bin");
+        std::fs::create_dir(&link).unwrap();
+        std::os::unix::fs::symlink(&convert, link.join("convert")).unwrap();
+        assert!(is_heif_decoder(&link.join("convert")));
+        assert_eq!(count(), 1, "convert was run more than once");
+
+        // Replaced (another size and time): asked again.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let convert = script(dir.path(), "convert", &body("GraphicsMagick"));
+        assert!(!is_heif_decoder(&convert));
+        assert!(!is_heif_decoder(&convert));
+        assert_eq!(count(), 2);
+
+        // No answer is not a "no" to keep.
+        let slow = tempfile::tempdir().unwrap();
+        let hangs = script(slow.path(), "convert", "sleep 30");
+        assert_eq!(
+            imagemagick_probe(&hangs, std::time::Duration::from_millis(200)),
+            None
+        );
+        assert!(program_key(&hangs)
+            .is_some_and(|key| !HEIF_DECODER_VERDICTS.lock().unwrap().contains_key(&key)));
     }
 
     #[test]

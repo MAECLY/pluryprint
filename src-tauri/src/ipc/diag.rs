@@ -44,9 +44,14 @@ pub struct AppInfo {
     /// It rides on `app_info` rather than a command of its own because this is
     /// exactly what `app_info` is for — "what does this build see on this
     /// host?" — and because the screens that care already fetch it once on
-    /// mount. The probe itself is a handful of `is_file` calls (see
-    /// [`deps::report_all`]), so it costs nothing to answer on every call and
-    /// is never stale.
+    /// mount. The probe is mostly `is_file` calls (see [`deps::report_all`]).
+    /// The one exception is a `convert` met while looking for the Linux HEIF
+    /// decoder: it is run (`convert -version`, up to five seconds) to tell
+    /// ImageMagick's from GraphicsMagick's, once per program file for the
+    /// life of the process ([`deps::is_heif_decoder`]). So the first call on
+    /// such a machine can take that long; every later one costs a few
+    /// `stat`s, and a replaced program is asked again, so the list is never
+    /// stale.
     ///
     /// `#[serde(default)]` — as on `AppSettings::meta`, and for the same
     /// reason: the server always sends it, but a test building an `AppInfo` by
