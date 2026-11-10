@@ -693,6 +693,9 @@ mod tests {
     /// FR-083 on Linux: only a real AppImage (named by `APPIMAGE`) or the file
     /// a package installed may update itself; anything else, which the
     /// updater would overwrite as if it were an AppImage, is refused.
+    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+    /// (on Windows `/tmp/...` is not even absolute).
+    #[cfg(unix)]
     #[test]
     fn fr_083_linux_updates_only_an_appimage_or_a_packaged_install() {
         let mounted = PathBuf::from("/tmp/.mount_PluryAbc/usr/bin/pluryprint");

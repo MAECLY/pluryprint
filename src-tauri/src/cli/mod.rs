@@ -686,6 +686,9 @@ mod tests {
     /// (the folder the user ran it from), not at `$APPDIR/usr`, where
     /// `AppRun` leaves the process. A review found `print --files rel.png`
     /// looking for the file inside the mounted image.
+    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+    /// (on Windows `/tmp/...` is not even absolute).
+    #[cfg(unix)]
     #[test]
     fn fr_008_an_appimage_anchors_relative_paths_at_owd() {
         use std::ffi::OsStr;

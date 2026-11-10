@@ -330,6 +330,9 @@ mod tests {
     /// Inside an AppImage the CLI command must name the AppImage file, not
     /// the temporary mount the binary runs from (which vanishes on exit and
     /// whose name the UI could only guess).
+    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+    /// (on Windows `/tmp/...` is not even absolute).
+    #[cfg(unix)]
     #[test]
     fn fr_008_an_appimage_reports_its_own_file_as_the_executable() {
         use std::ffi::OsStr;
