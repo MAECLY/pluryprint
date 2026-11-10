@@ -246,10 +246,12 @@ pub(crate) fn kill_tree(child: &mut Child) {
     let pid = child.id();
     #[cfg(unix)]
     {
-        // `kill -KILL -<pgid>` signals the whole group the child leads. Run
-        // through the `kill` utility so no `libc` binding is needed.
+        // `kill -KILL -- -<pgid>` signals the whole group the child leads.
+        // The `--` is not optional: procps-ng's `kill` (3.3.17, Ubuntu 22.04)
+        // reads a bare `-<pgid>` after the signal as a second signal option
+        // and then signals the *caller's* group, killing this process.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -283,8 +285,9 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
     let pid = child.id();
     #[cfg(unix)]
     {
+        // `--` as in [`kill_tree`]: without it procps-ng signals our group.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -336,8 +339,10 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
 /// `None` when it cannot be told (`kill` would not run).
 #[cfg(unix)]
 pub(crate) fn group_alive(pgid: u32) -> Option<bool> {
+    // `--` as in [`kill_tree`]: procps-ng otherwise probes our own group,
+    // which is always alive, and every tree would look like it survived.
     let probe = Command::new("kill")
-        .args(["-0", &format!("-{pgid}")])
+        .args(["-0", "--", &format!("-{pgid}")])
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1137,6 +1142,25 @@ mod reason_tests {
     /// child that grows past its cap is killed as `OverMemory`; one that
     /// stays under it runs to the end; cancel and timeout behave as in
     /// `run_bounded`.
+    /// The group probe and the group kill address the child's group, never
+    /// ours. procps-ng's `kill` (Ubuntu 22.04) reads `kill -0 -<pgid>` as two
+    /// signal options and probes, or kills, the caller's own group: the
+    /// probe then said every finished tree was alive, and the kill took the
+    /// test runner with it.
+    #[cfg(unix)]
+    #[test]
+    fn kill_tree_ends_the_childs_group_and_the_probe_sees_it_gone() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 30 & sleep 30"]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let pgid = child.id();
+        assert_eq!(group_alive(pgid), Some(true));
+        assert!(kill_tree_confirmed(&mut child));
+        // We are still here, and the group really is gone.
+        assert_eq!(group_alive(pgid), Some(false));
+    }
+
     #[cfg(unix)]
     #[test]
     fn nfr_security_run_capped_kills_a_child_over_its_memory_cap() {
