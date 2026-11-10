@@ -1,12 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Icon, type IconName } from '@/components/Icon';
 import { MPAppIcon } from '@/components/Brand';
-import { isMacPlatform, shortcutLabel } from '@/components/AppShell/MPAppShell';
+import { shortcutLabel } from '@/components/AppShell/MPAppShell';
 import { ModalOverlay } from '@/components/Modal';
 import { MPButton, MPCard } from '@/components/ui';
 import { useModalFocus } from '@/components/useModal';
 import { useT } from '@/i18n/I18nProvider';
 import { cliProgram } from '@/lib/format';
+import {
+  appImageFileName,
+  linuxMenuKey,
+  rememberedHostInfo,
+  useHostPlatform,
+} from '@/lib/platform';
 import { findProfileIn } from '@/lib/profiles';
 import { useProfilesStore } from '@/stores/profilesStore';
 
@@ -18,9 +24,12 @@ import { useProfilesStore } from '@/stores/profilesStore';
  * that does not exist, a Settings switch that was never shipped) is a broken
  * feature as far as they are concerned. The right-click entry is described per
  * platform — Finder Services on macOS; on Windows the installer's Explorer
- * entry, which Windows 11 keeps under "Show more options" — the command-line
- * program is named per platform (`pluryprint-cli` on Windows), and the default
- * profile is read from the real profile list instead of being retyped here.
+ * entry, which Windows 11 keeps under "Show more options"; on Linux "Open
+ * with" plus the Dolphin and Nemo actions the .deb installs, which an AppImage
+ * only gets once the user integrates it — the command-line program is named
+ * per platform (`pluryprint-cli` on Windows, the AppImage's own file for an
+ * AppImage), and the default profile is read from the real profile list
+ * instead of being retyped here.
  */
 const STEPS = [
   { key: 'welcome', icon: 'maecly' },
@@ -42,17 +51,27 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   // Non-null: `step` starts at 0 and the Back/Continue handlers below keep it
   // within [0, STEPS.length - 1].
   const cur = STEPS[step]!;
+  const host = useHostPlatform();
+  const hostInfo = rememberedHostInfo();
+  const program = cliProgram(host.os, {
+    linuxPackage: host.linuxPackage,
+    appImage: appImageFileName(hostInfo?.version, hostInfo?.arch),
+  });
   const params = {
     name: findProfileIn(profiles, null).name,
-    command: `${cliProgram(isMacPlatform() ? 'macos' : 'windows')} print --files "*.pdf"`,
+    command: `${program} print --files "*.pdf"`,
     shortcut: shortcutLabel('newJob'),
+    menu: t(linuxMenuKey(host.linuxPackage)),
   };
   // FR-001: the right-click entry and "Save as PDF" are platform-specific, so
-  // those two steps have a macOS wording.
+  // those two steps have a macOS and a Linux wording.
+  const perPlatform = cur.key === 'ready' || cur.key === 'printers';
   const bodyKey =
-    isMacPlatform() && (cur.key === 'ready' || cur.key === 'printers')
+    perPlatform && host.os === 'macos'
       ? (`onboarding.${cur.key}.bodyMac` as const)
-      : (`onboarding.${cur.key}.body` as const);
+      : perPlatform && host.os === 'linux'
+        ? (`onboarding.${cur.key}.bodyLinux` as const)
+        : (`onboarding.${cur.key}.body` as const);
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const bodyId = useId();

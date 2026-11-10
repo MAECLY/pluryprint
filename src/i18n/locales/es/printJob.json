@@ -32,6 +32,7 @@
   },
   "empty": {
     "desktop": "Aún no hay archivos. Arrastra archivos o carpetas desde el Explorador o el Finder, o usa Añadir archivos.",
+    "desktopLinux": "Aún no hay archivos. Arrastra archivos o carpetas desde tu gestor de archivos, o usa Añadir archivos.",
     "web": "Para añadir archivos se necesita la aplicación de escritorio."
   },
   "dependencies": {

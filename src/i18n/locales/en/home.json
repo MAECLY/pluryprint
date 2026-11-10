@@ -27,7 +27,9 @@
     "copied": "Command copied to the clipboard",
     "copyFailed": "Could not reach the clipboard — select the command and copy it manually.",
     "pathNote": "Uses the app's full path — it is not on your PATH yet.",
-    "noPathNote": "Not on your PATH yet: replace {{program}} with its full path, in the app's folder."
+    "noPathNote": "Not on your PATH yet: replace {{program}} with its full path, in the app's folder.",
+    "onPathNote": "Already on your PATH: the .deb package installed pluryprint in /usr/bin.",
+    "noPathNoteAppImage": "An AppImage is not on your PATH: run {{program}} from the folder you saved it in, or use its full path."
   },
   "recent": {
     "label": "Recent activity",
@@ -72,8 +74,11 @@
     "label": "Tip",
     "pathCopied": "Nothing adds it to your PATH yet, so call it by its full path — the Run from CLI card copies a command that already does.",
     "pathManual": "Nothing adds it to your PATH yet, so call it by its full path, in the app's folder.",
+    "pathOnPath": "The .deb package put it on your PATH, so it runs from any folder.",
+    "pathAppImage": "Nothing puts an AppImage on your PATH, so run it from the folder you saved it in, or by its full path.",
     "body": "Pluryprint also prints from a script, with no window: {{command}} … runs its command-line tool, installed next to the app. {{path}} In Explorer, right-click files and choose Pluryprint; on Windows 11 the entry is under Show more options.",
-    "bodyMac": "Pluryprint also prints from a script, with no window: {{command}} … runs the app's own executable as a command-line tool. {{path}} In Finder, select files and choose Services › Print with Pluryprint from the right-click menu."
+    "bodyMac": "Pluryprint also prints from a script, with no window: {{command}} … runs the app's own executable as a command-line tool. {{path}} In Finder, select files and choose Services › Print with Pluryprint from the right-click menu.",
+    "bodyLinux": "Pluryprint also prints from a script, with no window: {{command}} … runs the app's own executable as a command-line tool. {{path}} {{menu}}"
   },
   "nav": {
     "home": "Home",
@@ -93,12 +98,13 @@
   "onboarding": {
     "welcome": {
       "title": "Welcome to Pluryprint",
-      "body": "Open source batch printing for Windows and Mac. No 15-file limit, no Adobe required, no $149 license fee."
+      "body": "Open source batch printing for Windows, Mac and Linux. No 15-file limit, no Adobe required, no $149 license fee."
     },
     "printers": {
       "title": "Detect your printers",
       "body": "We'll list every printer your system has installed — including 'Microsoft Print to PDF' if it is enabled.",
-      "bodyMac": "We'll list every printer your system has installed. To make a PDF instead, use Save as PDF in your apps' own print dialog."
+      "bodyMac": "We'll list every printer your system has installed. To make a PDF instead, use Save as PDF in your apps' own print dialog.",
+      "bodyLinux": "We'll list every printer set up in CUPS, the system print service. To make a PDF instead, use Print to File in your apps' own print dialog."
     },
     "cli": {
       "title": "Print without the window",
@@ -111,12 +117,18 @@
     "ready": {
       "title": "Ready to print",
       "body": "Drag any number of files onto the window or press {{shortcut}}, pick a profile, and watch them queue up. In Explorer, right-click files and choose Pluryprint (on Windows 11, under Show more options).",
-      "bodyMac": "Drag any number of files onto the window or press {{shortcut}}, pick a profile, and watch them queue up. In Finder, right-click files and choose Services › Print with Pluryprint."
+      "bodyMac": "Drag any number of files onto the window or press {{shortcut}}, pick a profile, and watch them queue up. In Finder, right-click files and choose Services › Print with Pluryprint.",
+      "bodyLinux": "Drag any number of files onto the window or press {{shortcut}}, pick a profile, and watch them queue up. {{menu}}"
     },
     "skip": "Skip",
     "back": "Back",
     "continue": "Continue",
     "start": "Get started",
     "progress": "Step {{step}} of {{total}}"
+  },
+  "linuxMenu": {
+    "deb": "In your file manager, right-click files and choose Pluryprint under Open With; Dolphin and Nemo also offer Pluryprint's Print now, Configure print job and Add to print queue.",
+    "appimage": "An AppImage adds no right-click entry by itself: once you integrate it with your desktop (an AppImage manager can do that), Pluryprint appears under Open With in your file manager.",
+    "unknown": "Installed from the .deb package, Pluryprint appears under Open With in your file manager, and Dolphin and Nemo add its Print now, Configure print job and Add to print queue actions; an AppImage appears under Open With once you integrate it with your desktop."
   }
 }

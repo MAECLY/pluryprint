@@ -246,7 +246,7 @@
   },
   "testPage": {
     "title": "Pluryprint Test Page",
-    "tagline": "Open source batch printing for Windows and Mac.",
+    "tagline": "Open source batch printing for Windows, Mac and Linux.",
     "headline": "Printer Test Page",
     "confirm": "If you can read this clearly, your printer is working with Pluryprint.",
     "prop1": "No 15-file limit",

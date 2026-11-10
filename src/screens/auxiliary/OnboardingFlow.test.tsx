@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OnboardingFlow } from './OnboardingFlow';
 import { shortcutLabel } from '@/components/AppShell/MPAppShell';
 import { BUILT_IN_PROFILES } from '@/lib/profiles';
+import { rememberHostInfo } from '@/lib/platform';
 import { useProfilesStore } from '@/stores/profilesStore';
 
 /** Walk the tour to the last step, returning the text seen along the way. */
@@ -126,6 +127,38 @@ describe('OnboardingFlow', () => {
       // The macOS app binary is itself the CLI.
       expect(seen).toMatch(/pluryprint print --files/);
       expect(seen).toMatch(/Save as PDF in your apps' own print dialog/);
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  it('FR-001: on Linux the tour names CUPS, Print to File and the file manager', () => {
+    rememberHostInfo({
+      os: 'linux',
+      arch: 'x86_64',
+      executable: '/usr/bin/pluryprint',
+    });
+    render(<OnboardingFlow onComplete={vi.fn()} />);
+    const seen = walkToEnd();
+    expect(seen).toMatch(/printer set up in CUPS/);
+    expect(seen).toMatch(/Print to File in your apps' own print dialog/);
+    expect(seen).toMatch(/choose Pluryprint under Open With/);
+    // The .deb puts the app's own executable on PATH.
+    expect(seen).toMatch(/pluryprint print --files/);
+    expect(seen).not.toMatch(/Explorer|Finder|Microsoft Print to PDF/);
+    expect(seen).not.toMatch(/pluryprint-cli/);
+  });
+
+  it('FR-001: before the backend answers, a Linux webview already gets Linux copy', () => {
+    const platform = vi
+      .spyOn(window.navigator, 'platform', 'get')
+      .mockReturnValue('Linux aarch64');
+    try {
+      render(<OnboardingFlow onComplete={vi.fn()} />);
+      const seen = walkToEnd();
+      // The package is not known yet, so both are described.
+      expect(seen).toMatch(/Installed from the \.deb package/);
+      expect(seen).not.toMatch(/Explorer|Finder/);
     } finally {
       platform.mockRestore();
     }

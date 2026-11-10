@@ -246,7 +246,7 @@
   },
   "testPage": {
     "title": "Página de prueba de Pluryprint",
-    "tagline": "Impresión por lotes de código abierto para Windows y Mac.",
+    "tagline": "Impresión por lotes de código abierto para Windows, Mac y Linux.",
     "headline": "Página de prueba",
     "confirm": "Si puedes leer esto con claridad, tu impresora funciona con Pluryprint.",
     "prop1": "Sin límite de 15 archivos",

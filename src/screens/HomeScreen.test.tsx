@@ -289,6 +289,76 @@ describe('HomeScreen', () => {
     }
   });
 
+  it('FR-008: from the .deb, the command is the bare pluryprint already on PATH', async () => {
+    mockIPC((cmd) => {
+      if (cmd === 'app_info') {
+        return {
+          ...fixtureAppInfo,
+          os: 'linux',
+          arch: 'x86_64',
+          executable: '/usr/bin/pluryprint',
+        };
+      }
+      return null;
+    });
+    try {
+      renderHome();
+      const card = screen.getByRole('button', { name: /run from cli/i });
+      await vi.waitFor(() =>
+        expect(card).toHaveAttribute(
+          'title',
+          "pluryprint print --files '*.pdf' --profile Quick",
+        ),
+      );
+      expect(card).toHaveTextContent(/already on your PATH/i);
+      const text = document.body.textContent ?? '';
+      expect(text).toMatch(/\.deb package put it on your PATH/);
+      // FR-001: the .deb registers "Open with" and the Dolphin/Nemo actions.
+      expect(text).toMatch(/choose Pluryprint under Open With/);
+      expect(text).toMatch(/Dolphin and Nemo/);
+      expect(text).not.toMatch(/Explorer|Finder|pluryprint-cli/);
+    } finally {
+      clearMocks();
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      delete (window as unknown as Record<string, unknown>).__TAURI__;
+    }
+  });
+
+  it('FR-008: from an AppImage, the command runs the AppImage file, never its temporary mount', async () => {
+    mockIPC((cmd) => {
+      if (cmd === 'app_info') {
+        return {
+          ...fixtureAppInfo,
+          os: 'linux',
+          arch: 'aarch64',
+          version: '0.0.5',
+          executable: '/tmp/.mount_PluryZ9/usr/bin/pluryprint',
+        };
+      }
+      return null;
+    });
+    try {
+      renderHome();
+      const card = screen.getByRole('button', { name: /run from cli/i });
+      await vi.waitFor(() =>
+        expect(card).toHaveAttribute(
+          'title',
+          "./Pluryprint_0.0.5_linux_arm64.AppImage print --files '*.pdf' --profile Quick",
+        ),
+      );
+      expect(card).not.toHaveTextContent('.mount_');
+      expect(card).toHaveTextContent(/from the folder you saved it in/);
+      const text = document.body.textContent ?? '';
+      // An AppImage registers no right-click entry by itself: say so.
+      expect(text).toMatch(/An AppImage adds no right-click entry by itself/);
+      expect(text).not.toMatch(/Dolphin and Nemo also offer/);
+    } finally {
+      clearMocks();
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+      delete (window as unknown as Record<string, unknown>).__TAURI__;
+    }
+  });
+
   it('FR-008: a clipboard refusal is reported instead of silently doing nothing', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
