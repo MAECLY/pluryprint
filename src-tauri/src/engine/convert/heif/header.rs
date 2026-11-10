@@ -117,20 +117,29 @@ pub(crate) fn unreadable(input: &Path, e: &std::io::Error) -> EngineError {
 ///
 /// A `.heic` can be a FIFO or a device: opening a FIFO with no writer, or
 /// reading one, blocks for as long as nobody writes, and a device such as
-/// `/dev/zero` never ends. So the file is opened with `O_NONBLOCK` (which a
-/// regular file ignores), and the handle itself, not the path, is asked what
-/// it is: a path swapped after the question cannot change the answer.
+/// `/dev/zero` never ends. Opening a device is not harmless either (a tape
+/// rewinds, a modem line hangs up), so the path is first asked what it is
+/// (links followed) and anything but a regular file is refused unopened.
+/// That answer is about the path, which can be swapped before the open, so
+/// the file is then opened with `O_NONBLOCK` (which a regular file ignores)
+/// and `O_NOCTTY` (a terminal swapped in does not become this process's
+/// controlling one), and the handle itself is asked again: its answer is
+/// the one that counts.
 pub(crate) fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
+    let not_regular = || std::io::Error::other("not a regular file");
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(not_regular());
+    }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(std::io::Error::other("not a regular file"));
+        return Err(not_regular());
     }
     Ok(file)
 }
@@ -299,6 +308,58 @@ mod tests {
             matches!(&err, EngineError::ConversionFailed(f)
                 if f.reason == Some("cannot_read_input") && f.params["file"] == "gone.heic"),
             "{err:?}"
+        );
+    }
+
+    /// `open_regular` follows links to what they name: a link to a regular
+    /// file opens; a link to a device, a link to a folder, a folder and a
+    /// FIFO are refused as not regular, and a dangling link as missing.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_open_regular_judges_what_a_link_names() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let photo = dir.path().join("photo.heic");
+        std::fs::write(&photo, ftyp(b"heic", &[])).unwrap();
+        let to_photo = dir.path().join("to-photo.heic");
+        symlink(&photo, &to_photo).unwrap();
+        let mut read = Vec::new();
+        open_regular(&to_photo)
+            .unwrap()
+            .read_to_end(&mut read)
+            .unwrap();
+        assert_eq!(read, ftyp(b"heic", &[]));
+
+        let fifo = dir.path().join("fifo.heic");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let links = [
+            ("to-null.heic", Path::new("/dev/null")),
+            ("to-dir.heic", dir.path()),
+            ("to-fifo.heic", fifo.as_path()),
+        ];
+        for (name, target) in links {
+            symlink(target, dir.path().join(name)).unwrap();
+        }
+        for refused in links
+            .iter()
+            .map(|(name, _)| dir.path().join(name))
+            .chain([dir.path().to_path_buf(), fifo.clone()])
+        {
+            let err = open_regular(&refused).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "not a regular file",
+                "{}",
+                refused.display()
+            );
+        }
+        let dangling = dir.path().join("dangling.heic");
+        symlink(dir.path().join("gone"), &dangling).unwrap();
+        assert_eq!(
+            open_regular(&dangling).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
         );
     }
 }
