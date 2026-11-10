@@ -19,7 +19,18 @@
 //!   ([`convert_with_external`]), bounded and cancellable like every
 //!   converter process; without one the job pauses with the
 //!   `heif-decoder` remediation.
+//!
+//! On Linux the decoder is a program the app did not choose and cannot pin,
+//! so what reaches it is narrowed twice ([`convert_external`]): the file must
+//! start with an ISO-BMFF `ftyp` box naming a HEIF brand ([`header`]) before
+//! any process starts, and ImageMagick runs under a security policy that
+//! allows nothing but reading HEIC/HEIF and writing PNG
+//! ([`imagemagick_policy_env`]). macOS and Windows decode with the system's
+//! own HEIF reader and keep their behaviour.
 
+pub mod header;
+
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -149,6 +160,42 @@ fn decoded_png(png: &Path) -> Option<std::path::PathBuf> {
     first.is_file().then_some(first)
 }
 
+/// The ImageMagick security policy for HEIF decoding (`heif/magick-policy.xml`):
+/// no delegate program, no filter, no `@file` indirection, only the HEIC and
+/// PNG modules, read HEIC/HEIF and write PNG, and Ubuntu's resource limits.
+pub const MAGICK_POLICY: &str = include_str!("heif/magick-policy.xml");
+
+/// Write [`MAGICK_POLICY`] into `work` and return the environment that makes
+/// ImageMagick use it.
+///
+/// ImageMagick 6 and 7 both look for `policy.xml` in the folders
+/// `MAGICK_CONFIGURE_PATH` lists before their own, and both apply the last
+/// policy that matches a coder, module or path, which is why the policy
+/// closes each domain before it opens the one use. The folder is the
+/// conversion's private one (mode 0700, removed with it), so nothing else
+/// can swap the file between being written and being read. Pixels that do
+/// not fit the memory limit spill to `MAGICK_TEMPORARY_PATH`, which is
+/// pointed there too instead of the shared `/tmp`.
+pub fn imagemagick_policy_env(
+    work: &WorkDir,
+) -> Result<Vec<(&'static str, OsString)>, EngineError> {
+    let config = work.path().join("magick-policy");
+    let temp = work.path().join("magick-tmp");
+    std::fs::create_dir(&config)
+        .and_then(|()| std::fs::write(config.join("policy.xml"), MAGICK_POLICY))
+        .and_then(|()| std::fs::create_dir(&temp))
+        .map_err(|e| {
+            EngineError::ConversionFailed(Failure::new(
+                "workdir_failed",
+                format!("cannot prepare the conversion folder: {e}"),
+            ))
+        })?;
+    Ok(vec![
+        ("MAGICK_CONFIGURE_PATH", config.into_os_string()),
+        ("MAGICK_TEMPORARY_PATH", temp.into_os_string()),
+    ])
+}
+
 /// The memory an external HEIF decoder may use (resident set, sampled by
 /// [`super::process::run_capped`]): a hostile file can claim huge
 /// dimensions, and the decoder runs outside the in-process image limits.
@@ -156,8 +203,31 @@ fn decoded_png(png: &Path) -> Option<std::path::PathBuf> {
 /// pixel cache.
 pub const EXTERNAL_DECODER_MEMORY_CAP: u64 = 2 * 1024 * 1024 * 1024;
 
+/// Convert `input` with the external decoder at `decoder` (Linux), writing
+/// the PDF to `output`, once its header says it is a HEIF file.
+///
+/// The header is checked first ([`header::check`], a bounded read): a file
+/// that is not HEIF whatever its name (an SVG, an MVG or PostScript program,
+/// a PBM, an empty or truncated file) is `heif_decode_failed` and no decoder
+/// process is started. This is the entry point the engine uses.
+pub fn convert_external(
+    decoder: &Path,
+    input: &Path,
+    output: &Path,
+    work: &WorkDir,
+    cancel: &AtomicBool,
+    timeout: Option<Duration>,
+    progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<(), EngineError> {
+    header::check(input)?;
+    convert_with_external(decoder, input, output, work, cancel, timeout, progress)
+}
+
 /// Convert with the external decoder at `decoder` (Linux), writing the PDF
-/// to `output`.
+/// to `output`, without looking at the file first: the decoder plumbing
+/// alone. Callers go through [`convert_external`], which refuses a file that
+/// is not HEIF before this starts anything. ImageMagick runs under
+/// [`MAGICK_POLICY`].
 ///
 /// A decoder that disappeared between being found and being started pauses
 /// the job like a missing one (`heif-decoder`); one that runs and writes no
@@ -179,6 +249,9 @@ pub fn convert_with_external(
     let staged = kind.stage_input(input, work)?;
     let mut cmd = crate::util::appimage::host_command(decoder);
     cmd.args(kind.args(&staged, &png)).current_dir(work.path());
+    if kind == ExternalDecoder::ImageMagick {
+        cmd.envs(imagemagick_policy_env(work)?);
+    }
     let log = work.path().join("heif-decoder.log");
     progress(0.0);
     let ran = super::process::run_capped(
@@ -418,7 +491,7 @@ pub fn convert(
                 spec.remediation(),
             )));
         };
-        convert_with_external(decoder, input, output, work, cancel, timeout, progress)
+        convert_external(decoder, input, output, work, cancel, timeout, progress)
     }
 }
 
@@ -692,6 +765,376 @@ mod tests {
 
         let ok = run_abandonable("decoder", &AtomicBool::new(false), None, || Ok(7));
         assert_eq!(ok.unwrap(), 7);
+    }
+
+    /// The pages of the PDF at `pdf`.
+    #[cfg(unix)]
+    fn pages_of(pdf: &Path) -> usize {
+        lopdf::Document::load(pdf).unwrap().get_pages().len()
+    }
+
+    /// A fake external decoder named `name` in `dir` that leaves `<dir>/ran`
+    /// behind when it is started, records `MAGICK_CONFIGURE_PATH` and the
+    /// policy it names into `<dir>/env`, and "decodes" by copying a real PNG
+    /// to its last argument (without ImageMagick's `png:` prefix).
+    ///
+    /// It is returned once it can be started: on Linux a test thread that
+    /// forks while the script is still open for writing holds it open in the
+    /// child until that child execs, and starting the script then fails with
+    /// `ETXTBSY`. A probe run (`FAKE_PROBE`, which exits before leaving any
+    /// trace) is retried until it starts.
+    #[cfg(unix)]
+    fn fake_decoder(dir: &Path, name: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let png = dir.join("real.png");
+        ::image::RgbImage::from_pixel(4, 3, ::image::Rgb([10, 200, 10]))
+            .save_with_format(&png, ::image::ImageFormat::Png)
+            .unwrap();
+        let path = dir.join(name);
+        let body = format!(
+            r#"#!/bin/sh
+[ -n "$FAKE_PROBE" ] && exit 0
+: > '{ran}'
+printf '%s\n' "${{MAGICK_CONFIGURE_PATH:-unset}}" "${{MAGICK_TEMPORARY_PATH:-unset}}" > '{env}'
+[ -n "$MAGICK_CONFIGURE_PATH" ] && cat "$MAGICK_CONFIGURE_PATH/policy.xml" >> '{env}'
+for last in "$@"; do :; done
+cp '{png}' "${{last#png:}}"
+"#,
+            ran = dir.join("ran").display(),
+            env = dir.join("env").display(),
+            png = png.display(),
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for _ in 0..100 {
+            match std::process::Command::new(&path)
+                .env("FAKE_PROBE", "1")
+                .status()
+            {
+                Ok(status) if status.success() => return path,
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                other => panic!("the fake {name} does not start: {other:?}"),
+            }
+        }
+        panic!("the fake {name} stayed busy");
+    }
+
+    /// A `.heic` that is really something else, or no HEIF at all.
+    #[cfg(unix)]
+    fn disguised_inputs() -> Vec<(&'static str, Vec<u8>)> {
+        let mut huge = b"\xff\xff\xff\xf0ftypheic\0\0\0\0mif1heic".to_vec();
+        huge.resize(64, 0);
+        vec![
+            (
+                "svg",
+                br#"<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>"#
+                    .to_vec(),
+            ),
+            (
+                "mvg",
+                b"push graphic-context\nviewbox 0 0 640 480\nimage over 0,0 0,0 'ephemeral:/etc/passwd'\npop graphic-context\n"
+                    .to_vec(),
+            ),
+            (
+                "postscript",
+                b"%!PS-Adobe-3.0\n(/etc/passwd) (r) file\nshowpage\n".to_vec(),
+            ),
+            ("pbm", b"P1\n4 4\n0 1 0 1\n1 0 1 0\n0 1 0 1\n1 0 1 0\n".to_vec()),
+            ("empty", Vec::new()),
+            ("truncated ftyp", b"\0\0\0\x18ftypheic\0\0\0\0".to_vec()),
+            ("huge ftyp", huge),
+        ]
+    }
+
+    /// NFR-security, FR-052 on Linux: a `.heic` that is not HEIF is refused
+    /// as a damaged photo before any decoder process starts, through each
+    /// kind of decoder; a real HEIF header does reach the decoder (the fake
+    /// would have recorded every refused start), and ImageMagick is started
+    /// with the policy.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_a_disguised_heic_never_reaches_a_decoder() {
+        for name in ["heif-dec", "heif-convert", "magick", "convert"] {
+            let dir = tempfile::tempdir().unwrap();
+            let decoder = fake_decoder(dir.path(), name);
+            for (what, bytes) in disguised_inputs() {
+                let input = dir.path().join("IMG_0001.HEIC");
+                std::fs::write(&input, &bytes).unwrap();
+                let output = dir.path().join("o.pdf");
+                let work = WorkDir::new("disguised").unwrap();
+                let err = convert_external(
+                    &decoder,
+                    &input,
+                    &output,
+                    &work,
+                    &AtomicBool::new(false),
+                    None,
+                    &|_| {},
+                )
+                .unwrap_err();
+                assert!(
+                    matches!(&err, EngineError::ConversionFailed(f)
+                        if f.reason == Some("heif_decode_failed")
+                            && f.contains("not a HEIC/HEIF photo")),
+                    "{name}, {what}: {err:?}"
+                );
+                assert!(
+                    !dir.path().join("ran").exists(),
+                    "{name} was started for a disguised {what}"
+                );
+                assert!(!output.exists(), "{name}, {what}");
+                // Nothing was staged or prepared for a decoder either.
+                assert_eq!(
+                    std::fs::read_dir(work.path()).unwrap().count(),
+                    0,
+                    "{name}, {what}"
+                );
+            }
+
+            // The control: a HEIF header is let through to the same decoder.
+            let input = dir.path().join("IMG_0002.HEIC");
+            std::fs::write(&input, b"\0\0\0\x18ftypheic\0\0\0\0mif1heic").unwrap();
+            let output = dir.path().join("o.pdf");
+            let work = WorkDir::new("heif").unwrap();
+            convert_external(
+                &decoder,
+                &input,
+                &output,
+                &work,
+                &AtomicBool::new(false),
+                None,
+                &|_| {},
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(dir.path().join("ran").exists(), "{name}");
+            assert_eq!(pages_of(&output), 1, "{name}");
+            let env = std::fs::read_to_string(dir.path().join("env")).unwrap();
+            let mut lines = env.lines();
+            let (config, temp) = (lines.next().unwrap(), lines.next().unwrap());
+            if ExternalDecoder::of(&decoder) == Some(ExternalDecoder::ImageMagick) {
+                assert_eq!(
+                    Path::new(config),
+                    work.path().join("magick-policy"),
+                    "{name}"
+                );
+                assert_eq!(Path::new(temp), work.path().join("magick-tmp"), "{name}");
+                assert!(env.ends_with(MAGICK_POLICY), "{name}: {env}");
+            } else {
+                assert_eq!((config, temp), ("unset", "unset"), "{name}");
+            }
+        }
+    }
+
+    /// The policy closes every domain before opening the one use, in the
+    /// order ImageMagick needs (the last match wins).
+    #[test]
+    fn nfr_security_the_imagemagick_policy_allows_only_heif_in_png_out() {
+        let at = |needle: &str| {
+            MAGICK_POLICY
+                .find(needle)
+                .unwrap_or_else(|| panic!("policy lacks {needle}"))
+        };
+        for closed in [
+            r#"<policy domain="delegate" rights="none" pattern="*"/>"#,
+            r#"<policy domain="filter" rights="none" pattern="*"/>"#,
+            r#"<policy domain="path" rights="none" pattern="@*"/>"#,
+        ] {
+            at(closed);
+        }
+        let coders = at(r#"<policy domain="coder" rights="none" pattern="*"/>"#);
+        assert!(coders < at(r#"<policy domain="coder" rights="read" pattern="{HEIC,HEIF}"/>"#));
+        assert!(coders < at(r#"<policy domain="coder" rights="write" pattern="PNG"/>"#));
+        let modules = at(r#"<policy domain="module" rights="none" pattern="*"/>"#);
+        assert!(
+            modules < at(r#"<policy domain="module" rights="read | write" pattern="{HEIC,PNG}"/>"#)
+        );
+        // Nothing else is opened.
+        assert_eq!(MAGICK_POLICY.matches(r#"rights="read"#).count(), 2);
+        assert_eq!(MAGICK_POLICY.matches(r#"rights="write"#).count(), 1);
+        for limit in [
+            "memory",
+            "map",
+            "disk",
+            "width",
+            "height",
+            "area",
+            "list-length",
+        ] {
+            at(&format!(r#"name="{limit}""#));
+        }
+    }
+
+    /// A HEIC made by the local ImageMagick (which encodes through libheif),
+    /// or `None` with a note.
+    #[cfg(target_os = "linux")]
+    fn real_heic(dir: &Path) -> Option<std::path::PathBuf> {
+        let png = dir.join("photo.png");
+        let mut img = ::image::RgbImage::new(64, 48);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            *px = ::image::Rgb([(x * 4) as u8, (y * 5) as u8, 90]);
+        }
+        img.save_with_format(&png, ::image::ImageFormat::Png)
+            .unwrap();
+        let heic = dir.join("photo.HEIC");
+        let made = ["heif-enc", "magick", "convert"].iter().any(|tool| {
+            let mut cmd = std::process::Command::new(tool);
+            if *tool == "heif-enc" {
+                cmd.arg("-o").arg(&heic).arg(&png);
+            } else {
+                cmd.arg(&png).arg(format!("heic:{}", heic.display()));
+            }
+            cmd.stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+                && heic.is_file()
+        });
+        if !made {
+            eprintln!("SKIPPED heic: nothing here can encode HEIC");
+            return None;
+        }
+        Some(heic)
+    }
+
+    /// An installed program named `name` on `PATH`.
+    #[cfg(target_os = "linux")]
+    fn on_path(name: &str) -> Option<std::path::PathBuf> {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&path)
+            .map(|d| d.join(name))
+            .find(|p| p.is_file())
+    }
+
+    /// FR-052 on Linux with the real decoders: a real HEIC passes the header
+    /// check and prints as one page through each installed decoder,
+    /// ImageMagick under its policy; a disguised one is refused.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_052_a_real_heic_passes_the_gate_and_each_real_decoder() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(heic) = real_heic(dir.path()) else {
+            return;
+        };
+        header::check(&heic).expect("a real HEIC has a HEIF header");
+        let mut ran = 0;
+        for name in crate::engine::deps::HEIF_DECODERS_LINUX {
+            let Some(decoder) = on_path(name) else {
+                eprintln!("SKIPPED {name}: not installed");
+                continue;
+            };
+            let output = dir.path().join(format!("{name}.pdf"));
+            let work = WorkDir::new(name).unwrap();
+            convert_external(
+                &decoder,
+                &heic,
+                &output,
+                &work,
+                &AtomicBool::new(false),
+                Some(Duration::from_secs(120)),
+                &|_| {},
+            )
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(pages_of(&output), 1, "{name}");
+            ran += 1;
+        }
+        eprintln!("{ran} real HEIF decoder(s) exercised through the gate");
+    }
+
+    /// NFR-security on Linux with the real ImageMagick: the environment
+    /// [`imagemagick_policy_env`] returns makes it load the policy (it lists
+    /// the file), decode a real HEIC to PNG, and refuse every other coder,
+    /// whether named explicitly or picked from the content.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_real_imagemagick_applies_the_policy() {
+        let Some(magick) = on_path("magick").or_else(|| on_path("convert")) else {
+            eprintln!("SKIPPED ImageMagick policy: not installed");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let Some(heic) = real_heic(dir.path()) else {
+            return;
+        };
+        let work = WorkDir::new("policy").unwrap();
+        let env = imagemagick_policy_env(&work).unwrap();
+        let run = |args: &[String]| {
+            std::process::Command::new(&magick)
+                .args(args)
+                .envs(env.clone())
+                .current_dir(work.path())
+                .output()
+                .unwrap()
+        };
+        let listed = run(&["-list".into(), "policy".into()]);
+        let listed = String::from_utf8_lossy(&listed.stdout);
+        let policy = work.path().join("magick-policy").join("policy.xml");
+        assert!(
+            listed.contains(&policy.display().to_string()),
+            "policy not loaded:\n{listed}"
+        );
+
+        let png = work.path().join("heif.png");
+        let ok = run(&[
+            format!("heic:{}[0]", heic.display()),
+            format!("png:{}", png.display()),
+        ]);
+        assert!(ok.status.success() && png.is_file(), "{ok:?}");
+
+        let svg = work.path().join("x.svg");
+        std::fs::write(
+            &svg,
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>"#,
+        )
+        .unwrap();
+        let ps = work.path().join("x.ps");
+        std::fs::write(&ps, b"%!PS-Adobe-3.0\nshowpage\n").unwrap();
+        let out = |n: &str| format!("png:{}", work.path().join(n).display());
+        for (what, args) in [
+            (
+                "svg by content",
+                vec![svg.display().to_string(), out("a.png")],
+            ),
+            (
+                "svg by name",
+                vec![format!("svg:{}", svg.display()), out("b.png")],
+            ),
+            (
+                "postscript",
+                vec![format!("ps:{}", ps.display()), out("c.png")],
+            ),
+            (
+                "png read",
+                vec![format!("png:{}", png.display()), out("d.png")],
+            ),
+            (
+                "gif write",
+                vec![
+                    format!("heic:{}[0]", heic.display()),
+                    format!("gif:{}", work.path().join("e.gif").display()),
+                ],
+            ),
+            (
+                "@file",
+                vec![format!("heic:@{}", svg.display()), out("f.png")],
+            ),
+        ] {
+            let refused = run(&args);
+            assert!(!refused.status.success(), "{what} was allowed: {refused:?}");
+        }
+        for n in ["a.png", "b.png", "c.png", "d.png", "e.gif", "f.png"] {
+            assert!(!work.path().join(n).exists(), "{n} was written");
+        }
+        // The refusals are the policy's, not a missing delegate's.
+        let gif = run(&[
+            format!("heic:{}[0]", heic.display()),
+            format!("gif:{}", work.path().join("e.gif").display()),
+        ]);
+        assert!(
+            String::from_utf8_lossy(&gif.stderr).contains("security policy"),
+            "{gif:?}"
+        );
     }
 
     /// FR-058 on a real Windows: a `.heic` WIC cannot decode pauses with one

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The ImageMagick security policy Pluryprint decodes HEIC/HEIF under (Linux).
+  Written into each conversion's private folder and found through
+  MAGICK_CONFIGURE_PATH (ImageMagick 6 and 7), ahead of the system's. The
+  last policy matching a name wins, so each domain is closed first and then
+  opened for the one use: read the HEIC/HEIF coder, write PNG. The system
+  policy.xml is still read after this one; the ones Debian, Ubuntu and
+  Fedora ship only close more.
+-->
+<policymap>
+  <!-- No external program (Ghostscript, rsvg, ffmpeg...), no filter module,
+       and no "@file" indirection to read a list of paths. -->
+  <policy domain="delegate" rights="none" pattern="*"/>
+  <policy domain="filter" rights="none" pattern="*"/>
+  <policy domain="path" rights="none" pattern="@*"/>
+  <!-- Only the HEIC and PNG coder modules are ever loaded. -->
+  <policy domain="module" rights="none" pattern="*"/>
+  <policy domain="module" rights="read | write" pattern="{HEIC,PNG}"/>
+  <policy domain="coder" rights="none" pattern="*"/>
+  <policy domain="coder" rights="read" pattern="{HEIC,HEIF}"/>
+  <policy domain="coder" rights="write" pattern="PNG"/>
+  <!-- Ubuntu's defaults: 128 megapixels, 16K a side, pixels that do not fit
+       in memory spill to disk (in the conversion folder) up to 1 GiB. Only
+       the first image is decoded, so a long image list is refused. -->
+  <policy domain="resource" name="memory" value="256MiB"/>
+  <policy domain="resource" name="map" value="512MiB"/>
+  <policy domain="resource" name="disk" value="1GiB"/>
+  <policy domain="resource" name="width" value="16KP"/>
+  <policy domain="resource" name="height" value="16KP"/>
+  <policy domain="resource" name="area" value="128MP"/>
+  <policy domain="resource" name="list-length" value="16"/>
+</policymap>
