@@ -1,0 +1,23 @@
+# Nemo (Cinnamon) action: prints the selection right away with the default
+# profile. Installed by the .deb at
+# /usr/share/nemo/actions/pluryprint-print-now.nemo_action. Nemo has no
+# system-wide submenus, so the three actions sit at the top level and name
+# Pluryprint themselves.
+#
+# Extensions= rather than Mimetypes=: Nemo matches a MIME type together with
+# its subclasses, and text/plain would then offer the action on every source
+# file and log. Entries keep their leading dot because Nemo compares them as a
+# plain suffix ("md" would match "cmd"). Every selected item must match, and
+# "dir" lets folders through. `shell_menu::linux_files` tests keep the list in
+# step with the engine.
+
+[Nemo Action]
+Name=Print now with Pluryprint
+Name[es]=Imprimir ahora con Pluryprint
+Comment=Print the selected files with the default profile
+Comment[es]=Imprime los archivos seleccionados con el perfil predeterminado
+Exec=pluryprint --invoke=context-menu --action=print-default -- %F
+Icon-Name=document-print
+Selection=notnone
+Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;
+Dependencies=pluryprint;

@@ -1,0 +1,30 @@
+# The app's desktop entry: `bundle.linux.deb.desktopTemplate`, which the
+# AppImage reuses (the bundler renders it into usr/share/applications/
+# Pluryprint.desktop for both). Handlebars fills name, comment, exec, icon and
+# categories from tauri.conf.json.
+#
+# MimeType= is what puts Pluryprint under "Open with" in every file manager.
+# It lists every format the engine prints (`engine::SUPPORTED_EXTS`), never
+# inode/directory: a folder is opened by the file manager, and claiming it
+# here could make Pluryprint the default folder handler on a desktop without
+# its own defaults. `Exec=… %F` hands over the files; the app opens on the
+# Print Job screen with them loaded, and a second launch is forwarded to the
+# running window (`cli::startup`, `cli::single_instance`).
+#
+# `shell_menu::linux_files` tests keep the list in step with the engine.
+[Desktop Entry]
+Type=Application
+Name={{name}}
+{{#if comment}}
+Comment={{comment}}
+Comment[es]=Impresión de archivos por lotes
+{{/if}}
+Exec={{exec}} %F
+Icon={{icon}}
+StartupWMClass={{exec}}
+StartupNotify=true
+Terminal=false
+Categories={{categories}}
+Keywords=print;printer;batch;queue;pdf;
+Keywords[es]=imprimir;impresora;lotes;cola;pdf;
+MimeType=application/pdf;image/jpeg;image/png;image/tiff;image/bmp;image/webp;image/heif;image/heic;image/svg+xml;image/svg+xml-compressed;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.presentation;application/rtf;text/rtf;text/plain;text/html;text/markdown;text/x-markdown;

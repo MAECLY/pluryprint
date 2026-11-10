@@ -1,0 +1,45 @@
+# Dolphin (and every KIO file dialog) service menu: a "Pluryprint" submenu
+# with the three actions of the Windows Explorer menu. Installed by the .deb
+# at /usr/share/kio/servicemenus/pluryprint.desktop, which KDE Frameworks 6
+# and KDE Frameworks 5.85+ both read (Ubuntu 22.04 ships 5.92).
+#
+# Each action runs `pluryprint --invoke=context-menu --action=<a> -- %F`:
+# the paths after `--` are the selection (Linux only, see
+# `cli::ARGV_SELECTION`). Folders qualify, as in Explorer; the app asks
+# whether to include subfolders.
+#
+# Dolphin filters only by MIME type, subclasses included, so text/plain also
+# brings the submenu up on source files and logs; the app then refuses those
+# with its unsupported-format reason, as it does for a drop.
+#
+# The labels repeat the `shellMenu` entries of the i18n catalogs, and
+# `shell_menu::linux_files` tests keep them, the MimeType list and the Exec
+# lines in step with the app.
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+Name=Pluryprint
+MimeType=application/pdf;image/jpeg;image/png;image/tiff;image/bmp;image/webp;image/heif;image/heic;image/svg+xml;image/svg+xml-compressed;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.presentation;application/rtf;text/rtf;text/plain;text/html;text/markdown;text/x-markdown;inode/directory;
+X-KDE-Protocols=file
+X-KDE-Submenu=Pluryprint
+Icon=pluryprint
+TryExec=pluryprint
+Actions=printNow;configure;queue;
+
+[Desktop Action printNow]
+Name=Print now
+Name[es]=Imprimir ahora
+Icon=document-print
+Exec=pluryprint --invoke=context-menu --action=print-default -- %F
+
+[Desktop Action configure]
+Name=Configure print job…
+Name[es]=Configurar el trabajo de impresión…
+Icon=pluryprint
+Exec=pluryprint --invoke=context-menu --action=configure -- %F
+
+[Desktop Action queue]
+Name=Add to print queue
+Name[es]=Añadir a la cola de impresión
+Icon=view-list-details
+Exec=pluryprint --invoke=context-menu --action=queue -- %F
