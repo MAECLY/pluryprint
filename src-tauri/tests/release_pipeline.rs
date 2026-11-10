@@ -2,7 +2,7 @@
 //! NFR-070), checked from the files themselves so a reviewer does not have to
 //! run a release to see it broken:
 //!
-//! - `.github/workflows/release.yml` builds the four targets with no write
+//! - `.github/workflows/release.yml` builds the six targets with no write
 //!   token and no secret, signs the update artifacts in a job that builds
 //!   nothing, and only then uploads a draft: it refuses to run without the
 //!   updater signing secret, names every asset for the computer it is for,
@@ -404,28 +404,74 @@ fn release_explorer_extension_version_is_the_app_version() {
     }
 }
 
-/// The four labels, in matrix order, and the latest.json key each serves.
-const LABELS: [(&str, &str); 4] = [
-    ("apple_silicon", "darwin-aarch64"),
-    ("apple_intel", "darwin-x86_64"),
-    ("windows_x64", "windows-x86_64"),
-    ("windows_arm64", "windows-aarch64"),
+/// The six builds, in matrix order: the bundles each makes and its label.
+const BUILDS: [(&str, &str); 6] = [
+    (
+        "--target aarch64-apple-darwin --bundles app,dmg",
+        "apple_silicon",
+    ),
+    (
+        "--target x86_64-apple-darwin --bundles app,dmg",
+        "apple_intel",
+    ),
+    (
+        "--target x86_64-pc-windows-msvc --bundles nsis",
+        "windows_x64",
+    ),
+    (
+        "--target aarch64-pc-windows-msvc --bundles nsis",
+        "windows_arm64",
+    ),
+    (
+        "--target x86_64-unknown-linux-gnu --bundles appimage,deb",
+        "linux_x64",
+    ),
+    (
+        "--target aarch64-unknown-linux-gnu --bundles appimage,deb",
+        "linux_arm64",
+    ),
 ];
 
-/// NFR-070 and decision D2: four builds, each named for the computer it is
-/// for (Versorium's layout), Windows as NSIS only.
+/// Every latest.json key a release serves, with the label of the build that
+/// makes its update artifact and the artifact's extension. A Linux build
+/// makes two: the AppImage for the plain key and the .deb for the `-deb` key
+/// the updater of a .deb install looks up first.
+const UPDATES: [(&str, &str, &str); 8] = [
+    ("darwin-aarch64", "apple_silicon", ".app.tar.gz"),
+    ("darwin-x86_64", "apple_intel", ".app.tar.gz"),
+    ("windows-x86_64", "windows_x64", ".exe"),
+    ("windows-aarch64", "windows_arm64", ".exe"),
+    ("linux-x86_64", "linux_x64", ".AppImage"),
+    ("linux-x86_64-deb", "linux_x64", ".deb"),
+    ("linux-aarch64", "linux_arm64", ".AppImage"),
+    ("linux-aarch64-deb", "linux_arm64", ".deb"),
+];
+
+/// The flags that require every key of UPDATES, as the workflows write them.
+fn require_flags() -> String {
+    UPDATES
+        .iter()
+        .map(|(key, _, _)| format!("--require {key}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `text` with every line continuation and run of spaces folded into one
+/// space, so a command split over lines reads as one.
+fn one_line(text: &str) -> String {
+    text.replace("\\\n", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// NFR-070 and decision D2: six builds, each named for the computer it is
+/// for (Versorium's layout), Windows as NSIS only, Linux as an AppImage and
+/// a .deb.
 #[test]
 fn nfr_070_release_builds_every_platform_with_its_own_asset_names() {
     let build = job(&release_yml(), "build");
-    for (args, (label, _)) in [
-        "--target aarch64-apple-darwin --bundles app,dmg",
-        "--target x86_64-apple-darwin --bundles app,dmg",
-        "--target x86_64-pc-windows-msvc --bundles nsis",
-        "--target aarch64-pc-windows-msvc --bundles nsis",
-    ]
-    .into_iter()
-    .zip(LABELS)
-    {
+    for (args, label) in BUILDS {
         assert!(build.contains(&format!("args: '{args}'")), "missing {args}");
         let at = build.find(&format!("args: '{args}'")).unwrap();
         assert!(
@@ -433,14 +479,24 @@ fn nfr_070_release_builds_every_platform_with_its_own_asset_names() {
             "missing label {label}"
         );
     }
+    // No build the tables above do not know about.
+    assert_eq!(
+        build.matches("\n            label: ").count(),
+        BUILDS.len(),
+        "{build}"
+    );
     assert!(build.contains("pnpm tauri build $ARGS --ci"));
     assert!(build.contains("--label \"$LABEL\""));
     // The labels and the manifest keys are the release tools' own table.
     let tools = read("scripts/release/release_tools.py");
-    for (label, key) in LABELS {
+    for (key, label, ext) in UPDATES {
         assert!(
-            tools.contains(&format!("\"{label}\": (\"{key}\"")),
-            "release_tools.py does not map {label} to {key}"
+            tools.contains(&format!("\"{key}\": (\"{label}\", \"{ext}\")")),
+            "release_tools.py does not map {key} to {label} {ext}"
+        );
+        assert!(
+            BUILDS.iter().any(|(_, l)| *l == label),
+            "{key} is served by {label}, which no build makes"
         );
     }
     // A draft, never published by the workflow.
@@ -455,9 +511,20 @@ fn nfr_070_release_builds_every_platform_with_its_own_asset_names() {
 /// upload silently replaces the other's (`gh release upload --clobber`).
 #[test]
 fn release_asset_names_never_collide() {
-    let exts = [".dmg", ".app.tar.gz", ".app.tar.gz.sig", ".exe", ".exe.sig"];
+    let exts = [
+        ".dmg",
+        ".app.tar.gz",
+        ".app.tar.gz.sig",
+        ".exe",
+        ".exe.sig",
+        ".AppImage",
+        ".AppImage.sig",
+        ".deb",
+        ".deb.sig",
+        "_appimage-sources.txt",
+    ];
     let mut seen = std::collections::HashSet::new();
-    for (label, _) in LABELS {
+    for (_, label) in BUILDS {
         for ext in exts {
             let name = format!("Pluryprint_1.2.3_{label}{ext}");
             assert!(seen.insert(name.clone()), "two builds would upload {name}");
@@ -486,6 +553,8 @@ fn d2_release_notes_explain_gatekeeper_and_smartscreen_in_en_and_es() {
         "apple_intel",
         "windows_x64",
         "windows_arm64",
+        "linux_x64",
+        "linux_arm64",
     ] {
         assert!(notes.contains(needle), "release notes lack {needle:?}");
     }
@@ -494,27 +563,59 @@ fn d2_release_notes_explain_gatekeeper_and_smartscreen_in_en_and_es() {
     assert!(publish.contains("--notes-file release-notes.md"));
 }
 
-/// FR-085: the manifest is complete for the four platforms the app updates
-/// on before anyone can publish, with URLs the app can download, and
-/// checksums of every file.
+/// FR-085: the manifest is complete for every key the app updates through
+/// (the four desktop platforms, and the AppImage and .deb of both Linux
+/// architectures) before anyone can publish, with URLs the app can download,
+/// and checksums of every file. Writing it, checking it and verifying its
+/// signatures each require the whole set.
 #[test]
 fn fr_085_publish_requires_every_platform_and_writes_sha256sums() {
     let publish = job(&release_yml(), "publish");
-    for key in [
-        "darwin-aarch64",
-        "darwin-x86_64",
-        "windows-x86_64",
-        "windows-aarch64",
-    ] {
+    let flat = one_line(&publish);
+    let all = require_flags();
+    for cmd in ["make-manifest", "check-manifest", "extract-signatures"] {
+        let at = flat
+            .find(&format!("release_tools.py {cmd}"))
+            .unwrap_or_else(|| panic!("publish does not run {cmd}"));
+        let rest = &flat[at..];
+        let end = rest.find(" python3 ").unwrap_or(rest.len());
         assert!(
-            publish.contains(&format!("--require {key}")),
-            "publish does not require {key}"
+            rest[..end].contains(&all),
+            "{cmd} does not require every key ({all}): {}",
+            &rest[..end]
         );
     }
     assert!(publish.contains("needs.sign.result == 'success'"));
     assert!(publish.contains("release_tools.py make-manifest"));
     assert!(publish.contains("sha256sum -- * > ../SHA256SUMS"));
     assert!(publish.contains("gh release upload \"$GITHUB_REF_NAME\" SHA256SUMS latest.json"));
+}
+
+/// NFR-022: the sign job signs every update artifact the builds staged, the
+/// Linux AppImages and .deb packages included, and fails when one is missing
+/// rather than leaving a platform out of the manifest.
+#[test]
+fn nfr_022_sign_job_signs_every_update_artifact() {
+    let sign = job(&release_yml(), "sign");
+    let mut exts: Vec<&str> = Vec::new();
+    for (_, _, ext) in UPDATES {
+        if !exts.contains(&ext) {
+            exts.push(ext);
+        }
+    }
+    let globs: Vec<String> = exts.iter().map(|e| format!("unsigned/*{e}")).collect();
+    assert!(
+        sign.contains(&format!("for f in {}; do", globs.join(" "))),
+        "{sign}"
+    );
+    assert!(
+        sign.contains(&format!("if [ \"$n\" -ne {} ]; then", UPDATES.len())),
+        "{sign}"
+    );
+    assert!(
+        sign.contains("expected 8 (two .app.tar.gz, two .exe, two .AppImage, two .deb)"),
+        "{sign}"
+    );
 }
 
 /// FR-082/NFR-022: the app's updater has `requireSignedVersion` on, so every
@@ -597,10 +698,18 @@ fn fr_082_check_manifest_requires_signatures_bound_to_the_version() {
     assert_eq!(garbage.status.code(), Some(1));
 }
 
-/// FR-085/086: publishing a release moves the beta manifest, forward only.
+/// FR-085/086: publishing a release moves the beta manifest, forward only,
+/// and only to a manifest as complete as the one publish requires.
 #[test]
 fn fr_086_beta_pointer_moves_forward_only() {
     let wf = read(".github/workflows/release-channels.yml");
+    assert!(
+        one_line(&wf).contains(&format!(
+            "release_tools.py check-manifest --manifest new/latest.json --version \"$new_version\" {}",
+            require_flags()
+        )),
+        "{wf}"
+    );
     assert!(wf.contains("types: [published]"));
     assert!(wf.contains("BETA_TAG: channel-beta"));
     assert!(wf.contains("release_tools.py semver-gt \"$new_version\" \"$current_version\""));
@@ -708,6 +817,109 @@ fn nfr_070_windows_release_builds_and_checks_both_explorer_dlls() {
     }
 }
 
+/// NFR-070: the Linux builds run on the Ubuntu 22.04 runners (the glibc and
+/// WebKitGTK floor the docs state), install what they link against, and check
+/// what they made the way the Mac builds are checked: the architecture of
+/// every binary in both packages, the .deb's dependency on the CUPS client
+/// tools, valid .desktop entries, no Windows program, and a binary that
+/// starts.
+#[test]
+fn nfr_070_linux_release_builds_are_checked_like_the_mac_ones() {
+    let build = job(&release_yml(), "build");
+    for (platform, target, machine) in [
+        (
+            "ubuntu-22.04",
+            "x86_64-unknown-linux-gnu",
+            "Advanced Micro Devices X86-64",
+        ),
+        ("ubuntu-22.04-arm", "aarch64-unknown-linux-gnu", "AArch64"),
+    ] {
+        let row = format!("platform: {platform}\n            target: {target}\n");
+        let at = build
+            .find(&row)
+            .unwrap_or_else(|| panic!("no {platform} row for {target}"));
+        let next = build[at..].find("label: ").unwrap() + at;
+        assert!(
+            build[next..].contains(&format!("machine: {machine}\n")),
+            "{target} is not checked for {machine}"
+        );
+    }
+    // linuxdeploy runs unpacked: the runners have no FUSE.
+    assert!(build.contains("APPIMAGE_EXTRACT_AND_RUN: '1'"));
+    let apt = steps(&build)
+        .into_iter()
+        .find(|s| s.contains("name: System libraries (Linux)"))
+        .expect("an apt step for the Linux builds");
+    assert!(apt.contains("if: startsWith(matrix.platform, 'ubuntu')"));
+    for pkg in [
+        "libwebkit2gtk-4.1-dev",
+        "libgtk-3-dev",
+        "libdbus-1-dev",
+        "librsvg2-dev",
+        "patchelf",
+        "desktop-file-utils",
+    ] {
+        assert!(apt.contains(pkg), "the Linux build does not install {pkg}");
+    }
+    let checks = steps(&build)
+        .into_iter()
+        .find(|s| s.contains("name: Architecture and package checks (Linux)"))
+        .expect("a check step for the Linux packages");
+    for needle in [
+        "if: startsWith(matrix.platform, 'ubuntu')",
+        "dpkg-deb -I \"$deb\"",
+        "dpkg-deb -f \"$deb\" Depends",
+        "cups-client",
+        "--appimage-extract",
+        "readelf -h",
+        "[ \"$got\" = \"$MACHINE\" ]",
+        "desktop-file-validate",
+        "SumatraPDF.exe",
+        "/usr/bin/pluryprint\" --version",
+        "AppRun\" --version",
+        "usr/lib/Pluryprint/$f",
+        "usr/share/kio/servicemenus/pluryprint.desktop",
+        "usr/share/nemo/actions/pluryprint-print.nemo_action",
+        "GITHUB_STEP_SUMMARY",
+    ] {
+        assert!(checks.contains(needle), "the Linux checks lack {needle:?}");
+    }
+}
+
+/// LGPL-2.1 section 6: the AppImage carries system libraries (WebKitGTK,
+/// GTK, GLib, libsoup...) copied from the runner's Ubuntu packages, so every
+/// Linux build stages the list of those packages with their source versions,
+/// which the release attaches and THIRD-PARTY-NOTICES.md points to. The list
+/// is made after staging (stage-bundle wants an empty folder) and travels in
+/// the same artifact.
+#[test]
+fn nfr_027_linux_builds_record_the_appimage_libraries_sources() {
+    let build = job(&release_yml(), "build");
+    let all = steps(&build);
+    let stage = all
+        .iter()
+        .position(|s| s.contains("name: Stage the release files"))
+        .unwrap();
+    let record = all
+        .iter()
+        .position(|s| s.contains("name: Record the AppImage's system libraries (Linux)"))
+        .expect("a step that records the AppImage's libraries");
+    let upload = all
+        .iter()
+        .position(|s| s.contains("name: Upload the unsigned files"))
+        .unwrap();
+    assert!(stage < record && record < upload, "{build}");
+    let step = &all[record];
+    assert!(step.contains("if: startsWith(matrix.platform, 'ubuntu')"));
+    assert!(step.contains("scripts/release/appimage-sources.sh \"$RUNNER_TEMP/squashfs-root\""));
+    assert!(
+        step.contains("\"release-staging/Pluryprint_${version}_${LABEL}_appimage-sources.txt\"")
+    );
+    let script = read("scripts/release/appimage-sources.sh");
+    assert!(script.contains("${source:Package} ${source:Version}"));
+    assert!(read("scripts/licenses/notices-header.md").contains("_appimage-sources.txt"));
+}
+
 /// NFR-006: the installer size is measured on every Windows release build;
 /// CI builds no installer.
 #[test]
@@ -720,8 +932,8 @@ fn nfr_006_installer_size_is_measured_against_the_budget() {
 }
 
 /// CI is the lean pull-request gate: frontend lint, typecheck, format and
-/// tests, and the Rust backend's fmt, clippy and full test run on both
-/// shipped platforms. Coverage, bundles, smoke launches and advisory lanes
+/// tests, and the Rust backend's fmt, clippy and tests on every shipped
+/// platform (Linux on ubuntu-22.04, the image the Linux release builds on). Coverage, bundles, smoke launches and advisory lanes
 /// are not part of it.
 #[test]
 fn ci_is_the_lean_pull_request_gate() {
@@ -745,7 +957,7 @@ fn ci_is_the_lean_pull_request_gate() {
     }
 
     let backend = job(&ci, "backend");
-    assert!(backend.contains("os: [windows-latest, macos-latest]"));
+    assert!(backend.contains("os: [windows-latest, macos-latest, ubuntu-22.04]"));
     assert!(backend.contains("PLURYPRINT_SKIP_MIGRATION: '1'"));
     for cmd in [
         "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
@@ -756,12 +968,13 @@ fn ci_is_the_lean_pull_request_gate() {
         assert!(backend.contains(cmd), "backend does not run {cmd}");
     }
     // The full run on Windows is what keeps src/ipc/bindings.ts in sync: no
-    // filter. macOS runs the unit tests, which hold its cfg-gated code.
+    // filter. macOS and Linux run the unit tests, which hold their cfg-gated
+    // code; linux.yml runs the rest of the Linux suite after a merge.
     assert!(backend.contains(
         "if: runner.os == 'Windows'\n        run: cargo test --manifest-path src-tauri/Cargo.toml\n"
     ));
     assert!(backend.contains(
-        "if: runner.os == 'macOS'\n        run: cargo test --manifest-path src-tauri/Cargo.toml --lib\n"
+        "if: runner.os != 'Windows'\n        run: cargo test --manifest-path src-tauri/Cargo.toml --lib\n"
     ));
 
     // Audits are not part of the pull-request gate (audit.yml runs them): a
@@ -960,6 +1173,140 @@ fn nfr_070_stage_bundle_names_the_files_and_drops_throwaway_signatures() {
     let mixed = stage("apple_silicon", &shared);
     assert_eq!(mixed.status.code(), Some(1), "{mixed:?}");
     assert!(String::from_utf8_lossy(&mixed.stderr).contains("not empty"));
+}
+
+/// NFR-070: a Linux build stages two update artifacts, the AppImage and the
+/// .deb, and nothing else tauri leaves next to them (the AppDir, the .deb's
+/// unpacked tree, the throwaway signatures). A build that lost either package
+/// is refused, because each serves a manifest key of its own.
+#[test]
+fn nfr_070_stage_bundle_stages_both_linux_packages() {
+    if python().is_none() {
+        eprintln!("no python on this machine; release_tools.py not exercised");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = dir.path().join("bundle");
+    let put = |rel: &str| {
+        let p = bundle.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, rel).unwrap();
+    };
+    put("appimage/Pluryprint_0.2.0_aarch64.AppImage");
+    put("appimage/Pluryprint_0.2.0_aarch64.AppImage.sig");
+    put("appimage/Pluryprint.AppDir/AppRun");
+    put("deb/Pluryprint_0.2.0_arm64.deb");
+    put("deb/Pluryprint_0.2.0_arm64.deb.sig");
+    put("deb/Pluryprint_0.2.0_arm64/control/control");
+    let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    let stage = |label: &str, out: &std::path::Path| {
+        tools(&[
+            "stage-bundle",
+            "--bundle-dir",
+            &s(&bundle),
+            "--label",
+            label,
+            "--version",
+            "0.2.0",
+            "--out",
+            &s(out),
+        ])
+        .unwrap()
+    };
+    let out = dir.path().join("staged");
+    let ok = stage("linux_arm64", &out);
+    assert!(ok.status.success(), "{ok:?}");
+    let mut names: Vec<String> = std::fs::read_dir(&out)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "Pluryprint_0.2.0_linux_arm64.AppImage",
+            "Pluryprint_0.2.0_linux_arm64.deb"
+        ]
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&ok.stdout),
+        "Pluryprint_0.2.0_linux_arm64.AppImage\nPluryprint_0.2.0_linux_arm64.deb\n"
+    );
+
+    // Without the .deb, the -deb key would have nothing to serve.
+    std::fs::remove_file(bundle.join("deb/Pluryprint_0.2.0_arm64.deb")).unwrap();
+    let no_deb = stage("linux_arm64", &dir.path().join("n"));
+    assert_eq!(no_deb.status.code(), Some(1), "{no_deb:?}");
+    assert!(String::from_utf8_lossy(&no_deb.stderr).contains("Pluryprint_0.2.0_linux_arm64.deb"));
+}
+
+/// FR-085: a .deb install looks up `linux-<arch>-deb` before `linux-<arch>`
+/// (tauri-plugin-updater), so the manifest names both for each Linux build:
+/// the AppImage under the plain key, the .deb under the -deb one.
+#[test]
+fn fr_085_make_manifest_serves_the_appimage_and_the_deb_of_each_linux_build() {
+    if python().is_none() {
+        eprintln!("no python on this machine; release_tools.py not exercised");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().join("assets");
+    std::fs::create_dir_all(&d).unwrap();
+    let mut listing = Vec::new();
+    for (i, (_, label, ext)) in UPDATES.iter().enumerate() {
+        let name = format!("Pluryprint_0.2.0_{label}{ext}");
+        std::fs::write(d.join(&name), "x").unwrap();
+        std::fs::write(d.join(format!("{name}.sig")), format!("c2ln{i}")).unwrap();
+        listing.push(serde_json::json!({ "name": name, "id": 100 + i }));
+    }
+    let assets = dir.path().join("assets.json");
+    std::fs::write(&assets, serde_json::Value::Array(listing).to_string()).unwrap();
+    let out = dir.path().join("latest.json");
+    let mut args: Vec<String> = [
+        "make-manifest",
+        "--dir",
+        &d.to_string_lossy(),
+        "--version",
+        "0.2.0",
+        "--assets",
+        &assets.to_string_lossy(),
+        "--repo",
+        "MAECLY/pluryprint",
+        "--pub-date",
+        "2026-11-09T00:00:00Z",
+        "--out",
+        &out.to_string_lossy(),
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
+    args.extend(require_flags().split(' ').map(String::from));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let ok = tools(&refs).unwrap();
+    assert!(ok.status.success(), "{ok:?}");
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let api = "https://api.github.com/repos/MAECLY/pluryprint/releases/assets/";
+    assert_eq!(v["platforms"].as_object().unwrap().len(), UPDATES.len());
+    for (i, (key, _, _)) in UPDATES.iter().enumerate() {
+        assert_eq!(
+            v["platforms"][key]["url"],
+            format!("{api}{}", 100 + i),
+            "{key}"
+        );
+        assert_eq!(
+            v["platforms"][key]["signature"],
+            format!("c2ln{i}"),
+            "{key}"
+        );
+    }
+
+    // A release whose .deb was lost still has its AppImage, but a .deb
+    // install could not update: refused.
+    std::fs::remove_file(d.join("Pluryprint_0.2.0_linux_x64.deb")).unwrap();
+    let lost = tools(&refs).unwrap();
+    assert_eq!(lost.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&lost.stderr).contains("linux-x86_64-deb"));
 }
 
 /// The build job stages into its own folder, never Vite's `dist/`.
