@@ -41,7 +41,7 @@ Description: Batch file printing
 | `/usr/share/applications/Pluryprint.desktop` | from `src-tauri/linux/pluryprint.desktop.hbs` (`bundle.linux.deb.desktopTemplate`): the menu entry and **Open with Pluryprint** (`MimeType=`, `Exec=pluryprint %F`) |
 | `/usr/share/icons/hicolor/{32x32,64x64,128x128,512x512}/apps/pluryprint.png` | `bundle.icon` |
 | `/usr/share/kio/servicemenus/pluryprint.desktop` | the Dolphin service menu (KDE Frameworks 6, and KF5 from 5.85) |
-| `/usr/share/nemo/actions/pluryprint-{print,configure,queue}.nemo_action` | the Nemo (Cinnamon) actions |
+| `/usr/share/nemo/actions/pluryprint-{print-now,configure,queue}.nemo_action` | the Nemo (Cinnamon) actions |
 
 The dependencies are `bundle.linux.deb` in `tauri.conf.json`; tauri adds the WebKitGTK and GTK libraries to `Depends` on its own:
 
@@ -70,7 +70,7 @@ Per architecture: the `.AppImage` and `.deb`, a `.sig` for each (the minisign si
 |---|---|---|
 | Applications menu, dock icon | `Pluryprint.desktop`, `Icon=pluryprint`, `StartupWMClass` | the desktop template |
 | **Open with Pluryprint** (every file manager) | `MimeType=` lists the printable types, `Exec=pluryprint %F` | the desktop template |
-| Dolphin (KDE): *Print now*, *Configure print job*, *Add to print queue* | KIO service menu | `src-tauri/linux/kio/pluryprint.desktop` → `/usr/share/kio/servicemenus/` |
+| Dolphin (KDE): *Print now*, *Configure print job*, *Add to print queue* | KIO service menu | `src-tauri/linux/kio-servicemenu.desktop` → `/usr/share/kio/servicemenus/` |
 | Nemo (Cinnamon): the same three | three `.nemo_action` files | `src-tauri/linux/nemo/` → `/usr/share/nemo/actions/` |
 | Nautilus (GNOME Files) | **Open with** only: its context menu needs `nautilus-python`, which is not used | not in this release |
 

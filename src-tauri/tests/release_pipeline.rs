@@ -879,7 +879,7 @@ fn nfr_070_linux_release_builds_are_checked_like_the_mac_ones() {
         "AppRun\" --version",
         "usr/lib/Pluryprint/$f",
         "usr/share/kio/servicemenus/pluryprint.desktop",
-        "usr/share/nemo/actions/pluryprint-print.nemo_action",
+        "usr/share/nemo/actions/pluryprint-print-now.nemo_action",
         "GITHUB_STEP_SUMMARY",
     ] {
         assert!(checks.contains(needle), "the Linux checks lack {needle:?}");

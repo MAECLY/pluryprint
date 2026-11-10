@@ -68,7 +68,7 @@ The Explorer context-menu DLL is its own crate: `shell-ext-win/` is deliberately
 | The Linux packages (`.deb`, AppImage): architecture, `Depends: cups-client`, `desktop-file-validate`, `--version` | `release.yml` `build`, step *Architecture and package checks (Linux)* |
 | Coverage (Vitest V8, `cargo llvm-cov`) | Local only: `pnpm test:coverage`, `cargo llvm-cov` |
 | `#[ignore]`d tests (live update manifest, real CUPS queue) | Local only: `cargo test -- --ignored` |
-| E2E (WebdriverIO + tauri-driver) and smoke launches | Local only: `pnpm test:e2e` on Windows; the VM scripts under `scripts/vm/` |
+| E2E (WebdriverIO + tauri-driver) and smoke launches | Windows: local only, `pnpm test:e2e` and the VM scripts under `scripts/vm/`. Linux: the `e2e` job of `linux.yml` (WebKitWebDriver under Xvfb, `continue-on-error` while some specs still time out) |
 | Windows on ARM | `release.yml` cross-compiles the ARM64 app and DLL on every tag |
 
 The COM export check that an earlier `shell-ext-win` CI lane ran was itself broken: it tested `$exports -notmatch $symbol` with `$exports` being `dumpbin`'s output as an **array** of lines, and on an array PowerShell's `-notmatch` returns the non-matching lines instead of a yes or no, so it threw on every DLL. The DLL was fine: `lib.rs` exports both functions with `#[no_mangle] pub unsafe extern "system"`, and the linker's `LNK4104 ... should be PRIVATE` warning in the same log names them in the export table. The release check joins the output into one string first.

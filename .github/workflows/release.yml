@@ -461,7 +461,7 @@ jobs:
             grep -q '^MimeType=' "$f" || { echo "::error::$f has no MimeType"; exit 1; }
           done
           for f in usr/share/kio/servicemenus/pluryprint.desktop \
-                   usr/share/nemo/actions/pluryprint-print.nemo_action \
+                   usr/share/nemo/actions/pluryprint-print-now.nemo_action \
                    usr/share/nemo/actions/pluryprint-configure.nemo_action \
                    usr/share/nemo/actions/pluryprint-queue.nemo_action; do
             test -s "$RUNNER_TEMP/deb/$f" || { echo "::error::the .deb does not install /$f"; exit 1; }

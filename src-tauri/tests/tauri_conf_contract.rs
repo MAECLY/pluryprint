@@ -82,11 +82,11 @@ fn fr_001_deb_installs_the_file_manager_actions() {
     let wanted = [
         (
             "/usr/share/kio/servicemenus/pluryprint.desktop",
-            "linux/kio/pluryprint.desktop",
+            "linux/kio-servicemenu.desktop",
         ),
         (
-            "/usr/share/nemo/actions/pluryprint-print.nemo_action",
-            "linux/nemo/pluryprint-print.nemo_action",
+            "/usr/share/nemo/actions/pluryprint-print-now.nemo_action",
+            "linux/nemo/pluryprint-print-now.nemo_action",
         ),
         (
             "/usr/share/nemo/actions/pluryprint-configure.nemo_action",
