@@ -1,6 +1,6 @@
 # Milestones
 
-> **TL;DR.** Pluryprint ships in six milestones (M0–M5) over roughly five to six months of single-developer work, taking the project from an empty repository to a notarized macOS port. Each milestone has explicit scope, deliverables, exit criteria, and named risks.
+> **TL;DR.** Pluryprint ships in six milestones (M0–M5) over roughly five to six months of single-developer work, taking the project from an empty repository to a notarized macOS port. A seventh, M6, adds Linux ([ADR-0015](../adr/0015-linux-support.md)). Each milestone has explicit scope, deliverables, exit criteria, and named risks.
 
 This document is the source of truth for what each milestone contains. Anything not listed here is out of scope for that milestone and should be deferred or filed against a later one. See [timeline.md](./timeline.md) for duration estimates and [release-strategy.md](./release-strategy.md) for how these milestones map to public versions.
 
@@ -14,6 +14,7 @@ This document is the source of truth for what each milestone contains. Anything 
 | M3 | Multi-format (Win) | `0.2.0` | Adapters delivered (every format but GIF, which is refused by decision); Settings dependency panel owed |
 | M4 | Auto-update + Polish (Win) | `1.0.0` GA | Update install, channels, release pipeline and i18n delivered; no OS certificates by decision (ADR-0011); 0.0.1 preview published 2026-10-10 |
 | M5 | macOS Port | `1.1.0` | Printing, Finder entry and per-architecture `.dmg` delivered; no notarization by decision |
+| M6 | Linux Port | `0.0.5` (preview) | Decided 2026-11-09 (ADR-0015); in progress. Status as of that date, not the round-3 date above |
 
 Milestones are strictly sequential. We do not start M(n+1) work until M(n) exit criteria are met. Spillover items roll forward and reduce the next milestone's headroom.
 
@@ -382,13 +383,51 @@ Untouched: `.pkg` / `.dmg` packaging, Developer ID signing, notarization, stapli
 - Apple Developer Program membership active ($99/year).
 - Access to one Apple Silicon and one Intel Mac for local QA (CI handles both).
 
+## M6 — Linux Port
+
+**Goal:** Linux x86_64 and ARM64 builds with the same formats, queue, profiles, CLI and updates as Windows and macOS, released with 0.0.5 and labelled **preview** until they have run on real hardware ([ADR-0015](../adr/0015-linux-support.md), which supersedes decision D20 and the "Linux (M6+)" note of ADR-0007).
+
+### Status (2026-11-09) — decided, in progress
+
+The CUPS backend is shared with macOS and already compiled for Linux. The work for 0.0.5 is packaging, three converters and the file-manager glue.
+
+### Scope
+
+- **Packages:** an AppImage and a `.deb` per architecture (`Pluryprint_<version>_linux_x64.AppImage`, `…_linux_x64.deb`, `…_linux_arm64.AppImage`, `…_linux_arm64.deb`), built on `ubuntu-22.04` and `ubuntu-22.04-arm`. No `.rpm`, no repository, Flatpak or Snap.
+- **Minimum:** Ubuntu 22.04, Debian 12 or Fedora 38, or later (glibc 2.35, WebKitGTK 4.1 2.40 or later), with CUPS; X11 or Wayland.
+- **Format parity:** a WebKitGTK backend for the render worker (HTML, Markdown, text); HEIC/HEIF through `heif-dec` / `heif-convert` or ImageMagick, found at run time and reported as a dependency; RTF through LibreOffice.
+- **Shell integration:** "Open with" through the `.desktop` file's `MimeType=`; Dolphin and Nemo entries (**Print now**, **Configure print job**, **Add to print queue**) installed by the `.deb`.
+- **Updates:** the AppImage updates itself (`linux-x86_64`, `linux-aarch64`); a `.deb` install updates in the app through `pkexec dpkg -i` (`linux-x86_64-deb`, `linux-aarch64-deb`).
+- **Engine:** process-group memory accounting from `/proc`, so the memory cap covers a capped tool's children; process groups signalled without the ambiguous `kill -<sig> -<pgid>` form.
+- **CI:** `ubuntu-22.04` in the pull-request gate (fmt, clippy, `--lib`); `linux.yml` with the full suite on `ubuntu-22.04-arm`, Xvfb and a `cups-pdf` queue (push to `main`, weekly, by hand).
+- **Licences:** the AppImage's LGPL libraries listed with a Corresponding Source pointer.
+
+### Exit criteria
+
+- `release.yml` publishes the eight Linux files and the four Linux manifest keys, signed, and refuses a release without them.
+- `linux.yml` is green on ARM64, and the pull-request gate is green on `ubuntu-22.04`.
+- **To drop the "preview" label:** a manual pass on real hardware per architecture (install, print to `cups-pdf` and to a real printer, add a printer, "Open with", the Dolphin and Nemo entries, the CLI, HTML and HEIC, an in-app update from the previous Linux release) on Ubuntu 22.04 and 24.04, Debian 12 and Fedora.
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| The first Linux release has no earlier Linux build to update from | Required manifest keys on every release; the update path is proven by the release after it. |
+| WebKitGTK traps: AppArmor and the `bubblewrap` sandbox inside an AppImage (Ubuntu 24.04), NVIDIA on Wayland, the Wayland `app_id`, 16K-page kernels | Test each on real hardware before dropping "preview"; document workarounds. |
+| AppImage needs `libfuse2` | Say so in the release notes and on the landing page. |
+| The `ubuntu-22.04` runner image is retired | Move the baseline (and raise the stated minimum) when GitHub announces it. |
+
+### Dependencies
+
+- M5's CUPS backend.
+- A Linux machine or VM per architecture for the manual pass.
+
 ---
 
 ## What is explicitly out of scope (pre-1.0)
 
 These are deferred to post-1.0 to keep the milestone path tight:
 
-- Linux port (CUPS exists; tracked for v2.0).
 - Cloud printing / IPP-over-HTTPS (would expand attack surface; not justified yet).
 - Plugin/extension API for third-party adapters.
 - Per-page settings within a single document (we only do per-job and per-profile).

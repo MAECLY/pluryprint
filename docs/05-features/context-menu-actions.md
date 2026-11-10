@@ -1,6 +1,6 @@
 # Context Menu Actions
 
-> **TL;DR** — UX design of the right-click submenu Pluryprint adds to Windows Explorer (and later macOS Finder): which items appear, when, what they do, and how the layout differs by selection type.
+> **TL;DR** — UX design of the right-click submenu Pluryprint adds to Windows Explorer (and, in reduced forms, to the macOS Finder and to Linux file managers): which items appear, when, what they do, and how the layout differs by selection type.
 
 This document is the source of truth for the **content and behavior** of the context menu integration. Implementation lives in the [shell-extensions architecture doc](../04-architecture/shell-extensions.md); UX behavior lives here.
 
@@ -100,9 +100,11 @@ The shell extension code path runs synchronously in Explorer's UI thread. To sta
 - A Finder Sync extension (a submenu equivalent to Windows) stays deferred.
 - macOS shortcuts conventionally appear under **Quick Actions** in modern Finder, which is acceptable but slightly less discoverable than Windows.
 
-### Linux (potential v2)
+### Linux — decided for 0.0.5, preview ([ADR-0015](../adr/0015-linux-support.md))
 
-- File-manager-specific extensions: Nautilus, Dolphin, Files. Each has a different mechanism. Out of scope until community demand.
+- **Open with → Pluryprint** in every file manager, from the `.desktop` file's `MimeType=` list: the print dialog opens with the selection, like **Configure print job**.
+- **Dolphin (KDE) and Nemo (Cinnamon)**, installed by the `.deb` only: a Pluryprint entry with **Print now** (the default profile, at once), **Configure print job** and **Add to print queue**. No per-profile rows: the entries are static files, not drawn from the app's profiles.
+- **Not in this release:** GNOME Files (Nautilus, which would need `nautilus-python`), Thunar and Caja; and the AppImage does not register itself in any file manager. See [shell-extensions.md §4](../04-architecture/shell-extensions.md).
 
 ## Visual design notes
 
