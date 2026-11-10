@@ -15,10 +15,9 @@ Free · No account · No telemetry · AGPL-3.0
 [Docs](./docs/README.md) ·
 [Changelog](./CHANGELOG.md) ·
 [Report a bug](https://github.com/MAECLY/pluryprint/issues/new/choose) ·
-[Español](https://pluryprint.maecly.com/)
+[Sitio en español](https://pluryprint.maecly.com/)
 
 [![Latest release](https://img.shields.io/github/v/release/MAECLY/pluryprint?label=release&color=C2410C)](https://github.com/MAECLY/pluryprint/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/MAECLY/pluryprint/total?color=C2410C)](https://github.com/MAECLY/pluryprint/releases)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-C2410C)](./LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/MAECLY/pluryprint/ci.yml?branch=main&label=CI)](https://github.com/MAECLY/pluryprint/actions/workflows/ci.yml)
 
@@ -71,6 +70,8 @@ with one set of print settings.
 - **On both:** drag files or folders onto the window, with or without
   subfolders.
 
+The Windows Explorer submenu:
+
 ```text
 Right-click on any number of files → Pluryprint ▸
                                        ├─ Print 12 files          (default profile)
@@ -86,7 +87,7 @@ List prices in USD for one user, from each vendor’s website when we did our
 research (2026). They may have changed: check them before you decide. A dash:
 not stated.
 
-|                           | Pluryprint                                                                     | Print Conductor                            | 2Printer          | Batch & Print Pro         | FolderMill             |
+| Feature                   | Pluryprint                                                                     | Print Conductor                            | 2Printer          | Batch & Print Pro         | FolderMill             |
 | ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ | ----------------- | ------------------------- | ---------------------- |
 | Price                     | $0                                                                             | $149 (volume pricing down to $59 per user) | $149              | $79.95 (Premium, $109.95) | Quote (for businesses) |
 | Open source               | AGPL-3.0                                                                       | No                                         | No                | No                        | No                     |
@@ -104,7 +105,7 @@ entry in Finder’s Services.
 
 <sub>Sources:
 [Print Conductor](https://www.fcoder.com/products/print-conductor),
-[Print Conductor file lists](https://print-conductor.com/how-to/load-list-of-files-for-printing),
+[Print Conductor’s Explorer menu guide](https://www.print-conductor.com/how-to/load-list-of-files-for-printing),
 [2Printer](https://www.cmd2printer.com/),
 [Batch & Print Pro](https://www.batch-print.com/),
 [FolderMill](https://www.foldermill.com/),
@@ -186,13 +187,16 @@ Get the installer for your computer from the
 from the [website’s download section](https://pluryprint.maecly.com/en/#status),
 which always links the current files.
 
-| Computer                                | File   | Notes                                                                                     |
-| --------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
-| Windows 10 and 11 · x64 (Intel or AMD)  | `.exe` | Built and tested in CI. Per-user installer, no administrator rights.                      |
-| Windows 11 · ARM64 (Snapdragon)         | `.exe` | Its own installer, tested on Windows 11 on ARM. The x64 one also works there, emulated.   |
-| macOS 13 or later · Apple silicon (M1+) | `.dmg` | Built and tested in CI.                                                                   |
-| macOS 13 or later · Intel               | `.dmg` | Tested only under Rosetta 2 on an Apple silicon Mac, not yet on an Intel Mac.             |
-| Linux                                   | —      | Planned, not available yet: follow [#66](https://github.com/MAECLY/pluryprint/issues/66). |
+| Computer                                | File   | Notes                                                                                                       |
+| --------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
+| Windows 10 and 11 · x64 (Intel or AMD)  | `.exe` | Built and tested in CI. Per-user installer, no administrator rights. Not yet tried on a Windows 10 machine. |
+| Windows 11 · ARM64 (Snapdragon)         | `.exe` | Its own installer, tested on Windows 11 on ARM. The x64 one also works there, emulated.                     |
+| macOS 13 or later · Apple silicon (M1+) | `.dmg` | Built and tested in CI.                                                                                     |
+| macOS 13 or later · Intel               | `.dmg` | Tested only under Rosetta 2 on an Apple silicon Mac, not yet on an Intel Mac.                               |
+| Linux                                   | —      | Planned, not available yet: follow [#66](https://github.com/MAECLY/pluryprint/issues/66).                   |
+
+**Right-click. Print everything.** In Finder, from Services; in Explorer, from
+the submenu the installer registers.
 
 The Windows installers register the Explorer menu and include SumatraPDF, which
 Pluryprint prints PDFs with. On macOS, drag Pluryprint to Applications.
@@ -214,7 +218,7 @@ Gatekeeper warn. Each release’s notes explain it step by step.
 
    ```powershell
    # Windows: compare the hash with the installer's line in SHA256SUMS
-   Get-FileHash .\Pluryprint_*_windows_x64.exe -Algorithm SHA256
+   Get-FileHash .\Pluryprint_*_windows_*.exe -Algorithm SHA256
    ```
 
 2. **Windows:** SmartScreen will say “Windows protected your PC”; choose
@@ -240,8 +244,10 @@ channels, stable and beta.
      options” (or Shift+F10). It does not appear when Explorer runs elevated.
    - **macOS:** Services › “Print with Pluryprint”, or “Print with Pluryprint
      (default profile)”.
-3. Choose **Print N files**, a **Print with “profile”** row, or **Configure
-   print job…** to review every setting first.
+3. On Windows, choose **Print N files**, a **Print with “profile”** row, or
+   **Configure print job…** to review every setting first. On macOS, “Print
+   with Pluryprint” opens the Print Job screen and “(default profile)” prints
+   straight away.
 4. Follow the jobs in the **Queue**.
 
 You can also drag files or folders onto the app window.
@@ -254,8 +260,10 @@ on macOS it is `Pluryprint.app/Contents/MacOS/pluryprint-cli`. It is not added
 to `PATH` yet: call it by the executable’s path. The command name may change
 before the first stable release.
 
+Output shortened:
+
 ```console
-$ pluryprint print --files "invoices/*.pdf" --profile "Duplex BW" --json
+$ pluryprint-cli print --files "invoices/*.pdf" --profile "Duplex BW" --json
 { "batch_id": "…", "printer": "HP LaserJet Pro M404dn", "profile_name": "Duplex BW",
   "files": [ { "path": "invoices/2026-001.pdf", "state": "done" }, { "path": "invoices/2026-002.pdf", "state": "done" } ],
   "exit_code": 0 }
@@ -286,9 +294,9 @@ email (EML, MSG), CAD, PostScript and archives. Details in
 No account, no cloud, no telemetry. Pluryprint converts and prints on your
 machine, and a document it prints cannot reach the network. The only internet
 traffic is the update check (at startup, at most once a day, or from About), an
-update download you start, and a missing-tool install you confirm. Printer
-discovery stays on your local network. See
-[privacy.md](./docs/09-legal/privacy.md).
+update download you start, and a missing-tool install you confirm. Finding
+printers (mDNS) stays on your local network, and print output goes only to the
+printer you chose. See [privacy.md](./docs/09-legal/privacy.md).
 
 ## What it doesn't do yet
 
@@ -325,10 +333,7 @@ AGPL-3.0.
 <details>
 <summary><strong>Do my files leave my computer?</strong></summary>
 
-No. Pluryprint converts and prints on your machine, and a document it prints
-cannot reach the network. The app only goes online to check for updates (at
-startup, at most once a day, or from About) and, if you ask it to, to download
-one or to install a missing tool. There is no telemetry.
+No. Everything is converted and printed on your machine; see [Privacy](#privacy).
 
 </details>
 
@@ -387,10 +392,10 @@ it. A PDF whose permissions forbid printing is refused.
 
 On macOS, yes: select the files in Finder and choose Services › Print with
 Pluryprint. On Windows, the installer registers the Explorer submenu (print N
-files, print with a profile, configure the job or add it to the queue): it
-appears on Windows 10 and, on Windows 11, under “Show more options”. A top-level
-entry in the Windows 11 menu needs a signed package, and there is no
-certificate yet.
+files, print with a profile, configure the job or add it to the queue): it is
+meant for the Windows 10 menu (not yet tried on a Windows 10 machine) and, on
+Windows 11, appears under “Show more options”. A top-level entry in the
+Windows 11 menu needs a signed package, and there is no certificate yet.
 
 </details>
 
@@ -408,28 +413,16 @@ Intel Mac. Linux is planned but not available yet: follow
 <details>
 <summary><strong>Why will Windows and macOS warn when I open it?</strong></summary>
 
-Because Pluryprint is not signed with Apple or Microsoft certificates.
-SmartScreen and Gatekeeper will warn the first time: on Windows, choose More
-info › Run anyway; on macOS, System Settings › Privacy & Security › Open Anyway.
-Each release’s notes explain it step by step. Updates are signed with the
-project’s own key, and the app checks that signature before installing
-anything.
-
-</details>
-
-<details>
-<summary><strong>How does it update?</strong></summary>
-
-The app tells you when there is a new version and you choose: install now
-(signature verified, no administrator rights), remind me later or skip that
-version. It never updates by itself. There are two channels, stable and beta.
+Because Pluryprint is not signed with Apple or Microsoft certificates yet.
+[First launch](#first-launch) shows how to get past the warning; updates are
+signed with the project’s own key and checked before they install.
 
 </details>
 
 ## Build from source
 
-You need Rust stable, Node 24 LTS (22.22.2 at least) with pnpm 9, and the
-platform’s native build tools: Visual Studio Build Tools 2022 with “Desktop
+You need Rust stable (1.90 or later), Node 24 LTS (the minimum is 22.22.2) with
+pnpm 9, and the platform’s native build tools: Visual Studio Build Tools 2022 with “Desktop
 development with C++” on Windows, the Xcode Command Line Tools on macOS. The
 full checklist is in [local-setup.md](./docs/08-development/local-setup.md).
 
@@ -442,10 +435,15 @@ pnpm tauri dev   # the real app, with hot reload
 
 - `pnpm dev` runs only the web preview: every screen renders, but with no
   Tauri host the IPC calls fail, so use it for layout work only.
-- `make check` runs every quality gate CI runs; run it before a pull request
-  (`make help` lists the other targets).
-- `make build` produces an unsigned bundle under
-  `src-tauri/target/release/bundle/`.
+- `make check` runs the same lint, format, type-check, test and clippy gates CI
+  runs, on your OS; run it before a pull request (`make help` lists the other
+  targets).
+- `pnpm tauri build --config src-tauri/tauri.ci.conf.json` produces an
+  unsigned bundle under `src-tauri/target/release/bundle/`. The override turns
+  off the signed updater artifacts, which need the release key. On Windows,
+  first run `scripts\fetch-sumatrapdf.ps1` and
+  `scripts\build-shell-ext.ps1 -Arch all`: see
+  [installer-windows.md](./docs/07-build-and-release/installer-windows.md).
 - The Explorer menu DLL is a separate crate (Windows only): see
   [shell-ext-win/README.md](./shell-ext-win/README.md) and
   [installer-windows.md](./docs/07-build-and-release/installer-windows.md).
@@ -455,10 +453,11 @@ pnpm tauri dev   # the real app, with hot reload
 
 Tauri 2 with a Rust backend and a React + TypeScript + Vite + Tailwind CSS
 frontend. Printing goes through the bundled SumatraPDF on Windows and CUPS
-(`lp`) on macOS. Images, SVG, Markdown and text become PDF in Rust (`image`,
-`lopdf`, `usvg` + `svg2pdf`, `pulldown-cmark`), paginated by the system web view
-(WebView2 or WebKit) in a worker process. Explorer integration is a per-user
-`IExplorerCommand` COM DLL; Finder integration is an `NSServices` provider
+(`lp`) on macOS. Images become PDF in Rust (`image`, `printpdf`, `lopdf`); SVG
+through `usvg` + `svg2pdf` in an isolated worker process; HTML, Markdown
+(`pulldown-cmark`) and text are paginated by the system web view (WebView2 or
+WebKit) in a second worker, with scripts and network off. Explorer integration
+is a per-user `IExplorerCommand` COM DLL; Finder integration is an `NSServices` provider
 inside the app. Updates use the Tauri updater with minisign-signed manifests on
 GitHub Releases. Reasons in [tech-stack.md](./docs/04-architecture/tech-stack.md)
 and the [ADRs](./docs/adr/README.md).
@@ -490,8 +489,9 @@ agree on the approach. Translations are welcome too: see
 
 ## Security
 
-Please do not report vulnerabilities in a public issue. See
-[SECURITY.md](./SECURITY.md) for the private channels and response times.
+Please do not report vulnerabilities in a public issue. Email
+security@maecly.com; [SECURITY.md](./SECURITY.md) has the details and response
+times.
 
 ## Acknowledgements
 
