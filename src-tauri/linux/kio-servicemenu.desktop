@@ -5,8 +5,9 @@
 #
 # Each action runs `pluryprint --invoke=context-menu --action=<a> -- %F`:
 # the paths after `--` are the selection (Linux only, see
-# `cli::ARGV_SELECTION`). Folders qualify, as in Explorer; the app asks
-# whether to include subfolders.
+# `cli::ARGV_SELECTION`). Folders qualify, as in Explorer: Print now and Add
+# to print queue take their top level, Configure print job asks whether to
+# include subfolders.
 #
 # Dolphin filters only by MIME type, subclasses included, so text/plain also
 # brings the submenu up on source files and logs; the app then refuses those

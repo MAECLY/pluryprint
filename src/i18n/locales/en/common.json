@@ -46,6 +46,7 @@
     "print_one": "Print 1 file",
     "print_other": "Print {{count}} files",
     "printWithProfile": "Print with “{{name}}”",
+    "printNow": "Print now",
     "configure": "Configure print job…",
     "queue": "Add to print queue",
     "tooltip": "Batch print the selected files with Pluryprint"

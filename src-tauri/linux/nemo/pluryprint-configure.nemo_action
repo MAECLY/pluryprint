@@ -10,6 +10,12 @@
 # plain suffix ("md" would match "cmd"). Every selected item must match, and
 # "dir" lets folders through. `shell_menu::linux_files` tests keep the list in
 # step with the engine.
+#
+# Quote=double: Nemo builds one command string and splits it like a shell
+# command line. Without it, Nemo 5.2 to 5.4 (Ubuntu 22.04, Mint 21.0) leave
+# spaces in the paths unescaped, so "a report.pdf" arrives as two arguments.
+# Every version wraps each quoted path in double quotes, and 5.4 and later
+# escape what is inside them.
 
 [Nemo Action]
 Name=Configure print job in Pluryprint…
@@ -17,6 +23,7 @@ Name[es]=Configurar el trabajo de impresión en Pluryprint…
 Comment=Open the selected files in Pluryprint to choose the print settings
 Comment[es]=Abre los archivos seleccionados en Pluryprint para elegir los ajustes de impresión
 Exec=pluryprint --invoke=context-menu --action=configure -- %F
+Quote=double
 Icon-Name=pluryprint
 Selection=notnone
 Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;

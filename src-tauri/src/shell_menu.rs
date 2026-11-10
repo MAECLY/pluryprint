@@ -567,7 +567,11 @@ mod linux_files {
         );
         assert_eq!(groups.len(), 4, "the entry and its three actions");
 
-        for (id, label) in [("configure", "configure"), ("queue", "queue")] {
+        for (id, label) in [
+            ("printNow", "printNow"),
+            ("configure", "configure"),
+            ("queue", "queue"),
+        ] {
             let action = groups
                 .iter()
                 .find(|g| g.0 == format!("Desktop Action {id}"))
@@ -596,6 +600,8 @@ mod linux_files {
             assert_eq!(list(get(action, "Extensions")), expected, "{name}");
             assert_eq!(get(action, "Selection"), "notnone", "{name}");
             assert_eq!(get(action, "Dependencies"), "pluryprint;", "{name}");
+            // Nemo 5.2–5.4 split unquoted paths at their spaces.
+            assert_eq!(get(action, "Quote"), "double", "{name}");
             assert!(!get(action, "Name[es]").is_empty(), "{name}");
         }
     }

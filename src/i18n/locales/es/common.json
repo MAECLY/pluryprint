@@ -46,6 +46,7 @@
     "print_one": "Imprimir 1 archivo",
     "print_other": "Imprimir {{count}} archivos",
     "printWithProfile": "Imprimir con «{{name}}»",
+    "printNow": "Imprimir ahora",
     "configure": "Configurar el trabajo de impresión…",
     "queue": "Añadir a la cola de impresión",
     "tooltip": "Imprime por lotes los archivos seleccionados con Pluryprint"
