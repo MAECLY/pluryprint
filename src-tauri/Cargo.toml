@@ -65,7 +65,8 @@ semver = "1"
 # Minimal blocking HTTP client for the update manifest (no async runtime
 # pulled into the update path). Default features: rustls on ring with the
 # webpki roots, and gzip; the manifest is parsed with serde_json directly.
-ureq = "3.4"
+# 3.5 percent-decodes the credentials of a proxy URL once, as curl does.
+ureq = "3.5"
 # Percent-encode the prefilled "report issue" GitHub URL query.
 percent-encoding = "2.3"
 # WHATWG URL parsing for the open_external allow-list, so the host we check is
