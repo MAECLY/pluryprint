@@ -84,18 +84,12 @@ pub fn expand_inputs(entries: &[String], max_file_size_mb: u32) -> Result<Vec<St
     Ok(out)
 }
 
-/// Resolve `entry` against the working directory when it is relative. Nothing
-/// is canonicalized yet — a pattern has no file to canonicalize, and a missing
-/// file must still be reported by the name the user typed.
+/// Resolve `entry` against the caller's folder ([`crate::cli::caller_dir`]:
+/// the working directory, or an AppImage's `OWD`) when it is relative.
+/// Nothing is canonicalized yet — a pattern has no file to canonicalize, and
+/// a missing file must still be reported by the name the user typed.
 fn absolutize(entry: &str) -> PathBuf {
-    let path = Path::new(entry);
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    match std::env::current_dir() {
-        Ok(cwd) => cwd.join(path),
-        Err(_) => path.to_path_buf(),
-    }
+    crate::cli::from_caller(Path::new(entry))
 }
 
 /// Whether an entry carries a wildcard in its final component. A pattern in a

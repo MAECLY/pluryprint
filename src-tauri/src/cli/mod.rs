@@ -207,7 +207,7 @@ where
             // path typed in a terminal can be anchored here. A launch forwarded
             // to an already running instance is anchored there instead, against
             // the cwd the single-instance plugin reports for it.
-            let cwd = std::env::current_dir().ok();
+            let cwd = caller_dir();
             Startup::Gui {
                 selection: open_with_selection(&anchor_relative(&tail, cwd.as_deref())),
                 handoff: None,
@@ -221,7 +221,7 @@ where
             // Paths after `--` (Linux) are anchored like an "open with"
             // launch's: against this process' working directory, which at
             // launch is the caller's.
-            let cwd = std::env::current_dir().ok();
+            let cwd = caller_dir();
             let parsed = Cli::parse_context_menu(&argv)
                 .map_err(context_menu_parse_error)
                 .and_then(|cli| {
@@ -266,6 +266,49 @@ where
                 }
             }
         }
+    }
+}
+
+/// The folder the user ran this command from, which anchors every relative
+/// path on the command line: this process' working directory, except inside
+/// a Linux AppImage. Its `AppRun` changes into `$APPDIR/usr` before starting
+/// the app (WebKitGTK's helpers resolve from there, see
+/// [`crate::engine::convert::html`]) and keeps the caller's folder in `OWD`,
+/// so `./Pluryprint.AppImage print --files a.pdf` would otherwise look for
+/// `a.pdf` inside the mounted image. The process never changes folder back:
+/// the GUI's own web view needs `$APPDIR/usr` too.
+pub fn caller_dir() -> Option<PathBuf> {
+    caller_dir_from(
+        cfg!(target_os = "linux"),
+        std::env::var_os("APPIMAGE").as_deref(),
+        std::env::var_os("OWD").as_deref(),
+        std::env::current_dir().ok(),
+    )
+}
+
+/// [`caller_dir`] as a pure function: `linux` whether this is Linux,
+/// `appimage` and `owd` the variables the AppImage runtime and `AppRun` set,
+/// `cwd` the working directory. `OWD` counts only inside an AppImage and only
+/// when it is an absolute path.
+pub fn caller_dir_from(
+    linux: bool,
+    appimage: Option<&std::ffi::OsStr>,
+    owd: Option<&std::ffi::OsStr>,
+    cwd: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let in_appimage = linux && appimage.is_some_and(|a| !a.is_empty());
+    match owd.map(Path::new) {
+        Some(owd) if in_appimage && owd.is_absolute() => Some(owd.to_path_buf()),
+        _ => cwd,
+    }
+}
+
+/// `path` made absolute against [`caller_dir`] when it is relative (and left
+/// as typed when there is no such folder).
+pub fn from_caller(path: &Path) -> PathBuf {
+    match caller_dir() {
+        Some(dir) if path.is_relative() => dir.join(path),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -634,6 +677,34 @@ fn clap_exit_code(kind: clap::error::ErrorKind) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inside a Linux AppImage, relative CLI paths are anchored at `OWD`
+    /// (the folder the user ran it from), not at `$APPDIR/usr`, where
+    /// `AppRun` leaves the process. A review found `print --files rel.png`
+    /// looking for the file inside the mounted image.
+    #[test]
+    fn fr_008_an_appimage_anchors_relative_paths_at_owd() {
+        use std::ffi::OsStr;
+        let usr = Some(PathBuf::from("/tmp/.mount_PluryX/usr"));
+        let image = Some(OsStr::new("/home/u/Pluryprint.AppImage"));
+        let owd = Some(OsStr::new("/home/u/docs"));
+        assert_eq!(
+            caller_dir_from(true, image, owd, usr.clone()),
+            Some(PathBuf::from("/home/u/docs"))
+        );
+        // Not an AppImage, not Linux, or an unusable OWD: the working folder.
+        assert_eq!(caller_dir_from(true, None, owd, usr.clone()), usr);
+        assert_eq!(
+            caller_dir_from(true, Some(OsStr::new("")), owd, usr.clone()),
+            usr
+        );
+        assert_eq!(caller_dir_from(false, image, owd, usr.clone()), usr);
+        assert_eq!(
+            caller_dir_from(true, image, Some(OsStr::new("docs")), usr.clone()),
+            usr
+        );
+        assert_eq!(caller_dir_from(true, image, None, usr.clone()), usr);
+    }
 
     /// ipc-and-cli.md §3.3: `--json` turns errors into JSON on stderr — usage
     /// errors included. An unknown flag or a bad value used to come back as
