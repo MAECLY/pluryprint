@@ -193,13 +193,11 @@ fn compile_rules(store_dir: &Path, origin_url: &str) -> Result<ContentFilter, St
 fn respond(request: &URISchemeRequest, page: &Path, base_dir: &Path) {
     let uri = request.uri().map(|u| u.to_string()).unwrap_or_default();
     let answer = answer(&uri, page, base_dir);
-    let mime = answer
-        .content_type()
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    // The whole media type, charset included: WebKitGTK takes a page's
+    // encoding from this value only, not from the header map below. The
+    // staged page carries a UTF-8 BOM, which wins anyway; this keeps a page
+    // served without one (the bare worker) from decoding as Latin-1.
+    let mime = answer.content_type().to_string();
     let length = i64::try_from(answer.body.len()).unwrap_or(i64::MAX);
     let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_owned(answer.body));
     let response = URISchemeResponse::new(&stream, length);

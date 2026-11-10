@@ -854,6 +854,44 @@ fn fr_055_non_latin_text_prints_as_text_in_html_markdown_and_txt() {
     }
 }
 
+/// A page that declares no charset prints in the encoding its bytes are
+/// in: UTF-8 when they are valid UTF-8, Windows-1252 otherwise. The staged
+/// copy is re-encoded as UTF-8 with a BOM, and the private scheme answers
+/// with the sniffed charset as well; this pins the end result on every
+/// platform (a review fed the bare Linux worker such a page and got Latin-1
+/// mojibake, because the scheme's answer then dropped the charset).
+#[test]
+fn fr_057_a_page_without_meta_charset_prints_in_its_own_encoding() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let utf8 = dir.path().join("utf8.html");
+    std::fs::write(
+        &utf8,
+        "<!doctype html><p>café Ελληνικά naïve</p>".as_bytes(),
+    )
+    .unwrap();
+    let latin = dir.path().join("cp1252.html");
+    std::fs::write(&latin, b"<!doctype html><p>caf\xe9 na\xefve \x80uro</p>").unwrap();
+    for (input, needles) in [
+        (&utf8, &["café", "Ελληνικά", "naïve"][..]),
+        (&latin, &["café", "naïve", "€uro"][..]),
+    ] {
+        let pdf = convert(input, &a4()).unwrap();
+        let Some(text) = pdf_text(&pdf) else {
+            continue;
+        };
+        for needle in needles {
+            assert!(
+                text.contains(needle),
+                "{}: {needle} is printed as text: {text}",
+                input.display()
+            );
+        }
+    }
+}
+
 /// A long document of each web-view format paginates onto many pages of
 /// the job's paper, every page the same size, with its last line printed.
 #[test]
