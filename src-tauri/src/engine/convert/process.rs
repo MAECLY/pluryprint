@@ -458,6 +458,49 @@ pub const MEMORY_CAP_ENV: &str = "PLURYPRINT_WORKER_MEMORY_CAP";
 /// checked: a bomb can allocate fast, so more often than [`POLL`].
 const MEMORY_POLL: Duration = Duration::from_millis(20);
 
+/// On Linux, how many [`MEMORY_POLL`]s pass between two full scans of a
+/// [`CapScope::Tree`] child's process group ([`group_memory_in_use`] reads
+/// every `/proc/<pid>/stat` on the system, a few milliseconds on a busy
+/// desktop). In between, the leader alone is sampled and added to what the
+/// other members used at the last scan, so the worker itself is still
+/// checked every poll and a helper at most every 200 ms.
+#[cfg(all(unix, not(target_os = "macos")))]
+const GROUP_SCAN_EVERY: u32 = 10;
+
+/// The memory a [`CapScope::Tree`] child's group is using, sampled the way
+/// [`GROUP_SCAN_EVERY`] describes (every poll on macOS, where listing a
+/// group is one cheap call).
+#[cfg(unix)]
+#[derive(Default)]
+struct GroupSampler {
+    polls: u32,
+    /// What every member but the leader used at the last full scan.
+    others: u64,
+}
+
+#[cfg(unix)]
+impl GroupSampler {
+    fn sample(&mut self, leader: u32) -> Option<u64> {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (&mut self.polls, &mut self.others);
+            group_memory_in_use(leader)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let scan = self.polls % GROUP_SCAN_EVERY == 0;
+            self.polls = self.polls.wrapping_add(1);
+            let own = memory_in_use(leader);
+            if scan {
+                let group = group_memory_in_use(leader)?;
+                self.others = group.saturating_sub(own.unwrap_or(0));
+                return Some(group.max(own.unwrap_or(0)));
+            }
+            Some(own.unwrap_or(0).saturating_add(self.others))
+        }
+    }
+}
+
 /// What [`run_capped`]'s memory cap covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapScope {
@@ -489,7 +532,8 @@ pub enum CapScope {
 ///   [`MEMORY_POLL`] (macOS: its physical footprint, compressed pages
 ///   included; Linux: its resident set) and kills it past the cap. For
 ///   [`CapScope::Tree`] it samples the child's whole process group
-///   ([`group_memory_in_use`]). On macOS, WebKit's own web-content and
+///   ([`group_memory_in_use`]; on Linux a full scan every
+///   [`GROUP_SCAN_EVERY`] polls, the leader in between). On macOS, WebKit's own web-content and
 ///   networking processes are XPC services that launchd starts, outside that
 ///   group: they are not covered. On Linux a helper is covered for as long
 ///   as it stays in the group; one that starts its own session or group
@@ -539,6 +583,8 @@ pub fn run_capped(
     let _ = (&cannot_cap, scope);
 
     let started = Instant::now();
+    #[cfg(unix)]
+    let mut group = GroupSampler::default();
     let status = loop {
         if cancel.load(Ordering::Relaxed) {
             kill_tree(&mut child);
@@ -551,7 +597,7 @@ pub fn run_capped(
         #[cfg(unix)]
         let used = match scope {
             CapScope::Process => memory_in_use(child.id()),
-            CapScope::Tree => group_memory_in_use(child.id()),
+            CapScope::Tree => group.sample(child.id()),
         };
         #[cfg(unix)]
         if used.is_some_and(|used| used > memory_cap) {
