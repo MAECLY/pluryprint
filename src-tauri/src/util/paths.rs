@@ -12,6 +12,16 @@
 //! | cache  | `%LOCALAPPDATA%\Maecly\Pluryprint\cache\` | `~/Library/Caches/com.Maecly.Pluryprint/`        |
 //! | logs   | `<data>\logs\`                            | `~/Library/Logs/Pluryprint/`                     |
 //!
+//! On Linux the same call follows the XDG base directories (each honours its
+//! `XDG_*_HOME` variable when set):
+//!
+//! | Dir    | Linux                                      |
+//! | ------ | ------------------------------------------ |
+//! | config | `~/.config/pluryprint/`                    |
+//! | data   | `~/.local/share/pluryprint/`               |
+//! | cache  | `~/.cache/pluryprint/`                     |
+//! | logs   | `~/.local/share/pluryprint/logs/`          |
+//!
 //! See `docs/04-architecture/data-model.md` §1 for the full table.
 //!
 //! It also owns [`canonical_input`], the single gate every path that arrives
@@ -34,6 +44,7 @@ fn dirs() -> ProjectDirs {
 /// Where `config.toml` and `profiles.toml` live.
 /// Windows: `%APPDATA%\Maecly\Pluryprint\config\`
 /// macOS:   `~/Library/Application Support/com.Maecly.Pluryprint/`
+/// Linux:   `~/.config/pluryprint/` (`$XDG_CONFIG_HOME`)
 pub fn config_dir() -> PathBuf {
     dirs().config_dir().to_path_buf()
 }
@@ -41,6 +52,7 @@ pub fn config_dir() -> PathBuf {
 /// Where `queue.json` and other live state live.
 /// Windows: `%LOCALAPPDATA%\Maecly\Pluryprint\data\`
 /// macOS:   `~/Library/Application Support/com.Maecly.Pluryprint/`
+/// Linux:   `~/.local/share/pluryprint/` (`$XDG_DATA_HOME`)
 pub fn data_dir() -> PathBuf {
     dirs().data_local_dir().to_path_buf()
 }
@@ -48,6 +60,7 @@ pub fn data_dir() -> PathBuf {
 /// Where converted PDFs live (`conversions/`).
 /// Windows: `%LOCALAPPDATA%\Maecly\Pluryprint\cache\`
 /// macOS:   `~/Library/Caches/com.Maecly.Pluryprint/`
+/// Linux:   `~/.cache/pluryprint/` (`$XDG_CACHE_HOME`)
 pub fn cache_dir() -> PathBuf {
     dirs().cache_dir().to_path_buf()
 }
@@ -55,6 +68,7 @@ pub fn cache_dir() -> PathBuf {
 /// Where rotating JSONL logs are written.
 /// Windows: `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\`
 /// macOS:   `~/Library/Logs/Pluryprint/`
+/// Linux:   `~/.local/share/pluryprint/logs/`
 pub fn log_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -281,6 +295,29 @@ mod tests {
                 s(log_dir()),
                 format!(r"{local}\Maecly\Pluryprint\data\logs")
             );
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let home = std::env::var("HOME").expect("HOME is set");
+            let s = |p: PathBuf| p.to_string_lossy().into_owned();
+            // An absolute XDG_*_HOME replaces the default, per the spec.
+            let xdg = |var: &str, default: &str| {
+                std::env::var(var)
+                    .ok()
+                    .filter(|v| v.starts_with('/'))
+                    .unwrap_or_else(|| format!("{home}/{default}"))
+            };
+            let data = format!("{}/pluryprint", xdg("XDG_DATA_HOME", ".local/share"));
+            assert_eq!(
+                s(config_dir()),
+                format!("{}/pluryprint", xdg("XDG_CONFIG_HOME", ".config"))
+            );
+            assert_eq!(s(data_dir()), data);
+            assert_eq!(
+                s(cache_dir()),
+                format!("{}/pluryprint", xdg("XDG_CACHE_HOME", ".cache"))
+            );
+            assert_eq!(s(log_dir()), format!("{data}/logs"));
         }
     }
 
