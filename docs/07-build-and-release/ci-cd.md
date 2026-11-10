@@ -1,6 +1,6 @@
 # CI/CD
 
-> **TL;DR.** `ci.yml` is the lean pull-request gate, with only the essential checks: frontend lint, typecheck, format and unit tests on ubuntu; Rust fmt, clippy and the full test suite on Windows; clippy and the unit tests on macOS. It builds no bundle and reads no secret. The dependency audits (`cargo audit`, `pnpm audit`) live in `audit.yml`, which runs weekly, on lockfile changes and by hand, and in the release guard; locally, `make check-full` runs everything. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `landing.yml` has Vercel redeploy the landing, which lives in its own repository, with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
+> **TL;DR.** `ci.yml` is the lean pull-request gate, with only the essential checks: frontend lint, typecheck, format and unit tests on ubuntu; Rust fmt, clippy and the full test suite on Windows; clippy and the unit tests on macOS and on Linux (ubuntu-22.04). It builds no bundle and reads no secret. `linux.yml` runs the whole Rust suite on Linux ARM64, with a display and a CUPS queue, after every merge, weekly and by hand. The dependency audits (`cargo audit`, `pnpm audit`) live in `audit.yml`, which runs weekly, on lockfile changes and by hand, and in the release guard; locally, `make check-full` runs everything. `release.yml` builds a signed release into a **draft** on every `v*` tag (after checking the signing secret, the versions and `THIRD-PARTY-NOTICES.md`), and `release-channels.yml` moves the beta channel when a person publishes it: see [releasing.md](./releasing.md), the runbook, and [ADR-0011](../adr/0011-release-channel.md). Nothing is notarized or Authenticode-signed (decision D2), there is no nightly workflow, and the first release, 0.0.1 preview, was published on 2026-10-10. `landing.yml` has Vercel redeploy the landing, which lives in its own repository, with the latest published release's version and downloads on every publish ([below](#the-landing-follows-the-release)). There is no sign-off check: contributions come in under the [CLA](../../CLA.md), which the pull request template asks for.
 
 This document specifies what CI does; [releasing.md](./releasing.md) covers the release workflows.
 
@@ -9,12 +9,13 @@ This document specifies what CI does; [releasing.md](./releasing.md) covers the 
 | Workflow | File | Trigger | Signs? | Publishes? |
 |---|---|---|---|---|
 | **CI** | `.github/workflows/ci.yml` | `pull_request`, `push` → `main`, `workflow_dispatch` | No | No |
+| **Linux** | `.github/workflows/linux.yml` | `push` → `main`, `schedule` (weekly), `workflow_dispatch`; never `pull_request` | No | No |
 | **Audit** | `.github/workflows/audit.yml` | `schedule` (Mondays), `push` → `main` touching a lockfile, `package.json` or `audit.toml`; `workflow_dispatch` | No | No |
 | **release** | `.github/workflows/release.yml` | `push` of a `v*` tag; `workflow_dispatch` (build only) | Update artifacts (minisign); no OS code signing | A **draft** release, published by a person |
 | **release-channels** | `.github/workflows/release-channels.yml` | `release: published` | No | Overwrites `latest.json` on the `channel-beta` prerelease, forward only |
 | **Landing** | `.github/workflows/landing.yml` | `release: published`; `workflow_dispatch` | No | Nothing itself: it calls the Vercel Deploy Hook that redeploys the landing from `MAECLY/pluryprint-landing` ([below](#the-landing-follows-the-release)) |
 
-Only `ci.yml` runs on a pull request. `audit.yml` is the only scheduled workflow.
+Only `ci.yml` runs on a pull request. `audit.yml` and `linux.yml` are the scheduled workflows.
 
 ```yaml
 concurrency:
@@ -39,13 +40,13 @@ Two jobs, both blocking, and nothing else. `src-tauri/tests/release_pipeline.rs`
 
 > Note that `e2e/tsconfig.json` is standalone: `pnpm typecheck` does **not** type-check the E2E specs. They are checked when `pnpm test:e2e` compiles them, which CI does not run (see [testing-strategy.md](../08-development/testing-strategy.md)).
 
-### `backend` — matrix `windows-latest` + `macos-latest`
+### `backend` — matrix `windows-latest` + `macos-latest` + `ubuntu-22.04`
 
-The two platforms Pluryprint ships for. The Rust code is heavily `cfg`-gated — WinSpool, SumatraPDF and the Explorer handoff on Windows, the CUPS backend (`platform/cups.rs`, `engine/print/cups.rs`) on macOS — so each half only compiles, and its tests only run, on its own OS. `fail-fast: false` keeps one platform's failure from hiding the other's. `PLURYPRINT_SKIP_MIGRATION=1` is set for the job, so a test run never moves a MaeclyPrint-era data directory ([ADR-0009](../adr/0009-rename-to-pluryprint.md)).
+The platforms Pluryprint ships for. The Rust code is heavily `cfg`-gated — WinSpool, SumatraPDF and the Explorer handoff on Windows, the CUPS backend (`platform/cups.rs`, `engine/print/cups.rs`) on macOS and Linux, `/proc` and WebKitGTK on Linux — so each part only compiles, and its tests only run, on its own OS. Linux runs on `ubuntu-22.04`, the image `release.yml` builds the Linux packages on, so the baseline that ships is the one that is linted; it installs the WebKitGTK, GTK, D-Bus and librsvg development packages first. ARM64 Linux is left to `linux.yml`. `fail-fast: false` keeps one platform's failure from hiding the other's. `PLURYPRINT_SKIP_MIGRATION=1` is set for the job, so a test run never moves a MaeclyPrint-era data directory ([ADR-0009](../adr/0009-rename-to-pluryprint.md)).
 
 1. `cargo fmt --check` for `src-tauri` and `shell-ext-win` — Windows only; formatting does not depend on the platform
 2. `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
-3. Windows: `cargo test --manifest-path src-tauri/Cargo.toml` — the full suite, never filtered. macOS: `cargo test --lib` — the unit tests, which hold its `cfg`-gated code; the integration tests do not depend on the platform
+3. Windows: `cargo test --manifest-path src-tauri/Cargo.toml` — the full suite, never filtered. macOS and Linux: `cargo test --lib` — the unit tests, which hold their `cfg`-gated code; the integration tests do not depend on the platform, and on Linux they need the display and CUPS queue `linux.yml` sets up
 4. Windows only: `cargo clippy` and `cargo test` for `shell-ext-win/`
 
 Step 3 on Windows is also the **bindings drift gate**: `tests/ipc_surface.rs` regenerates `src/ipc/bindings.ts` from the tauri-specta command surface and fails when the committed copy is stale. Its failure message says what to do (`UPDATE_BINDINGS=1 cargo test …` and commit the result). It only runs in a full test run, which is why the step takes no filter.
@@ -63,6 +64,8 @@ The Explorer context-menu DLL is its own crate: `shell-ext-win/` is deliberately
 | `THIRD-PARTY-NOTICES.md` is current (`scripts/licenses/generate-notices.sh --check`) | `release.yml` `guard`, so no release is built from stale notices; run it by hand after a dependency change |
 | Dependency audits (`cargo audit`, `pnpm audit`) | `audit.yml` (weekly, on lockfile changes, by hand) and `release.yml` `guard`; locally `make audit` ([below](#dependency-audits)) |
 | Integration tests on macOS | Windows runs them on every PR; locally `make test-rust` |
+| Integration tests on Linux, the real CUPS spooler, the WebKitGTK renderer | `linux.yml` on `ubuntu-22.04-arm` (Xvfb, a cups-pdf queue), after every merge, weekly and by hand |
+| The Linux packages (`.deb`, AppImage): architecture, `Depends: cups-client`, `desktop-file-validate`, `--version` | `release.yml` `build`, step *Architecture and package checks (Linux)* |
 | Coverage (Vitest V8, `cargo llvm-cov`) | Local only: `pnpm test:coverage`, `cargo llvm-cov` |
 | `#[ignore]`d tests (live update manifest, real CUPS queue) | Local only: `cargo test -- --ignored` |
 | E2E (WebdriverIO + tauri-driver) and smoke launches | Local only: `pnpm test:e2e` on Windows; the VM scripts under `scripts/vm/` |
@@ -81,8 +84,8 @@ Accepted advisories (2026-10-10):
 
 | Advisory | Package | Why it is accepted | Exit |
 |---|---|---|---|
-| RUSTSEC-2024-0429 (unsound) | glib 0.18 | Linux only: Tauri's GTK/WebKitGTK stack, never built for Windows or macOS | A Tauri release off gtk-rs 0.18 |
-| RUSTSEC-2024-0370 (unmaintained) | proc-macro-error 1.0 | Linux only and build time only: proc-macro of glib-macros | Same |
+| RUSTSEC-2024-0429 (unsound) | glib 0.18 | Linux only, and shipped in the Linux builds: Tauri's GTK/WebKitGTK stack. The unsound `VariantStrIter` is never called by tao, wry, muda, tauri or `src-tauri/src` (searched, November 2026) | A Tauri release off gtk-rs 0.18 |
+| RUSTSEC-2024-0370 (unmaintained) | proc-macro-error 1.0 | Linux only and build time only: proc-macro of glib-macros, never in a binary | Same |
 | RUSTSEC-2024-0436 (unmaintained) | paste 1.0 | Build time only: proc-macro of specta, pinned by tauri-specta | specta without it |
 | RUSTSEC-2026-0192 (unmaintained) | ttf-parser 0.25 | Through usvg/fontdb for SVG text; reads the system's fonts, not the printed file. svg2pdf 0.13 is the latest | svg2pdf on a newer usvg |
 | RUSTSEC-2026-0206 (unmaintained) | rustybuzz 0.20 | Text shaping in usvg, same path as ttf-parser | Same |
@@ -106,7 +109,7 @@ To redeploy the landing by hand, use **Run workflow** on **Landing** in this rep
 
 ## Caching
 
-The `backend` job uses `actions/cache@v6` directly (not `Swatinem/rust-cache`) over `~/.cargo/{registry/index,registry/cache,git/db}` plus `src-tauri/target/` and `shell-ext-win/target/`, keyed on `${{ runner.os }}-cargo-` and both lockfiles. pnpm modules are cached by `actions/setup-node@v7` with `cache: pnpm`. The release jobs use no cache: their `setup-node` steps set `package-manager-cache: false`.
+The `backend` job uses `actions/cache@v6` directly (not `Swatinem/rust-cache`) over `~/.cargo/{registry/index,registry/cache,git/db}` plus `src-tauri/target/` and `shell-ext-win/target/`, keyed on `${{ runner.os }}-${{ runner.arch }}-cargo-` and both lockfiles (the architecture keeps the x64 and ARM64 Linux caches apart). pnpm modules are cached by `actions/setup-node@v7` with `cache: pnpm`. The release jobs use no cache: their `setup-node` steps set `package-manager-cache: false`.
 
 ## What does **not** exist yet
 
@@ -128,10 +131,10 @@ Everything in this section is **unimplemented**. It is recorded as design intent
 Releases are signed so the installed app can verify an update before installing it (FR-082, [ADR-0008](../adr/0008-installer-nsis-per-user.md)). The key pair is minisign, generated once with `pnpm tauri signer generate`:
 
 - **Public key** — committed, in `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. Every build embeds it and accepts only artifacts signed by the matching private key.
-- **Private key** — **never committed**. A release build reads it from the `TAURI_SIGNING_PRIVATE_KEY` secret (the key file's contents), plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has a password. `release.yml` keeps it away from the builds: they sign with a throwaway key, and the `sign` job runs `tauri signer sign` with the real one on the NSIS setup (Windows) and `Pluryprint.app.tar.gz` (macOS), writing the `.sig` files the release carries ([releasing.md](./releasing.md) §5). Keep an offline backup. If the key is lost, installed copies cannot be updated in place. If it leaks, rotate it and ship the new public key through a release signed with the old one.
+- **Private key** — **never committed**. A release build reads it from the `TAURI_SIGNING_PRIVATE_KEY` secret (the key file's contents), plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has a password. `release.yml` keeps it away from the builds: they sign with a throwaway key, and the `sign` job runs `tauri signer sign` with the real one on the NSIS setup (Windows), `Pluryprint.app.tar.gz` (macOS) and the `.AppImage` and `.deb` (Linux), writing the `.sig` files the release carries ([releasing.md](./releasing.md) §5). Keep an offline backup. If the key is lost, installed copies cannot be updated in place. If it leaks, rotate it and ship the new public key through a release signed with the old one.
 - **The private key must have a password.** Tauri asks for the password whenever `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is not set, and a passwordless key can only be used by setting that variable to an empty string. Windows PowerShell cannot do that: `$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""` *deletes* the variable (verified with `Test-Path env:...` on 5.1), so `pnpm tauri build` finishes both bundles and then waits forever at the password prompt, with no `.sig` written. In a non-interactive job (a scheduled task, CI) that is a hang, not an error. Generate release keys with a non-empty password (`pnpm tauri signer generate -w <file>` asks for one), and run signing builds with `CI=true` and a job timeout so a missing password fails instead of hanging. If an existing key has no password, sign the artifact explicitly instead, from `cmd.exe`: `pnpm tauri signer sign -f <key file> -p "" --app-version <version> <artifact>`. Windows PowerShell 5.1 drops empty arguments to native programs, so the same line typed there loses the `""`; `cmd.exe` passes it through.
 - **Signed version** — every update signature is bound to its release: `tauri signer sign --app-version <version>` writes `version:<version>` into the signature's trusted comment, which the signature covers. The app's updater has `requireSignedVersion` on, so an artifact signed by hand without `--app-version`, or for another version than the manifest announces, is refused. `release.yml` signs with the tag's version and `release_tools.py check-manifest --signed-version` checks every platform before the draft is finished.
-- **Manifest** — the release uploads `latest.json` as a release asset: `version`, `notes`, `pub_date`, and a `platforms` map (`windows-x86_64`, `windows-aarch64`, `darwin-aarch64`, `darwin-x86_64`; the updater falls back from `{os}-{arch}-{installer}` to these) of `{ url, signature }`, where `signature` is the contents of the matching `.sig`. The stable channel reads it from `https://github.com/MAECLY/pluryprint/releases/latest/download/latest.json`, the beta channel from the `channel-beta` release (see [releasing.md](./releasing.md) §3).
+- **Manifest** — the release uploads `latest.json` as a release asset: `version`, `notes`, `pub_date`, and a `platforms` map (`windows-x86_64`, `windows-aarch64`, `darwin-aarch64`, `darwin-x86_64`, `linux-x86_64` and `linux-aarch64` for the AppImages, and `linux-x86_64-deb` and `linux-aarch64-deb` for the `.deb` packages, which a `.deb` install looks up first; the others are reached by the updater's fallback from `{os}-{arch}-{installer}`) of `{ url, signature }`, where `signature` is the contents of the matching `.sig`. The stable channel reads it from `https://github.com/MAECLY/pluryprint/releases/latest/download/latest.json`, the beta channel from the `channel-beta` release (see [releasing.md](./releasing.md) §3).
 
 PR and `main` builds have no key and must not get one; `ci.yml` builds no bundle at all. With `createUpdaterArtifacts` on, Tauri refuses to bundle without a private key, so an unsigned local build uses `--config src-tauri/tauri.ci.conf.json`, which turns updater artifacts off for that build only.
 
@@ -141,7 +144,7 @@ To test an update end to end without publishing, serve a `latest.json` and a sig
 
 ### Required secrets
 
-**None** for `ci.yml`, which reads no `secrets.*` value. `release.yml` needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (release keys must have a password; see above), and its `guard` job fails a tag build when the key is not set. Only one step of its `sign` job reads them; the four builds get no secret and a read-only token. The full list of secrets and repository settings is in [releasing.md](./releasing.md) §2.
+**None** for `ci.yml`, which reads no `secrets.*` value. `release.yml` needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (release keys must have a password; see above), and its `guard` job fails a tag build when the key is not set. Only one step of its `sign` job reads them; the six builds get no secret and a read-only token. The full list of secrets and repository settings is in [releasing.md](./releasing.md) §2.
 
 ### Constraints the release pipeline keeps
 
@@ -159,12 +162,13 @@ To test an update end to end without publishing, serve a `latest.json` and a sig
 
 ## Status checks required for merge
 
-Branch protection is a GitHub repository setting, not something this file can assert. Both jobs are designed to gate: `frontend`, and `backend` on both matrix entries (`Backend (windows-latest)`, `Backend (macos-latest)`).
+Branch protection is a GitHub repository setting, not something this file can assert. Both jobs are designed to gate: `frontend`, and `backend` on every matrix entry (`Backend (windows-latest)`, `Backend (macos-latest)`, `Backend (ubuntu-22.04)`).
 
 ## See also
 
 - [installer-windows.md](./installer-windows.md)
 - [installer-macos.md](./installer-macos.md)
+- [installer-linux.md](./installer-linux.md)
 - [code-signing.md](./code-signing.md)
 - [auto-update-flow.md](./auto-update-flow.md)
 - [../06-roadmap/release-strategy.md](../06-roadmap/release-strategy.md)
