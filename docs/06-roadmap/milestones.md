@@ -389,7 +389,7 @@ Untouched: `.pkg` / `.dmg` packaging, Developer ID signing, notarization, stapli
 
 ### Status (2026-11-09) — decided, in progress
 
-The CUPS backend is shared with macOS and already compiled for Linux. The work for 0.0.5 is packaging, three converters and the file-manager glue.
+The CUPS backend is shared with macOS and already compiled for Linux. The work for 0.0.5 is packaging, two converters (the render worker and HEIC), the memory cap and the file-manager glue.
 
 ### Scope
 
