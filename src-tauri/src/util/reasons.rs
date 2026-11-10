@@ -65,6 +65,27 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     (IpcErrorCode::UpdateInstallFailed, "install_failed", &[]),
     (IpcErrorCode::UpdateInstallFailed, "bad_endpoint", &[]),
     (IpcErrorCode::UpdateInstallFailed, "app_not_located", &[]),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "wrong_package_format",
+        &[],
+    ),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "appimage_not_writable",
+        &[],
+    ),
+    (IpcErrorCode::UpdateInstallFailed, "auth_cancelled", &[]),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "package_install_failed",
+        &[],
+    ),
+    (
+        IpcErrorCode::UpdateInstallFailed,
+        "previous_app_not_restored",
+        &["path"],
+    ),
     // --- Internal ---
     (IpcErrorCode::Internal, "open_logs_failed", &[]),
     (IpcErrorCode::Internal, "open_link_failed", &[]),
@@ -75,6 +96,7 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     (IpcErrorCode::Internal, "printer_list_unstable", &[]),
     (IpcErrorCode::Internal, "printer_query_failed", &[]),
     (IpcErrorCode::Internal, "discovery_failed", &[]),
+    (IpcErrorCode::Internal, "printer_settings_unavailable", &[]),
     (IpcErrorCode::Internal, "update_state_save_failed", &[]),
     // --- Invalid request: links, profiles, import, updates ---
     (IpcErrorCode::InvalidRequest, "url_not_allowed", &[]),
@@ -194,6 +216,7 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     ),
     // --- Dependencies ---
     (IpcErrorCode::DependencyMissing, "ippfind_missing", &[]),
+    (IpcErrorCode::DependencyMissing, "cups_missing", &[]),
     // --- Printers ---
     (IpcErrorCode::PrintFailed, "set_default_failed", &[]),
     (IpcErrorCode::PrintFailed, "add_printer_needs_admin", &[]),
@@ -309,6 +332,7 @@ pub const JOB_REASONS: &[ReasonSpec<&'static str>] = &[
     ("dependency_missing", "pandoc", &[]),
     ("dependency_missing", "heif-codec", &[]),
     ("dependency_missing", "hevc-codec", &[]),
+    ("dependency_missing", "heif-decoder", &[]),
     ("dependency_missing", "no-heif-decoder", &[]),
     ("dependency_missing", "sips", &[]),
     ("dependency_missing", "cups", &[]),

@@ -960,7 +960,13 @@ export type Dependency =
  * only, paid unless the PC maker preinstalled it): HEIC photos are HEVC
  * inside.
  */
-"hevc-codec"
+"hevc-codec" | 
+/**
+ * An external HEIF decoder (Linux only): libheif's `heif-dec` or
+ * `heif-convert`, or ImageMagick's `magick` or `convert`. Linux has no
+ * system decoder to ask, so the program is looked for like any other.
+ */
+"heif-decoder"
 /**
  * One line of an install's output, as it happens (FR-058).
  */
@@ -2524,8 +2530,8 @@ export type UpdateInstallResult = {
  */
 installed: string | null; 
 /**
- * The new version runs only after a restart (macOS). On Windows the
- * installer restarts the app itself and this process exits.
+ * The new version runs only after a restart (macOS, Linux). On Windows
+ * the installer restarts the app itself and this process exits.
  */
 restart_required: boolean }
 /**

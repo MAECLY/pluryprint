@@ -94,6 +94,7 @@
         "printer_list_unstable": "La lista de impresoras cambió mientras se leía. Vuelve a intentarlo.",
         "printer_query_failed": "Windows notificó un error al leer las impresoras.",
         "discovery_failed": "Falló la búsqueda de impresoras en la red.",
+        "printer_settings_unavailable": "No se pudo abrir ninguna aplicación de ajustes de impresoras. Puedes gestionarlas en http://localhost:631 desde el navegador.",
         "update_state_save_failed": "No se pudo guardar tu elección sobre la actualización."
       },
       "InvalidRequest": {
@@ -145,7 +146,8 @@
       },
       "DependencyMissing": {
         "ippfind_missing": "La detección en red necesita las herramientas cliente de CUPS (ippfind), que no están instaladas.",
-        "ippfind_missingLinux": "La detección en red necesita ippfind, de las herramientas IPP de CUPS, que no está instalado. Instala el paquete cups-ipp-utils (en Debian y Ubuntu: sudo apt install cups-ipp-utils)."
+        "ippfind_missingLinux": "La detección en red necesita ippfind, de las herramientas IPP de CUPS, que no está instalado. Instala el paquete cups-ipp-utils (en Debian y Ubuntu: sudo apt install cups-ipp-utils).",
+        "cups_missing": "Las herramientas de impresión de CUPS no están instaladas, así que no se pueden mostrar impresoras. Instala el paquete cups-client (Debian, Ubuntu) o cups (Fedora)."
       },
       "PrintFailed": {
         "set_default_failed": "El sistema no pudo establecer la impresora predeterminada.",
@@ -167,7 +169,12 @@
         "not_an_installed_app": "Esta copia de Pluryprint no es una aplicación instalada, así que no puede actualizarse sola. Descarga la versión desde la página de versiones.",
         "install_failed": "No se pudo instalar la actualización. La carpeta de registros tiene los detalles.",
         "bad_endpoint": "La dirección de actualizaciones de esta versión no es válida.",
-        "app_not_located": "Pluryprint no encontró su propia instalación para actualizarla."
+        "app_not_located": "Pluryprint no encontró su propia instalación para actualizarla.",
+        "wrong_package_format": "La actualización publicada para esta plataforma no es del tipo de paquete con el que se instaló esta copia. No se ha instalado nada; descarga la versión desde la página de versiones.",
+        "appimage_not_writable": "La actualización no pudo reemplazar la AppImage porque no se puede escribir en su carpeta. Mueve el archivo .AppImage a una carpeta tuya (por ejemplo, ~/Applications) e inténtalo de nuevo.",
+        "auth_cancelled": "No se instaló la actualización porque se canceló o falló la petición de la contraseña de administrador. No se ha cambiado nada.",
+        "package_install_failed": "El gestor de paquetes del sistema no pudo instalar la actualización. Instala el paquete desde la página de versiones.",
+        "previous_app_not_restored": "La actualización falló y no se pudo restaurar la versión anterior. Se conservó en «{{path}}»; muévela de vuelta o reinstala desde la página de versiones."
       },
       "InvalidState": {
         "update_in_progress": "Ya se está instalando una actualización.",
@@ -225,6 +232,9 @@
     },
     "hevc-codec": {
       "remediation": "Falta el descodificador de vídeo HEVC que necesita esta foto HEIC. Instala «Extensiones de vídeo HEVC» desde Microsoft Store. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
+    },
+    "heif-decoder": {
+      "remediation": "No hay ningún descodificador HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif-tools en Fedora, libheif en Arch) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     },
     "no-heif-decoder": {
       "remediation": "No hay ningún descodificador de imágenes HEIF en este sistema. Convierte antes la foto a JPEG o PNG.",
