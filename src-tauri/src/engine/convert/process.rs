@@ -488,7 +488,7 @@ impl GroupSampler {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let scan = self.polls % GROUP_SCAN_EVERY == 0;
+            let scan = self.polls.is_multiple_of(GROUP_SCAN_EVERY);
             self.polls = self.polls.wrapping_add(1);
             let own = memory_in_use(leader);
             if scan {
