@@ -66,7 +66,7 @@ export async function visibleText(): Promise<string> {
  * re-renders its old value and the typing is appended to it.
  */
 export async function replaceInputText(
-  input: ReturnType<typeof $>,
+  input: WebdriverIO.Element,
   text: string,
 ): Promise<void> {
   await input.click();

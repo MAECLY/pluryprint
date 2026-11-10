@@ -17,7 +17,7 @@ Everything in this table is declared in `src-tauri/Cargo.toml`, `shell-ext-win/C
 | Async runtime          | `tokio` 1.41 (queue dispatcher). The print/convert hops are **blocking** `std::process` / pure functions the dispatcher drives |
 | Serialization          | `serde`, `serde_json`, `toml`                           |
 | Logging / tracing      | `tracing`, `tracing-subscriber` (JSON), `tracing-appender` (non-blocking writer only — rotation/retention is our own `RollingJsonl`) |
-| HTTP (update check)    | `ureq` 3.4, blocking, 10 s timeout                      |
+| HTTP (update check)    | `ureq` 3.5, blocking, 10 s timeout                      |
 | Windows API bindings   | `windows` 0.62, the line tauri 2.12 / webview2-com 0.39 use (`Win32_Graphics_Printing`, `Win32_Storage_Xps`, …) |
 | macOS API bindings     | `objc2` 0.6 + `objc2-app-kit` / `objc2-foundation` 0.3, feature-narrowed |
 | Image → PDF            | `image` 0.25 (jpeg/png/tiff/bmp/webp) + `lopdf` 0.44, **in-process** |
@@ -104,7 +104,7 @@ The Rust core handles file enumeration, format detection, conversion orchestrati
 | `webview2-com`, `windows-core` *(Windows only)* | WebView2 `PrintToPdf` in the render worker |
 | `block2` *(macOS only)*                | WebKit completion handlers in the render worker |
 | `printpdf` 0.12.8                      | PDF primitives for the test page (`default-features = false`; writes only) |
-| `ureq` 3.4                             | Blocking HTTPS for the update check (the channel's `latest.json`) |
+| `ureq` 3.5                             | Blocking HTTPS for the update check (the channel's `latest.json`) |
 | `semver` 1                             | Version comparison by SemVer *precedence* |
 | `percent-encoding` 2.3                 | Prefilled "report issue" URL |
 | `uuid` 1 (`v7`)                        | Time-sortable job ids — queue ordering falls out of the id |
@@ -138,7 +138,7 @@ The frontend is a small SPA: a print dialog, a profile editor, a queue viewer, a
 | `zustand` 5                  | Cross-route state (queue, profiles, settings stores) |
 | `sonner` 1.7                 | Toasts |
 
-**Build / dev only:** `vite` 7, `typescript` 5.7, `tailwindcss` 3.4 + `postcss` + `autoprefixer`, `eslint` 10 (+ react-hooks 7 with the React Compiler rules, jsx-a11y, react-refresh plugins), `prettier`, `vitest` 5 + `@vitest/coverage-v8` + `jsdom` 30, `@testing-library/{react,jest-dom,user-event}`, `@wdio/*` 9 for e2e, `husky` + `lint-staged` + `@commitlint/*`, `@tauri-apps/cli`.
+**Build / dev only:** `vite` 8, `typescript` 5.7, `tailwindcss` 3.4 + `postcss` + `autoprefixer`, `eslint` 10 (+ react-hooks 7 with the React Compiler rules, jsx-a11y, react-refresh plugins), `prettier`, `vitest` 5 + `@vitest/coverage-v8` + `jsdom` 30, `@testing-library/{react,jest-dom,user-event}`, `@wdio/*` 10 for e2e, `husky` + `lint-staged` + `@commitlint/*`, `@tauri-apps/cli`.
 
 Packages named in earlier drafts and **not** used: `@radix-ui/*`, `react-hook-form`, `@tanstack/react-query`, `lucide-react`, `clsx`, `tailwind-merge`, `react-i18next`, `playwright`.
 

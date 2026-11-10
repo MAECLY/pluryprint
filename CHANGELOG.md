@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies: Tauri 2.12.3 with `tauri-plugin-dialog` 2.8.4 (file dialogs on `rfd` 0.17), `tauri-plugin-single-instance` 2.5.5 (on Windows, a `|` in a path handed to the running window is no longer split, and a second launch gives up after 10 seconds if the first window stops answering), `tauri-plugin-opener` 2.7.2 and `tauri-plugin-notification` 2.8, all still on Tauri 2.12; `@tauri-apps/api` 2.12.4, `@tauri-apps/plugin-dialog` 2.8.4 and `@tauri-apps/cli` 2.12.4 on the UI side. `zeroize` 1.9.1 hardens how a PDF password is wiped; `ureq` 3.5 decodes proxy credentials as curl does (a literal `%` in a proxy password is written `%25`). Minor and patch updates of `serde_json`, `uuid`, `encoding_rs` and zustand 5.0.16.
+- Development: Vite 8.3.5, `@vitejs/plugin-react` 6.2.1, Vitest 5.0.5, jsdom 30.1.3, `@testing-library/user-event` 14.6.8 and WebdriverIO 10.1 for the end-to-end suite.
+
 ## [0.0.4] - 2026-11-05
 
 Windows prints are confirmed again: a job that printed is shown as printed instead of _Unconfirmed_. Also dependency security updates and a leaner CI.

@@ -73,6 +73,12 @@ export const config: WebdriverIO.Config = {
     } as WebdriverIO.Capabilities,
   ],
 
+  // The specs find controls by partial English labels (`button*=Settings`)
+  // and DOM-text XPath (`byText`), which often match more than one node.
+  // WebdriverIO 10 makes `$` throw on a multi-match; keep v9's
+  // first-match behaviour until every selector is narrowed on a real run.
+  strictSelectors: false,
+
   logLevel: 'warn',
   bail: 0,
   waitforTimeout: 15_000,
