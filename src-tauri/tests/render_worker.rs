@@ -752,15 +752,24 @@ fn nfr_security_a_symlink_in_the_document_folder_cannot_escape_it() {
 /// the tool is not installed (the text checks are then skipped; the page
 /// counts and sizes still run).
 fn pdf_text(pdf: &Path) -> Option<String> {
+    // `-layout` keeps each printed line together. Without it pdftotext
+    // guesses a reading order, and on WebView2's PDFs (every word placed on
+    // its own) it reads them column by column: "Línea Línea … 1: 2: …".
+    // The runs of spaces `-layout` pads with are folded to one, so a needle
+    // matches whatever the column widths.
     let out = std::process::Command::new("pdftotext")
-        .args(["-enc", "UTF-8"])
+        .args(["-layout", "-enc", "UTF-8"])
         .arg(pdf)
         .arg("-")
         .output()
         .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    out.status.success().then(|| {
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 /// The size of every page, in points.
