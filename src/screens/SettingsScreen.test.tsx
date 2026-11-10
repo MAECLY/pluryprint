@@ -680,7 +680,9 @@ describe('SettingsScreen', () => {
     expect(
       screen.getByText(/The \.deb package adds Pluryprint to Open With/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Dolphin \(KDE\) and Nemo/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Dolphin \(KDE, in a Pluryprint submenu\) and Nemo/),
+    ).toBeInTheDocument();
 
     // A later `app_info` answer re-words the note in place.
     act(() => {

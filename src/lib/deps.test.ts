@@ -55,7 +55,7 @@ describe('remediationKey (FR-058)', () => {
         'common',
         remediationKey('heif-decoder', { os: 'linux', locale }),
       );
-      expect(text).toContain('heif-convert');
+      expect(text).toContain('libheif-freeworld');
       expect(text).toContain('libheif-examples');
       expect(text).toContain('ImageMagick');
       expect(text).toMatch(/resumed|reanudar/);

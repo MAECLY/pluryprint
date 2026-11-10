@@ -235,11 +235,11 @@
       "remediation": "Falta el descodificador de vídeo HEVC que necesita esta foto HEIC. Instala «Extensiones de vídeo HEVC» desde Microsoft Store. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     },
     "heif-decoder": {
-      "remediation": "No hay ningún descodificador HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif-tools en Fedora, libheif en Arch) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
+      "remediation": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     },
     "no-heif-decoder": {
       "remediation": "No hay ningún descodificador de imágenes HEIF en este sistema. Convierte antes la foto a JPEG o PNG.",
-      "remediationLinux": "No hay ningún descodificador de imágenes HEIF instalado. Instala heif-convert (el paquete libheif-examples en Debian y Ubuntu, libheif-tools en Fedora) o ImageMagick, o convierte antes la foto a JPEG o PNG."
+      "remediationLinux": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick, o convierte antes la foto a JPEG o PNG."
     },
     "sips": {
       "remediation": "No se encontró sips, la herramienta de imágenes de macOS."
@@ -252,7 +252,7 @@
       "remediation": "La impresión no está disponible en esta plataforma."
     },
     "heif-decoder": {
-      "remediation": "No se encontró ningún descodificador de imágenes HEIF, así que no se pueden imprimir fotos HEIC/HEIF. Instala heif-convert (el paquete libheif-examples en Debian y Ubuntu, libheif-tools en Fedora) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
+      "remediation": "No hay ningún descodificador de imágenes HEIF instalado, así que no se pueden imprimir fotos HEIC/HEIF. Instala las herramientas de libheif (libheif-examples en Debian y Ubuntu, libheif en Arch; en Fedora, libheif-tools junto con libheif-freeworld de RPM Fusion, que descodifica HEIC) o ImageMagick. Después, un trabajo en pausa por esto se puede reanudar desde la cola."
     }
   },
   "testPage": {

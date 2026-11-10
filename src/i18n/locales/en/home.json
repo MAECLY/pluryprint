@@ -127,8 +127,8 @@
     "progress": "Step {{step}} of {{total}}"
   },
   "linuxMenu": {
-    "deb": "In your file manager, right-click files and choose Pluryprint under Open With; Dolphin and Nemo also offer Pluryprint's Print now, Configure print job and Add to print queue.",
+    "deb": "In your file manager, right-click files and choose Pluryprint under Open With. Dolphin and Nemo also add “Print now”, “Configure print job…” and “Add to print queue”: in a Pluryprint submenu in Dolphin, and as three entries that name Pluryprint in Nemo.",
     "appimage": "An AppImage adds no right-click entry by itself: once you integrate it with your desktop (an AppImage manager can do that), Pluryprint appears under Open With in your file manager.",
-    "unknown": "Installed from the .deb package, Pluryprint appears under Open With in your file manager, and Dolphin and Nemo add its Print now, Configure print job and Add to print queue actions; an AppImage appears under Open With once you integrate it with your desktop."
+    "unknown": "Installed from the .deb package, Pluryprint appears under Open With in your file manager, and Dolphin and Nemo add “Print now”, “Configure print job…” and “Add to print queue” (in a Pluryprint submenu in Dolphin, as three entries in Nemo). An AppImage appears under Open With once you integrate it with your desktop."
   }
 }

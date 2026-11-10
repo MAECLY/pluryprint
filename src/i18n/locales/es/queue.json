@@ -198,7 +198,7 @@
         "render_failed": "No se pudo maquetar la página para imprimirla.",
         "page_too_large": "Esta página necesita más memoria de la que Pluryprint permite para imprimir una página (límite: {{limit}} MB). Quita las imágenes muy grandes o divídela en páginas más pequeñas, e imprímela de nuevo.",
         "render_worker_missing": "No se encontró la aplicación Pluryprint, que maqueta las páginas para imprimirlas, junto a la herramienta de línea de comandos. Reinstala Pluryprint.",
-        "render_no_display": "Las páginas se maquetan con la vista web del escritorio, que necesita una sesión gráfica (X11 o Wayland), y no había ninguna disponible. Imprímela desde tu sesión de escritorio.",
+        "render_no_display": "Las páginas se maquetan con la vista web del escritorio, que necesita una sesión gráfica (X11 o Wayland), y no había ninguna disponible. Vuelve a imprimir el archivo desde tu sesión de escritorio.",
         "share_reference_refused": "La página usaba un archivo de una carpeta compartida de red, que Pluryprint no carga. Ahora las páginas se imprimen siempre con el renderizador del sistema, que deja fuera esos archivos: vuelve a imprimirla.",
         "page_not_checkable": "Pluryprint no pudo preparar esta página para imprimirla de forma segura: su comienzo está mal formado (por ejemplo, un <!DOCTYPE> que no termina), así que no se pudo poner su política de seguridad en primer lugar. Corrige el comienzo de la página, o vuelve a guardarla desde un navegador o editor, e imprímela de nuevo.",
         "text_unreadable": "No se pudo leer el archivo como texto."

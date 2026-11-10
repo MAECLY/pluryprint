@@ -42,9 +42,9 @@
     "profilesError": "Couldn't load the profile list.",
     "shellNote": "The installer adds Pluryprint to the Explorer right-click menu: on Windows 11 it is under Show more options (or Shift+F10), on Windows 10 in the menu itself.",
     "shellNoteMac": "Right-click printing works from Finder › Services › Print with Pluryprint. Those menu titles follow the system language.",
-    "shellNoteLinux": "The .deb package adds Pluryprint to Open With in your file manager, and Print now, Configure print job and Add to print queue to the right-click menu of Dolphin (KDE) and Nemo (Cinnamon).",
+    "shellNoteLinux": "The .deb package adds Pluryprint to Open With in your file manager, and “Print now”, “Configure print job…” and “Add to print queue” to the right-click menu of Dolphin (KDE, in a Pluryprint submenu) and Nemo (Cinnamon, as three entries).",
     "shellNoteLinuxAppImage": "An AppImage registers no right-click entry by itself. Integrate it with your desktop (an AppImage manager can do that) to find Pluryprint under Open With; the Dolphin and Nemo actions come with the .deb package only.",
-    "shellNoteLinuxUnknown": "The .deb package adds Pluryprint to Open With in your file manager, and its Print now, Configure print job and Add to print queue actions to Dolphin (KDE) and Nemo (Cinnamon). An AppImage appears under Open With only once you integrate it with your desktop."
+    "shellNoteLinuxUnknown": "The .deb package adds Pluryprint to Open With in your file manager, and “Print now”, “Configure print job…” and “Add to print queue” to Dolphin (KDE, in a Pluryprint submenu) and Nemo (Cinnamon, as three entries). An AppImage appears under Open With only once you integrate it with your desktop."
   },
   "engine": {
     "concurrency": {

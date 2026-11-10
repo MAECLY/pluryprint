@@ -127,8 +127,8 @@
     "progress": "Paso {{step}} de {{total}}"
   },
   "linuxMenu": {
-    "deb": "En tu gestor de archivos, haz clic derecho sobre los archivos y elige Pluryprint en «Abrir con»; Dolphin y Nemo también ofrecen las acciones de Pluryprint Imprimir ahora, Configurar el trabajo de impresión y Añadir a la cola de impresión.",
+    "deb": "En tu gestor de archivos, haz clic derecho sobre los archivos y elige Pluryprint en «Abrir con». Dolphin y Nemo también añaden «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión»: en un submenú Pluryprint en Dolphin y, en Nemo, como tres entradas que nombran a Pluryprint.",
     "appimage": "Una AppImage no añade ninguna entrada al menú contextual por sí sola: cuando la integres en tu escritorio (un gestor de AppImage puede hacerlo), Pluryprint aparecerá en «Abrir con» de tu gestor de archivos.",
-    "unknown": "Si lo instalaste con el paquete .deb, Pluryprint aparece en «Abrir con» de tu gestor de archivos, y Dolphin y Nemo añaden sus acciones Imprimir ahora, Configurar el trabajo de impresión y Añadir a la cola de impresión; una AppImage aparece en «Abrir con» cuando la integras en tu escritorio."
+    "unknown": "Si lo instalaste con el paquete .deb, Pluryprint aparece en «Abrir con» de tu gestor de archivos, y Dolphin y Nemo añaden «Imprimir ahora», «Configurar el trabajo de impresión…» y «Añadir a la cola de impresión» (en un submenú Pluryprint en Dolphin y como tres entradas en Nemo). Una AppImage aparece en «Abrir con» cuando la integras en tu escritorio."
   }
 }

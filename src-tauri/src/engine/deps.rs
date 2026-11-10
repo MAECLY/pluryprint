@@ -740,7 +740,8 @@ pub fn spec(dep: Dependency, os: Os) -> Spec {
                 blocks: if linux { &["heic", "heif"] } else { &[] },
                 effect: "HEIC/HEIF photos cannot be printed until one is installed. \
                          Install the libheif tools (libheif-examples on Debian and Ubuntu, \
-                         libheif-tools on Fedora, libheif on Arch) or ImageMagick",
+                         libheif on Arch; on Fedora, libheif-tools together with \
+                         libheif-freeworld from RPM Fusion, which decodes HEIC) or ImageMagick",
                 install: if linux {
                     HEIF_DECODER_INSTALL_LINUX
                 } else {
@@ -1483,7 +1484,12 @@ mod tests {
         );
         assert_eq!(linux.blocks, ["heic", "heif"]);
         let text = linux.remediation();
-        for package in ["libheif-examples", "libheif-tools", "ImageMagick"] {
+        for package in [
+            "libheif-examples",
+            "libheif-tools",
+            "libheif-freeworld",
+            "ImageMagick",
+        ] {
             assert!(text.contains(package), "{text}");
         }
         let report = from_resolution(&linux, &Resolution::Missing);

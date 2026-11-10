@@ -235,11 +235,11 @@
       "remediation": "The HEVC video decoder this HEIC photo needs is missing. Install “HEVC Video Extensions” from the Microsoft Store. A job paused for it can then be resumed from the queue."
     },
     "heif-decoder": {
-      "remediation": "No HEIF decoder is installed, so HEIC/HEIF photos cannot be printed. Install the libheif tools (libheif-examples on Debian and Ubuntu, libheif-tools on Fedora, libheif on Arch) or ImageMagick. A job paused for it can then be resumed from the queue."
+      "remediation": "No HEIF image decoder is installed, so HEIC/HEIF photos cannot be printed. Install the libheif tools (libheif-examples on Debian and Ubuntu, libheif on Arch; on Fedora, libheif-tools together with libheif-freeworld from RPM Fusion, which decodes HEIC) or ImageMagick. A job paused for it can then be resumed from the queue."
     },
     "no-heif-decoder": {
       "remediation": "No HEIF image decoder is available on this system. Convert the photo to JPEG or PNG first.",
-      "remediationLinux": "No HEIF image decoder is installed. Install heif-convert (the libheif-examples package on Debian and Ubuntu, libheif-tools on Fedora) or ImageMagick, or convert the photo to JPEG or PNG first."
+      "remediationLinux": "No HEIF image decoder is installed, so HEIC/HEIF photos cannot be printed. Install the libheif tools (libheif-examples on Debian and Ubuntu, libheif on Arch; on Fedora, libheif-tools together with libheif-freeworld from RPM Fusion, which decodes HEIC) or ImageMagick, or convert the photo to JPEG or PNG first."
     },
     "sips": {
       "remediation": "sips, the macOS image tool, could not be found."
@@ -252,7 +252,7 @@
       "remediation": "Printing is not available on this platform."
     },
     "heif-decoder": {
-      "remediation": "No HEIF image decoder was found, so HEIC/HEIF photos cannot be printed. Install heif-convert (the libheif-examples package on Debian and Ubuntu, libheif-tools on Fedora) or ImageMagick. A job paused for it can then be resumed from the queue."
+      "remediation": "No HEIF image decoder is installed, so HEIC/HEIF photos cannot be printed. Install the libheif tools (libheif-examples on Debian and Ubuntu, libheif on Arch; on Fedora, libheif-tools together with libheif-freeworld from RPM Fusion, which decodes HEIC) or ImageMagick. A job paused for it can then be resumed from the queue."
     }
   },
   "testPage": {
