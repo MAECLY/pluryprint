@@ -68,15 +68,14 @@ pub fn host_env(
     changes
 }
 
-#[cfg(test)]
+// Unix only: an AppImage exists on Linux alone, and these are Unix paths
+// (on Windows `/tmp/...` is not even absolute).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     /// Inside an AppImage, a host program loses every variable that points
     /// into the mounted image, and keeps the rest.
-    /// Unix only: an AppImage exists on Linux alone, and these are Unix paths
-    /// (on Windows `/tmp/...` is not even absolute).
-    #[cfg(unix)]
     #[test]
     fn host_programs_do_not_inherit_the_appimage_libraries() {
         let appdir = Path::new("/tmp/.mount_PluryX");
