@@ -69,6 +69,8 @@ use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod webkit;
 #[cfg(windows)]
 pub mod windows;
 
@@ -668,8 +670,8 @@ fn webkit_regex_escape(text: &str) -> String {
 }
 
 /// The text encoding a staged page is declared in, named in the
-/// `Content-Type` the macOS scheme handler serves the page with
-/// (`render/macos.rs`): a byte-order mark first, then a
+/// `Content-Type` the WebKit scheme handlers serve the page with
+/// (`render/webkit.rs`): a byte-order mark first, then a
 /// `charset` in the first kilobyte, then UTF-8 when the bytes are valid
 /// UTF-8, else Windows-1252 (what a browser assumes for Western text). Pure.
 pub fn sniff_charset(html: &[u8]) -> String {
