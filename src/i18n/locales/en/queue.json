@@ -198,6 +198,7 @@
         "render_failed": "The page could not be laid out for printing.",
         "page_too_large": "This page needs more memory than Pluryprint allows for printing a page (limit: {{limit}} MB). Remove very large pictures or split it into smaller pages, and print it again.",
         "render_worker_missing": "The Pluryprint app, which lays out pages for printing, was not found next to the command-line tool. Reinstall Pluryprint.",
+        "render_no_display": "Pages are laid out with the desktop's web view, which needs a graphical session (X11 or Wayland), and none was available. Print it from your desktop session.",
         "share_reference_refused": "The page used a file on a network share, which Pluryprint does not load. Pages now always print with the system renderer, which leaves such files out: print it again.",
         "page_not_checkable": "Pluryprint could not prepare this page safely for printing: its start is malformed (for example, a <!DOCTYPE> that never ends), so its security policy could not be placed first. Fix the start of the page, or save it again from a browser or editor, and print it again.",
         "text_unreadable": "The text file could not be read as text."

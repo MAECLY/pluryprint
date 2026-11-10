@@ -302,6 +302,9 @@ pub const JOB_REASONS: &[ReasonSpec<&'static str>] = &[
     ("conversion_failed", "page_too_large", &["limit"]),
     // The console CLI without the app next to it (the app is the renderer).
     ("conversion_failed", "render_worker_missing", &[]),
+    // Linux: the worker found no X11 or Wayland session to start WebKitGTK
+    // in (a headless CLI run over SSH, a service).
+    ("conversion_failed", "render_no_display", &[]),
     // No longer emitted: only the headless-browser fallback, removed in
     // round 6, refused a page whose stylesheets named a share. Kept so an
     // older `queue.json` that carries it still explains itself.
@@ -360,6 +363,7 @@ pub const PREVIEW_NOTES: &[(&str, &[&str])] = &[
 /// at once instead of retrying it (FR-034 retries are for transient failures).
 pub const TERMINAL_CONVERSION_REASONS: &[&str] = &[
     "render_worker_missing",
+    "render_no_display",
     "share_reference_refused",
     "page_not_checkable",
     "svg_too_large",

@@ -300,6 +300,14 @@ pub(crate) fn render_system_capped(
             if full.contains(crate::render::TIMEOUT_MARKER) {
                 return Err(super::process::timed_out_error(RENDERER_LABEL, timeout));
             }
+            // Linux without a graphical session: no retry can start the web
+            // view, so it is terminal and says why instead of "render failed".
+            if full.contains(crate::render::NO_DISPLAY_MARKER) {
+                return Err(EngineError::ConversionFailed(Failure::new(
+                    "render_no_display",
+                    super::process::log_tail(&log, 400),
+                )));
+            }
             let detail = super::process::log_tail(&log, 400);
             tracing::warn!(event = "render_worker_failed", detail = %detail, error = %failure.detail);
             return Err(EngineError::ConversionFailed(Failure::new(
@@ -770,6 +778,45 @@ mod tests {
         std::fs::write(dir.join(gui), b"app").unwrap();
         assert_eq!(worker_exe_for(&dir.join(cli)).unwrap(), dir.join(gui));
         assert_eq!(worker_exe_for(&dir.join(gui)).unwrap(), dir.join(gui));
+    }
+
+    /// A worker with no graphical session to start its web view in (Linux)
+    /// fails with its own terminal reason, not a retryable render failure.
+    #[cfg(unix)]
+    #[test]
+    fn fr_055_render_worker_without_a_display_is_terminal_with_reason() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("fake-worker.sh");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho '{}: no X11 or Wayland display' >&2\nexit 1\n",
+                crate::render::NO_DISPLAY_MARKER
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let work = WorkDir::new("no-display-test").unwrap();
+        let cancel = AtomicBool::new(false);
+        let err = render_system_with(
+            &fake,
+            b"<p>x",
+            dir.path(),
+            &dir.path().join("o.pdf"),
+            &work,
+            &cancel,
+            None,
+            &PageSetup::default(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f) if f.reason == Some("render_no_display")),
+            "{err:?}"
+        );
+        assert!(crate::util::reasons::is_terminal_conversion_reason(
+            "render_no_display"
+        ));
     }
 
     /// The CLI without the app next to it fails with a registered reason the
