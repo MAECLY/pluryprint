@@ -128,6 +128,25 @@ pub const TIMEOUT_MARKER: &str = "pluryprint-render-timeout";
 /// does not help, so the engine can report it as its own terminal reason.
 pub const NO_DISPLAY_MARKER: &str = "pluryprint-render-no-display";
 
+/// What the render worker puts before the message it fails with
+/// ([`crate::worker::render`]).
+pub const WORKER_ERROR_PREFIX: &str = "pluryprint worker render-pdf: ";
+
+/// Whether the worker's log `log` says it stopped with `marker`
+/// ([`TIMEOUT_MARKER`], [`NO_DISPLAY_MARKER`]): a line that starts with it
+/// (the watchdog) or with [`WORKER_ERROR_PREFIX`] and then it (the error the
+/// worker returns). Anywhere else on a line does not count: the same log
+/// records URLs the page itself chose (a refused navigation), and a page
+/// must not be able to turn its own failure into a terminal timeout or
+/// "no display" by naming a marker in a link. Pure.
+pub fn log_reports(log: &str, marker: &str) -> bool {
+    log.lines().any(|line| {
+        line.strip_prefix(WORKER_ERROR_PREFIX)
+            .unwrap_or(line)
+            .starts_with(marker)
+    })
+}
+
 /// Whether this process can start the render worker's web view: always on
 /// Windows and macOS; on Linux only inside an X11 or Wayland session
 /// (`DISPLAY` or `WAYLAND_DISPLAY` set and not empty). The worker inherits
@@ -270,6 +289,16 @@ pub fn start_watchdog(limit: Option<std::time::Duration>) {
             "{TIMEOUT_MARKER}: the render did not finish within {}s",
             limit.as_secs()
         );
+        // `_exit`, not `exit`: the main thread may still be inside GTK or
+        // WebKit, and running their exit handlers and C++ static destructors
+        // under it can crash or hang the worker instead of ending it.
+        // `eprintln!` is unbuffered, so the marker is already written.
+        #[cfg(unix)]
+        // SAFETY: `_exit` has no preconditions; it never returns.
+        unsafe {
+            libc::_exit(crate::worker::EXIT_FAILED)
+        };
+        #[cfg(not(unix))]
         std::process::exit(crate::worker::EXIT_FAILED);
     });
 }
@@ -1192,6 +1221,22 @@ mod tests {
         if !cfg!(target_os = "linux") {
             assert!(display_available());
         }
+    }
+
+    #[test]
+    fn fr_055_only_the_worker_itself_can_report_a_marker() {
+        let worker = format!("{WORKER_ERROR_PREFIX}{NO_DISPLAY_MARKER}: GTK could not open");
+        assert!(log_reports(&worker, NO_DISPLAY_MARKER));
+        let watchdog = format!("x\n{TIMEOUT_MARKER}: the render did not finish within 7s\n");
+        assert!(log_reports(&watchdog, TIMEOUT_MARKER));
+        // A URL the page chose, logged by the worker, is not the worker
+        // saying it stopped.
+        let page = format!(
+            "pluryprint render: navigation refused: http://x/{NO_DISPLAY_MARKER}\n\
+             {WORKER_ERROR_PREFIX}the web view crashed"
+        );
+        assert!(!log_reports(&page, NO_DISPLAY_MARKER));
+        assert!(!log_reports(&page, TIMEOUT_MARKER));
     }
 
     #[test]

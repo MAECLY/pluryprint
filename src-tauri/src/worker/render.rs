@@ -50,7 +50,7 @@ pub fn run(args: &[OsString]) -> i32 {
     match render::render(&request) {
         Ok(()) => super::EXIT_OK,
         Err(message) => {
-            eprintln!("pluryprint worker render-pdf: {message}");
+            eprintln!("{}{message}", render::WORKER_ERROR_PREFIX);
             super::EXIT_FAILED
         }
     }

@@ -301,12 +301,12 @@ pub(crate) fn render_system_capped(
             // The worker gave up on its own watchdog: a timeout, terminal
             // like the engine's own, never a render failure to retry.
             let full = std::fs::read_to_string(&log).unwrap_or_default();
-            if full.contains(crate::render::TIMEOUT_MARKER) {
+            if crate::render::log_reports(&full, crate::render::TIMEOUT_MARKER) {
                 return Err(super::process::timed_out_error(RENDERER_LABEL, timeout));
             }
             // Linux without a graphical session: no retry can start the web
             // view, so it is terminal and says why instead of "render failed".
-            if full.contains(crate::render::NO_DISPLAY_MARKER) {
+            if crate::render::log_reports(&full, crate::render::NO_DISPLAY_MARKER) {
                 return Err(EngineError::ConversionFailed(Failure::new(
                     "render_no_display",
                     super::process::log_tail(&log, 400),
