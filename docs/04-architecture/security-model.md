@@ -34,7 +34,7 @@ We start by being explicit about what we are defending against and what is out o
 
 ## 2. Code signing
 
-> **Status: §2.1 and §2.2 are not in use.** [ADR-0011](../adr/0011-release-channel.md) releases without OS certificates: the Windows installers are unsigned (SmartScreen warns; the release notes explain **More info → Run anyway**), the macOS bundles are signed ad hoc and not notarized (the notes give the `xattr` step), and every release attaches `SHA256SUMS`. What *is* signed is every update artifact (§2.3). §2.1/§2.2 are the plan for when certificates are bought; [code-signing.md](../07-build-and-release/code-signing.md) has the same status note.
+> **Status: §2.1 and §2.2 are not in use.** [ADR-0011](../adr/0011-release-channel.md) releases without OS certificates: the Windows installers are unsigned (SmartScreen warns; the release notes explain **More info → Run anyway**), the macOS bundles are signed ad hoc and not notarized (the notes give the `xattr` step), the Linux AppImage and `.deb` carry no GPG or distribution signature ([ADR-0015](../adr/0015-linux-support.md)), and every release attaches `SHA256SUMS`. What *is* signed is every update artifact (§2.3). §2.1/§2.2 are the plan for when certificates are bought; [code-signing.md](../07-build-and-release/code-signing.md) has the same status note.
 
 ### 2.1 Windows: EV cert + Authenticode (planned)
 
@@ -147,13 +147,13 @@ The converters are a far larger attack surface than `lp`, because they parse doc
 - each gets a **dedicated scratch folder** in the OS temp directory. It holds LibreOffice's throwaway `-env:UserInstallation` profile, the staged page and the web view's private profile, and it is removed on every exit path. Every Chromium-based profile (the render worker's WebView2 and the app's own `EBWebView`) is seeded so that it does not try an empty-password logon for the user, which on Windows counts as a failed logon toward account lockout (see [print-engine.md](print-engine.md));
 - each runs under a **deadline and the job's cancel flag**, and on either the **whole process tree** is killed (process group on Unix, `taskkill /T` on Windows). A parser that panics or a page that wedges the web view takes the worker down, not the app;
 - **no network and no file share**, enforced by the web view's own network layer, never by a scan of the HTML: the render worker turns scripts off; on Windows a request filter on `*` answers every request itself (the document's folder from a private `https` origin, `data:`/`blob:`, a logged 403 for anything else) and served files are checked on their open handle, so no `file://host/share` or `//host` reference ever opens SMB/WebDAV and hands out the user's NTLM credentials; on macOS the worker answers its own private scheme with a `WKURLSchemeHandler` that serves the staged page and files inside the document's folder (opened without following any symbolic link out of it, checked by `F_GETPATH` on the descriptor they are read from), a content rule list admits only that origin, `data:` and `blob:` (every `file:` URL is blocked), and a navigation delegate cancels every navigation the worker did not start. Round 6 had relied on a `file:` URL prefix, which a symbolic link inside the folder passed (round 7). The headless-browser fallback, which loaded pages from `file:` behind a text pre-pass, was removed in round 6 because that pre-pass could not be made to agree with a real HTML parser (security notes 5-7); the SVG converter loads `<image>` only from the drawing's folder; LibreOffice's profile is seeded to block linked resources, never update links, disable macros and OLE/DDE, and send its own HTTP to a dead proxy;
-- the render worker runs under a **memory cap** too since round 7 (2 GiB for the worker and the web view processes it starts together: a Windows Job Object with `JOB_OBJECT_LIMIT_JOB_MEMORY` and kill-on-close; on macOS a 20 ms watchdog over the worker's process group, which does not reach WebKit's own XPC web-content process). Running out of memory is the terminal `page_too_large`;
+- the render worker runs under a **memory cap** too since round 7 (2 GiB for the worker and the web view processes it starts together: a Windows Job Object with `JOB_OBJECT_LIMIT_JOB_MEMORY` and kill-on-close; on macOS a 20 ms watchdog over the worker's process group, which does not reach WebKit's own XPC web-content process; on Linux the same watchdog adds up the resident set of every process in the group, read from `/proc`). Running out of memory is the terminal `page_too_large`;
 - the SVG worker additionally runs under a **hard memory cap** (1 GiB, `process::run_capped`): a Windows Job Object with `JOB_OBJECT_LIMIT_PROCESS_MEMORY`, kill-on-close and one active process; `RLIMIT_DATA` plus a 20 ms memory watchdog in the parent on macOS/Linux (macOS does not enforce `RLIMIT_DATA`/`RLIMIT_AS` on `mmap`). Running out of memory is the terminal `svg_too_large`, running out of time the terminal `tool_timed_out`, and the PDF it writes is capped at 512 MB. Its pre-checks (byte, entity and node caps, a bounded-work expansion walk that follows `<use>`, markers, patterns, masks, clip paths and filters, raster and filter pixel caps) only make an oversized drawing fail fast; the worker is the boundary. Its only door to files is usvg's `ImageHrefResolver`, which judges the exact string usvg parsed with the shared `local_ref` predicate;
 - LibreOffice and `textutil` work on a private copy of the input, so a hostile file name never reaches their command line.
 
 **Encrypted PDFs.** A user's PDF password is passed to `lopdf` in-process, held in a buffer zeroed on drop, kept in the dispatcher's memory only while the job needs it, and never written to `queue.json`, a log, a command line or an environment block (FR-059). The CLI takes it from a file or a pipe, never from `argv`. A PDF whose permissions forbid printing is refused, never stripped.
 
-**Installing a missing dependency** (`install_dependency`, decision D13) runs `winget` or `brew` only after the user confirmed the exact command shown, with an argument vector, no shell, no console window and a 30-minute bound; Store and web options open with the OS handler.
+**Installing a missing dependency** (`install_dependency`, decision D13) runs `winget` or `brew` only after the user confirmed the exact command shown, with an argument vector, no shell, no console window and a 30-minute bound; Store and web options open with the OS handler. On Linux every option is a web link: the app runs no package manager and asks for no administrator password to install a dependency.
 
 **Still a gap:** environment minimization. Converters inherit the app's environment.
 
@@ -175,11 +175,21 @@ Operation:
 
 The one exception is **uninstalling the WebView2 Runtime** — but we don't ship that; we use the system one and bootstrap it on Win 10 if missing (the bootstrapper is a Microsoft binary that handles its own elevation).
 
-### 4.2 macOS
+### 4.2 macOS and Linux
+
+**macOS.**
 
 - App installs to `/Applications` (user can drag-drop without admin if not present).
 - All state in `~/Library/Application Support/com.Maecly.Pluryprint/` and friends.
 - The Finder integration is an `NSServices` entry inside the app bundle (no Finder Sync extension), so there is nothing extra to enable or sign.
+
+**Linux** (preview, [ADR-0015](../adr/0015-linux-support.md)).
+
+- The AppImage runs from wherever the user put it, with no installation and no administrator rights; it registers nothing on its own.
+- The `.deb` is installed system-wide by the package manager, which needs administrator rights (`sudo apt install ./Pluryprint_…_linux_x64.deb`). It puts the app, the `.desktop` entry and the Dolphin and Nemo entries under `/usr`, and nothing else.
+- An in-app update of a `.deb` install runs `pkexec dpkg -i` on the verified package, so the system asks for an administrator password each time; an AppImage replaces its own file, which must be writable by the user.
+- All state in `~/.config/pluryprint/`, `~/.local/share/pluryprint/` and `~/.cache/pluryprint/` (the XDG directories; `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` move them).
+- Printing, queue management and adding a printer go through the CUPS client tools as the user; whether `lpadmin` needs a password is the system's CUPS policy, not Pluryprint's.
 
 ### 4.3 Enterprise policy (`policy.json`)
 
@@ -233,7 +243,7 @@ That is everything. The app:
 
 - Does not phone home with usage stats. **This version has no telemetry transmitter at all** — the two consent flags in `[telemetry]` are recorded and never read by any sending code (documented on `TelemetryCfg` itself).
 - Does not download or install updates unless the user asks (**Install now**, `update install`); the download then goes to the artifact the same manifest names, on GitHub, and is verified before it is installed.
-- Does not install converters on its own: winget, Homebrew, the Microsoft Store or the browser make their own requests only after the user confirmed the dependency dialog.
+- Does not install converters on its own: winget, Homebrew, the Microsoft Store or the browser make their own requests only after the user confirmed the dependency dialog (on Linux, only the browser).
 - Lets no printed document reach the network or a file share (§3.4).
 - Does not load fonts, scripts or styles from CDNs — the CSP forbids it and the one webfont is bundled.
 - Does not check for updates of converters.
@@ -250,7 +260,7 @@ Nothing is collected, because nothing is transmitted. In particular the app neve
 
 ### 6.2 Logs
 
-Local-only. Files are named `pluryprint-<UTC date>.jsonl` (and `pluryprint-<date>.<n>.jsonl` for each size roll within one day) under `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` (Windows) or `~/Library/Logs/Pluryprint/` (macOS). The user can delete them at any time, and the About screen has a button that reveals the folder.
+Local-only. Files are named `pluryprint-<UTC date>.jsonl` (and `pluryprint-<date>.<n>.jsonl` for each size roll within one day) under `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` (Windows), `~/Library/Logs/Pluryprint/` (macOS) or `~/.local/share/pluryprint/logs/` (Linux, `$XDG_DATA_HOME/pluryprint/logs/`). The user can delete them at any time, and the About screen has a button that reveals the folder.
 
 Rotation and retention are implemented by `logging::RollingJsonl`, not by `tracing-appender`'s rolling appender (which only rotates on a clock boundary and never deletes): the current file rolls when the **UTC date changes or it passes 10 MB, whichever comes first**, and a sweep at startup and on every roll deletes anything older than **14 days** and then keeps only the **7 newest** files. Both bounds apply; whichever bites first wins. There is no `[logging]` section in `config.toml` — these are the whole policy.
 

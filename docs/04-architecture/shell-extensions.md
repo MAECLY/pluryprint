@@ -1,6 +1,6 @@
 # Shell Extensions
 
-> **TL;DR** — On Windows we ship a small Rust COM DLL implementing `IExplorerCommand`, registered per user as an `ExplorerCommandHandler` verb: it shows in the Windows 10 menu and in the Windows 11 classic menu ("Show more options"). The Windows 11 top-level menu needs a signed sparse MSIX package, which waits on a code-signing certificate (§2.5). On macOS the integration ships **inside the app bundle** as an `NSServices` declaration answered by a Rust/`objc2` provider — no `.appex`, no sandbox, no separate signature and nothing for the user to enable (see §3). In both cases the shell extension does *no real work*: it serializes the user's selection and spawns the main Pluryprint binary.
+> **TL;DR** — On Windows we ship a small Rust COM DLL implementing `IExplorerCommand`, registered per user as an `ExplorerCommandHandler` verb: it shows in the Windows 10 menu and in the Windows 11 classic menu ("Show more options"). The Windows 11 top-level menu needs a signed sparse MSIX package, which waits on a code-signing certificate (§2.5). On macOS the integration ships **inside the app bundle** as an `NSServices` declaration answered by a Rust/`objc2` provider — no `.appex`, no sandbox, no separate signature and nothing for the user to enable (see §3). On Linux (a preview platform, [ADR-0015](../adr/0015-linux-support.md)) there is no extension at all: a `.desktop` file puts Pluryprint under **Open with**, and the `.deb` adds a Dolphin service menu and Nemo actions (see §4). In every case the shell integration does *no real work*: it hands over the user's selection and starts the main Pluryprint binary.
 
 ## 1. The problem we are solving
 
@@ -37,7 +37,7 @@ A third-party entry reaches the modern menu only as an `IExplorerCommand` declar
 - the entry hides itself (`ECS_HIDDEN`) when none of the first 16 selected items is a supported file or a folder (FR-005); the app is the authority on what prints;
 - on click it writes the selection to a JSON handoff file and starts `pluryprint.exe --invoke=context-menu --files-from <file> --action <action> [--profile <id>]`. A command line has a fixed size whatever the selection, so there is no 15-item limit (FR-003).
 
-The DLL never prints, never reads file contents and never talks to the running app: that is the app's job (§4).
+The DLL never prints, never reads file contents and never talks to the running app: that is the app's job (§5).
 
 ### 2.2 What the installer registers
 
@@ -265,7 +265,19 @@ those steps — that `NSServices` survived the bundler, and that `pbs` discovere
 the service — but that the entry renders in the Finder's menu is not
 automatable.
 
-## 4. Flow: User right-click → DLL → spawn → Tauri renders
+## 4. Linux: desktop entries, no extension
+
+**Status: decided for 0.0.5 ([ADR-0015](../adr/0015-linux-support.md)); Linux is a preview platform and these entries have not yet been tried on real desktops.**
+
+Linux file managers share no extension API. GNOME Files (Nautilus) loads Python extensions only through `nautilus-python`, which is rarely installed; Dolphin reads KDE *service menus*; Nemo reads its own *actions*; Thunar and Caja have other formats again. All of them can run a program from a desktop-entry-style text file, and that is the only kind of integration Pluryprint ships on Linux: nothing loads into the file manager's process, and the file only names the program to start, as the Windows DLL and the macOS service do.
+
+- **Open with (every file manager).** The application's `.desktop` file lists the supported types in `MimeType=` and passes the selected files on its `Exec=` line, so **Open with → Pluryprint** appears for a supported file in any file manager that follows the freedesktop.org specifications. The selection arrives as an "open with" launch: the print dialog opens with those files, and a running instance receives them through the single-instance forward (§2.4 describes the same path on Windows).
+- **Dolphin (KDE) and Nemo (Cinnamon).** The `.deb` also installs a Dolphin service menu and Nemo actions with three entries, the same actions as the Windows submenu: **Print now** (the default profile, at once), **Configure print job** (the print dialog) and **Add to print queue**. Each entry starts `pluryprint` with its action and the selected paths. There are no per-profile rows.
+- **Not shipped.** No Nautilus extension, no Thunar or Caja actions, and the AppImage registers nothing: it never writes into `~/.local/share` on its own, so its "Open with" entry appears only if the user integrates the AppImage with a tool of their choice. Only the `.deb` installs the Dolphin and Nemo entries.
+
+Checking the files needs no desktop: `desktop-file-validate` covers the `.desktop` entry, and the `.deb`'s contents can be listed with `dpkg -c`. Whether an entry renders in Dolphin's or Nemo's menu, and starts the app with the right selection, is a manual check on a real KDE Plasma and Cinnamon session.
+
+## 5. Flow: User right-click → DLL → spawn → Tauri renders
 
 ```
 +-----------+      +-------------------+      +----------------------+      +---------------+
@@ -301,13 +313,13 @@ automatable.
 - **Single source of truth.** The Tauri exe is the only place that knows about profiles, supported formats, the queue, etc. The DLL doesn't need to be redeployed when a converter is added.
 - **Singleton.** A second right-click while the app is open routes the new selection into the running instance: `tauri-plugin-single-instance` forwards the argv (`WM_COPYDATA`), and the window is raised without faked input (§2.4).
 
-## 5. Logging and diagnostics
+## 6. Logging and diagnostics
 
 The DLL logs only to `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\shellext.jsonl`: one JSON line per invocation (action, item count, handoff file) and per caught panic, nothing while the menu is drawn, capped at 1 MB.
 
 The Tauri exe logs in JSONL to its own log file (see [`data-model.md`](./data-model.md)).
 
-## 6. Testing the shell extension
+## 7. Testing the shell extension
 
 - **Unit (DLL).** `cargo test` in `shell-ext-win/` covers the handoff payload, the menu model and the label cache on any host; the app reads the same fixtures (`tests/handoff_roundtrip.rs`, `tests/strings_cache.rs`).
 - **Installer.** `src-tauri/tests/installer_hooks.rs` and `bundle_identity.rs` pin what the hooks register and remove, and compile them with `makensis -WX`.
@@ -315,7 +327,7 @@ The Tauri exe logs in JSONL to its own log file (see [`data-model.md`](./data-mo
 
 On macOS everything that does not need the Finder is a plain `cargo test` in `platform::macos::*` — handoff writing and its caps, `NSPasteboard`→paths decoding built from real `NSURL`s, hostile file names, the action vocabulary. Whether the system *discovered* the service is assertable in CI (`plutil -extract NSServices` on the bundled `Info.plist`, then `lsregister -f` + `pbs -flush` + `pbs -dump_pboard | grep`); whether the entry renders in the Finder's menu is not automatable (see `shell-ext-mac/README.md`).
 
-## 7. Related documents
+## 8. Related documents
 
 - [`system-architecture.md`](./system-architecture.md) — where this fits in the overall layout.
 - [`ipc-and-cli.md`](./ipc-and-cli.md) — exact `--invoke` flag semantics.
