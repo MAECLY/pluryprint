@@ -189,14 +189,24 @@ pub const MAGICK_POLICY: &str = include_str!("heif/magick-policy.xml");
 /// can swap the file between being written and being read. Pixels that do
 /// not fit the memory limit spill to `MAGICK_TEMPORARY_PATH`, which is
 /// pointed there too instead of the shared `/tmp`.
+///
+/// ImageMagick also reads a policy from the user's configuration folders
+/// (`$XDG_CONFIG_HOME/ImageMagick`, `$HOME/.config/ImageMagick`,
+/// `$HOME/.magick`), and one there that grants rights would widen ours. So
+/// `HOME` and `XDG_CONFIG_HOME` point at an empty folder in the conversion
+/// folder too. A system `policy.xml` that grants rights still overrides
+/// ours (it is the administrator's); the distributions' own only close more.
 pub fn imagemagick_policy_env(
     work: &WorkDir,
 ) -> Result<Vec<(&'static str, OsString)>, EngineError> {
     let config = work.path().join("magick-policy");
     let temp = work.path().join("magick-tmp");
+    let home = work.path().join("magick-home");
+    let xdg_config = home.join(".config");
     std::fs::create_dir(&config)
         .and_then(|()| std::fs::write(config.join("policy.xml"), MAGICK_POLICY))
         .and_then(|()| std::fs::create_dir(&temp))
+        .and_then(|()| std::fs::create_dir_all(&xdg_config))
         .map_err(|e| {
             EngineError::ConversionFailed(Failure::new(
                 "workdir_failed",
@@ -206,6 +216,8 @@ pub fn imagemagick_policy_env(
     Ok(vec![
         ("MAGICK_CONFIGURE_PATH", config.into_os_string()),
         ("MAGICK_TEMPORARY_PATH", temp.into_os_string()),
+        ("HOME", home.into_os_string()),
+        ("XDG_CONFIG_HOME", xdg_config.into_os_string()),
     ])
 }
 
@@ -778,8 +790,9 @@ mod tests {
     }
 
     /// A fake external decoder named `name` in `dir` that leaves `<dir>/ran`
-    /// behind when it is started, records `MAGICK_CONFIGURE_PATH` and the
-    /// policy it names into `<dir>/env`, and "decodes" by copying a real PNG
+    /// behind when it is started, records `MAGICK_CONFIGURE_PATH`,
+    /// `MAGICK_TEMPORARY_PATH`, `HOME`, `XDG_CONFIG_HOME` and the policy it
+    /// names into `<dir>/env`, and "decodes" by copying a real PNG
     /// to its last argument (without ImageMagick's `png:` prefix).
     ///
     /// It is returned once it can be started: on Linux a test thread that
@@ -798,7 +811,8 @@ mod tests {
             r#"#!/bin/sh
 [ -n "$FAKE_PROBE" ] && exit 0
 : > '{ran}'
-printf '%s\n' "${{MAGICK_CONFIGURE_PATH:-unset}}" "${{MAGICK_TEMPORARY_PATH:-unset}}" > '{env}'
+printf '%s\n' "${{MAGICK_CONFIGURE_PATH:-unset}}" "${{MAGICK_TEMPORARY_PATH:-unset}}" \
+  "${{HOME:-unset}}" "${{XDG_CONFIG_HOME:-unset}}" > '{env}'
 [ -n "$MAGICK_CONFIGURE_PATH" ] && cat "$MAGICK_CONFIGURE_PATH/policy.xml" >> '{env}'
 for last in "$@"; do :; done
 cp '{png}' "${{last#png:}}"
@@ -927,17 +941,26 @@ cp '{png}' "${{last#png:}}"
             assert_eq!(pages_of(&output), 1, "{name}");
             let env = std::fs::read_to_string(dir.path().join("env")).unwrap();
             let mut lines = env.lines();
-            let (config, temp) = (lines.next().unwrap(), lines.next().unwrap());
+            let mut next = || Path::new(lines.next().unwrap());
+            let (config, temp, home, xdg) = (next(), next(), next(), next());
             if ExternalDecoder::of(&decoder) == Some(ExternalDecoder::ImageMagick) {
-                assert_eq!(
-                    Path::new(config),
-                    work.path().join("magick-policy"),
-                    "{name}"
-                );
-                assert_eq!(Path::new(temp), work.path().join("magick-tmp"), "{name}");
+                assert_eq!(config, work.path().join("magick-policy"), "{name}");
+                assert_eq!(temp, work.path().join("magick-tmp"), "{name}");
+                // No user-level policy.xml can widen ours: the folders
+                // ImageMagick reads one from are empty ones of the
+                // conversion.
+                let magick_home = work.path().join("magick-home");
+                assert_eq!(home, magick_home, "{name}");
+                assert_eq!(xdg, magick_home.join(".config"), "{name}");
+                assert_eq!(std::fs::read_dir(xdg).unwrap().count(), 0, "{name}");
                 assert!(env.ends_with(MAGICK_POLICY), "{name}: {env}");
             } else {
-                assert_eq!((config, temp), ("unset", "unset"), "{name}");
+                assert_eq!(
+                    (config, temp),
+                    (Path::new("unset"), Path::new("unset")),
+                    "{name}"
+                );
+                assert!(!home.starts_with(work.path()), "{name}");
             }
         }
     }
