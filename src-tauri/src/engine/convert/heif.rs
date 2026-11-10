@@ -137,12 +137,14 @@ const STAGED_NAME: &str = "input.heic";
 ///
 /// Everything after this reads the copy, never `input` again: the header
 /// check and the decoder see the same bytes, so a file swapped or rewritten
-/// at the original path after the check cannot reach a decoder. A file
-/// that cannot be read is `cannot_read_input`; a copy that cannot be
-/// written is `workdir_failed`.
+/// at the original path after the check cannot reach a decoder. Only a
+/// regular file is copied ([`header::open_regular`]): a FIFO or a device
+/// named `.heic` would block the copy or never end it. A file that cannot
+/// be read, or is not a regular file, is `cannot_read_input`; a copy that
+/// cannot be written is `workdir_failed`.
 fn stage_input(input: &Path, work: &WorkDir) -> Result<PathBuf, EngineError> {
     let staged = work.path().join(STAGED_NAME);
-    let mut source = std::fs::File::open(input).map_err(|e| header::unreadable(input, &e))?;
+    let mut source = header::open_regular(input).map_err(|e| header::unreadable(input, &e))?;
     let workdir_failed = |e: std::io::Error| {
         EngineError::ConversionFailed(Failure::new(
             "workdir_failed",
@@ -988,6 +990,52 @@ cp '{png}' "$2"
         assert_eq!(std::fs::read(dir.path().join("seen")).unwrap(), header);
         assert_eq!(std::fs::read(&input).unwrap(), b"<svg/>");
         assert_eq!(pages_of(&output), 1);
+    }
+
+    /// NFR-security: a FIFO (or a device) named `.heic` is refused at once,
+    /// before anything is copied or started: opening a FIFO with no writer,
+    /// or reading one, would block the conversion for good.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_a_fifo_named_heic_is_refused_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let decoder = fake_decoder(dir.path(), "heif-convert");
+        let fifo = dir.path().join("IMG_0004.HEIC");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        for input in [fifo, PathBuf::from("/dev/zero")] {
+            let work = WorkDir::new("fifo").unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (shown, decoder) = (input.clone(), decoder.clone());
+            let out = dir.path().join("o.pdf");
+            // On its own thread, so a conversion that blocks fails the test
+            // instead of hanging it.
+            std::thread::spawn(move || {
+                let r = convert_with_external(
+                    &decoder,
+                    &input,
+                    &out,
+                    &work,
+                    &AtomicBool::new(false),
+                    None,
+                    &|_| {},
+                );
+                let _ = tx.send(r);
+            });
+            let err = rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|_| panic!("{} blocked the conversion", shown.display()))
+                .unwrap_err();
+            assert!(
+                matches!(&err, EngineError::ConversionFailed(f)
+                    if f.reason == Some("cannot_read_input")
+                        && f.contains("not a regular file")),
+                "{}: {err:?}",
+                shown.display()
+            );
+        }
+        assert!(!dir.path().join("ran").exists(), "a decoder was started");
     }
 
     /// The policy closes every domain before opening the one use, in the
