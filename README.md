@@ -18,8 +18,13 @@ Free · No account · No telemetry · AGPL-3.0
 [Sitio en español](https://pluryprint.maecly.com/)
 
 [![Latest release](https://img.shields.io/github/v/release/MAECLY/pluryprint?label=release&color=C2410C)](https://github.com/MAECLY/pluryprint/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/MAECLY/pluryprint/total?color=C2410C)](https://github.com/MAECLY/pluryprint/releases)
+[![Stars](https://img.shields.io/github/stars/MAECLY/pluryprint?color=C2410C)](https://github.com/MAECLY/pluryprint/stargazers)
+[![Views](https://hits.sh/github.com/MAECLY/pluryprint.svg?label=views)](https://hits.sh/github.com/MAECLY/pluryprint/)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-C2410C)](./LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/MAECLY/pluryprint/ci.yml?branch=main&label=CI)](https://github.com/MAECLY/pluryprint/actions/workflows/ci.yml)
+[![Last commit](https://img.shields.io/github/last-commit/MAECLY/pluryprint?color=C2410C)](https://github.com/MAECLY/pluryprint/commits/main)
+[![Built with Tauri 2](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 
 </div>
 
