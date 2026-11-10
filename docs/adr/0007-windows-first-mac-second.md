@@ -4,6 +4,8 @@
 
 Accepted
 
+Update (2026-11-09): the "Linux (M6+)" deferral is superseded by [ADR-0015](./0015-linux-support.md); Linux ships alongside Windows and macOS from 0.0.5, as a preview.
+
 ## Date
 
 2026-05-03
