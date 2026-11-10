@@ -30,9 +30,33 @@ body:
         - macOS 15 Sequoia
         - macOS 14 Sonoma
         - macOS 13 Ventura
+        - Ubuntu 24.04 or later
+        - Ubuntu 22.04
+        - Debian 12 or later
+        - Fedora 38 or later
+        - Linux Mint, Pop!_OS or another Ubuntu-based distribution
+        - Other Linux distribution (please specify in description)
         - Other (please specify in description)
     validations:
       required: true
+
+  - type: dropdown
+    id: linux-package
+    attributes:
+      label: Linux package
+      description: Linux only. Which download you installed.
+      options:
+        - Not on Linux
+        - AppImage
+        - .deb
+        - Built from source
+
+  - type: input
+    id: linux-desktop
+    attributes:
+      label: Linux desktop and session
+      description: Linux only. The desktop environment and whether the session is X11 or Wayland (`echo $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE` prints both).
+      placeholder: 'KDE Plasma 6, Wayland'
 
   - type: input
     id: printer
@@ -46,7 +70,7 @@ body:
       label: Steps to reproduce
       description: A minimal sequence that triggers the issue.
       placeholder: |
-        1. Right-click 30 PDF files in Explorer
+        1. Right-click 30 PDF files in Explorer (or Finder, Dolphin, Nemo)
         2. Click "Print all with Pluryprint"
         3. ...
     validations:
@@ -71,6 +95,7 @@ body:
     attributes:
       label: Logs
       description: |
-        Attach the latest JSONL log from `%LOCALAPPDATA%\Pluryprint\logs\` (Windows) or
-        `~/Library/Logs/Pluryprint/` (macOS). Redact any absolute paths you do not want public.
+        Attach the latest JSONL log from `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\` (Windows),
+        `~/Library/Logs/Pluryprint/` (macOS) or `~/.local/share/pluryprint/logs/` (Linux).
+        About → "Open logs folder" opens it. Redact any absolute paths you do not want public.
       render: shell
