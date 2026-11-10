@@ -227,36 +227,47 @@ pub fn wait_bounded(
 /// tree by parent pid. The Windows console window is suppressed so a
 /// conversion does not flash a terminal in the user's face.
 ///
-/// On Linux the child is also made the subreaper of everything it starts
-/// (`PR_SET_CHILD_SUBREAPER`, kept across `exec`): a helper whose parent
-/// exits (a double fork) is adopted by the child instead of by init, so it
-/// stays the child's descendant and [`tree::TreeSampler`] still finds it by
-/// its parent link, even after a `setsid` took it out of the group.
+/// No `pre_exec`: a command without one is started with `posix_spawn`
+/// (`process_group` is a spawn attribute), not a `fork` of this whole
+/// process, which matters for every converter and the dependency installer.
+/// The one child that needs code before `exec` gets it from
+/// [`adopt_orphans`].
 pub(crate) fn isolate_process_tree(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: runs in the forked child before exec; prctl is a single
-        // async-signal-safe syscall that touches no memory of ours. Best
-        // effort: a kernel without it (before 3.4) leaves the old
-        // behaviour, an orphan adopted by init.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
-                Ok(())
-            });
-        }
-    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+/// Make the child the subreaper of everything it starts (Linux,
+/// `PR_SET_CHILD_SUBREAPER`, kept across `exec`), for [`run_capped`] with
+/// [`CapScope::Tree`] only, the one child [`tree::TreeSampler`] walks: a
+/// helper whose parent exits (a double fork) is adopted by the child instead
+/// of by init, so it stays the child's descendant and the walk still finds it
+/// by its parent link, even after a `setsid` took it out of the group.
+///
+/// It needs a `pre_exec`, which turns the spawn into a `fork` + `exec`, so
+/// it is not part of [`isolate_process_tree`]: every other child keeps the
+/// `posix_spawn` path.
+#[cfg(target_os = "linux")]
+pub(crate) fn adopt_orphans(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: runs in the forked child before exec; prctl is a single
+    // async-signal-safe syscall that touches no memory of ours. Best
+    // effort: a kernel without it (before 3.4) leaves the old behaviour,
+    // an orphan adopted by init.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+            Ok(())
+        });
     }
 }
 
@@ -529,7 +540,7 @@ pub enum CapScope {
 ///     processes belong is refreshed every [`TREE_SCAN_EVERY`] polls; the
 ///     resident set of each one already known is read on every poll, so a
 ///     known helper cannot grow past the cap between two refreshes. The
-///     child is the subreaper of its tree ([`isolate_process_tree`]), so a
+///     child is the subreaper of its tree ([`adopt_orphans`]), so a
 ///     helper whose parent exits (a double fork) is adopted by the child
 ///     and found by the next walk while the child lives. A
 ///     process stays a member once found, even after its parent exits,
@@ -563,6 +574,10 @@ pub fn run_capped(
         .stderr(Stdio::from(stderr))
         .env(MEMORY_CAP_ENV, memory_cap.to_string());
     isolate_process_tree(&mut cmd);
+    #[cfg(target_os = "linux")]
+    if scope == CapScope::Tree {
+        adopt_orphans(&mut cmd);
+    }
     let cannot_cap = |e: String| {
         engine(EngineError::ConversionFailed(
             Failure::new(
@@ -1739,6 +1754,7 @@ mod reason_tests {
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", &script]);
         isolate_process_tree(&mut cmd);
+        adopt_orphans(&mut cmd);
         let mut child = cmd.spawn().unwrap();
         let leader = child.id();
         let _guard = KillOnPanic {
@@ -1774,6 +1790,53 @@ mod reason_tests {
         tree.kill_all();
         kill_tree(&mut child);
         assert!(!still_alive(orphan), "the orphan outlived the kill");
+    }
+
+    /// [`isolate_process_tree`] alone makes no subreaper (it has no
+    /// `pre_exec`, so its children keep the `posix_spawn` path): a double
+    /// fork's orphan under it is adopted by someone else, never by the child.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn isolate_process_tree_alone_does_not_adopt_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("orphan");
+        let script = format!(
+            "(setsid sleep 600 & echo $! > '{}'); sleep 30",
+            pid_file.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let leader = child.id();
+        let _guard = KillOnPanic {
+            pid_file: Some(pid_file.clone()),
+            group: Some(leader),
+            ..KillOnPanic::default()
+        }
+        .child(leader);
+        let orphan: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        let orphan_start = tree::read_stat(orphan).expect("the orphan is alive").start;
+        // Its parent subshell (in the child's group) exits at once; then it
+        // is adopted, by the child if it were a subreaper, else by a
+        // process outside the child's group (init, or the container's).
+        let adopted_outside =
+            |ppid: u32| tree::read_stat(ppid).is_some_and(|parent| parent.pgrp != leader);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stat = loop {
+            let stat = tree::read_stat(orphan).expect("the orphan is alive");
+            if stat.ppid == leader || adopted_outside(stat.ppid) || Instant::now() >= deadline {
+                break stat;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_ne!(stat.ppid, leader, "the child adopted the orphan");
+        assert!(adopted_outside(stat.ppid), "the orphan was never adopted");
+        tree::kill_checked((orphan, orphan_start), libc::SIGKILL);
+        kill_tree(&mut child);
     }
 
     /// A member is signalled even when no pidfd can be had (`EMFILE`,
