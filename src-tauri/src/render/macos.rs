@@ -61,119 +61,8 @@ use objc2_web_kit::{
     WKWebpagePreferences, WKWebsiteDataStore,
 };
 
-use super::{RenderRequest, Resolved};
-
-/// US Letter, in points, for a job whose paper is `auto`.
-const LETTER_PT: (f64, f64) = (612.0, 792.0);
-
-/// Page margins, in points (0.4 in, Chromium's default print margin), so a
-/// page prints alike on both platforms.
-const MARGIN_PT: f64 = 28.8;
-
-/// Time left until `deadline` (the job's conversion timeout, counted from
-/// the worker's start), or no limit when there is none.
-fn remaining(deadline: Option<Instant>) -> Duration {
-    deadline.map_or(Duration::MAX, |d| {
-        d.saturating_duration_since(Instant::now())
-    })
-}
-
-/// The error of a stage that ran past the conversion timeout: it carries
-/// [`super::TIMEOUT_MARKER`], so the engine reports a timeout.
-fn timed_out(stage: &str) -> String {
-    format!(
-        "{}: {stage} did not finish within the conversion timeout",
-        super::TIMEOUT_MARKER
-    )
-}
-
-/// The largest PDF a render may write. A page WebKit cannot paginate keeps
-/// producing pages; this stops it before it fills the disk.
-const MAX_OUTPUT_BYTES: u64 = 512 * 1024 * 1024;
-
-/// Largest file the worker serves to the page, as on Windows. A bigger one
-/// is answered 404.
-const MAX_SERVED_BYTES: u64 = 256 * 1024 * 1024;
-
-/// What the scheme handler answers one request with.
-#[derive(Debug, PartialEq, Eq)]
-struct Answer {
-    status: isize,
-    /// `(name, value)` response headers.
-    headers: Vec<(&'static str, String)>,
-    body: Vec<u8>,
-}
-
-impl Answer {
-    fn empty(status: isize) -> Self {
-        Self {
-            status,
-            headers: vec![("Content-Type", "text/plain".into())],
-            body: Vec::new(),
-        }
-    }
-}
-
-/// The answer to a request for `uri` on the private origin (module docs):
-/// the staged `page` (with its policy as a header too), a file inside
-/// `base_dir` opened by [`super::open_in_folder`] and read from that same
-/// descriptor, a 404, or a logged 403 for anything that is not this origin
-/// or would leave the folder.
-fn answer(uri: &str, page: &Path, base_dir: &Path) -> Answer {
-    use std::io::Read;
-    let read_capped = |file: std::fs::File| -> Option<Vec<u8>> {
-        let mut bytes = Vec::new();
-        file.take(MAX_SERVED_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .ok()?;
-        (bytes.len() as u64 <= MAX_SERVED_BYTES).then_some(bytes)
-    };
-    match super::resolve(super::MAC_DOC_SCHEME, uri, page) {
-        Resolved::Page => match std::fs::File::open(page).ok().and_then(read_capped) {
-            Some(body) => Answer {
-                status: 200,
-                headers: vec![
-                    (
-                        "Content-Type",
-                        format!("text/html; charset={}", super::sniff_charset(&body)),
-                    ),
-                    (
-                        "Content-Security-Policy",
-                        crate::engine::convert::html::page_csp(),
-                    ),
-                ],
-                body,
-            },
-            None => Answer::empty(404),
-        },
-        Resolved::InFolder(segments) => match super::open_in_folder(base_dir, &segments) {
-            Ok(file) => match read_capped(file) {
-                Some(body) => {
-                    let name = segments.last().map(String::as_str).unwrap_or_default();
-                    Answer {
-                        status: 200,
-                        headers: vec![(
-                            "Content-Type",
-                            super::content_type(Path::new(name)).to_string(),
-                        )],
-                        body,
-                    }
-                }
-                None => Answer::empty(404),
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                super::log_refusal("file", uri);
-                Answer::empty(403)
-            }
-            Err(_) => Answer::empty(404),
-        },
-        Resolved::NotFound => Answer::empty(404),
-        Resolved::Refused => {
-            super::log_refusal("request", uri);
-            Answer::empty(403)
-        }
-    }
-}
+use super::webkit::{answer, paper_points, remaining, timed_out, MARGIN_PT, MAX_OUTPUT_BYTES};
+use super::RenderRequest;
 
 /// State of the [`DocSchemeHandler`].
 struct SchemeIvars {
@@ -225,7 +114,7 @@ define_class!(
             let response = NSHTTPURLResponse::initWithURL_statusCode_HTTPVersion_headerFields(
                 NSHTTPURLResponse::alloc(),
                 &url,
-                answer.status,
+                isize::try_from(answer.status).unwrap_or(500),
                 Some(ns_string!("HTTP/1.1")),
                 Some(&headers),
             );
@@ -333,10 +222,7 @@ pub fn render(request: &RenderRequest) -> Result<(), String> {
     // No Dock icon, no menu bar, never frontmost.
     app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
 
-    let (width, height) = request
-        .paper_in
-        .map(|(w, h)| (w * 72.0, h * 72.0))
-        .unwrap_or(LETTER_PT);
+    let (width, height) = paper_points(request.paper_in);
 
     let origin_url = super::base_href(&request.base_dir);
     let page_url = super::page_url_on(super::MAC_DOC_SCHEME, &request.page);
@@ -605,69 +491,5 @@ fn print_to_file(
         (true, Some(true)) => Ok(()),
         (true, _) => Err("the print operation failed".into()),
         (false, _) => Err(timed_out("printing")),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Round 7: the scheme handler serves the staged page with its policy,
-    /// files inside the folder with their type, and refuses a link out of
-    /// the folder (403), another origin (403) and a missing file (404).
-    #[test]
-    fn nfr_security_scheme_handler_answers_only_the_folder() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-        let doc = root.join("doc");
-        let stage = root.join("stage");
-        std::fs::create_dir_all(&doc).unwrap();
-        std::fs::create_dir_all(&stage).unwrap();
-        let page = stage.join("page.html");
-        std::fs::write(&page, "\u{feff}<p>hi").unwrap();
-        std::fs::write(doc.join("a.css"), "p{}").unwrap();
-        std::fs::write(root.join("secret.css"), "x").unwrap();
-        std::os::unix::fs::symlink("../secret.css", doc.join("link.css")).unwrap();
-        let origin = format!(
-            "{}://{}",
-            super::super::MAC_DOC_SCHEME,
-            super::super::DOC_HOST
-        );
-
-        let served = answer(
-            &super::super::page_url_on(super::super::MAC_DOC_SCHEME, &page),
-            &page,
-            &doc,
-        );
-        assert_eq!(served.status, 200);
-        assert!(served
-            .headers
-            .iter()
-            .any(|(k, v)| *k == "Content-Security-Policy" && v.contains("script-src 'none'")));
-        assert!(served
-            .headers
-            .iter()
-            .any(|(k, v)| *k == "Content-Type" && v == "text/html; charset=utf-8"));
-
-        let css = answer(&format!("{origin}/a.css"), &page, &doc);
-        assert_eq!((css.status, css.body.as_slice()), (200, b"p{}".as_slice()));
-        assert_eq!(css.headers, vec![("Content-Type", "text/css".to_string())]);
-
-        assert_eq!(
-            answer(&format!("{origin}/link.css"), &page, &doc).status,
-            403
-        );
-        assert_eq!(
-            answer(&format!("{origin}/..%2fsecret.css"), &page, &doc).status,
-            403
-        );
-        assert_eq!(answer("file:///etc/hosts", &page, &doc).status, 403);
-        assert_eq!(
-            answer(&format!("{origin}/nope.css"), &page, &doc).status,
-            404
-        );
-        assert!(answer(&format!("{origin}/link.css"), &page, &doc)
-            .body
-            .is_empty());
     }
 }
