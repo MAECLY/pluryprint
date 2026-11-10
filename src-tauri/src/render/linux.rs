@@ -33,6 +33,11 @@
 //!    ([`super::webkit::MARGIN_PT`]), backgrounds included. Its `finished`
 //!    or `failed` signal ends the render.
 //!
+//! The web context also carries WebKit's own memory limit for its web
+//! process: the render worker's memory cap ([`web_process_memory_limit`]).
+//! The engine's watchdog enforces the cap on the worker's whole tree; this
+//! limit holds the web process to it even if nothing is watching.
+//!
 //! The worker's web process is not run in WebKit's bubblewrap sandbox: that
 //! needs `bwrap` and unprivileged user namespaces, which neither the
 //! AppImage nor every distribution provides, and a sandbox that fails to
@@ -48,10 +53,10 @@ use std::time::{Duration, Instant};
 use gtk::prelude::*;
 use webkit2gtk::glib::translate::{FromGlibPtrFull, ToGlibPtr};
 use webkit2gtk::{
-    gio, glib, HardwareAccelerationPolicy, LoadEvent, NavigationPolicyDecision,
-    NavigationPolicyDecisionExt, NetworkProxyMode, NetworkProxySettings, PolicyDecisionExt,
-    PolicyDecisionType, PrintOperation, PrintOperationExt, SettingsExt, URIRequestExt,
-    URISchemeRequest, URISchemeRequestExt, URISchemeResponse, URISchemeResponseExt,
+    gio, glib, HardwareAccelerationPolicy, LoadEvent, MemoryPressureSettings,
+    NavigationPolicyDecision, NavigationPolicyDecisionExt, NetworkProxyMode, NetworkProxySettings,
+    PolicyDecisionExt, PolicyDecisionType, PrintOperation, PrintOperationExt, SettingsExt,
+    URIRequestExt, URISchemeRequest, URISchemeRequestExt, URISchemeResponse, URISchemeResponseExt,
     UserContentManager, WebContext, WebContextExt, WebProcessTerminationReason, WebView,
     WebViewExt, WebsiteDataManager, WebsiteDataManagerExt,
 };
@@ -85,6 +90,53 @@ const QUIET_ENV: [(&str, &str); 4] = [
     ("NO_AT_BRIDGE", "1"),
     ("GIO_USE_VFS", "local"),
 ];
+
+/// The memory cap the engine passed the worker
+/// ([`crate::engine::convert::process::MEMORY_CAP_ENV`]), in bytes; `None`
+/// for a hand-started worker or a value that is not a byte count.
+fn memory_cap() -> Option<u64> {
+    std::env::var(crate::engine::convert::process::MEMORY_CAP_ENV)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// How often, in seconds, WebKit measures the web process against its limit
+/// (its default is 30 s, long enough for a page to take gigabytes).
+const MEMORY_POLL_SECS: f64 = 0.5;
+
+/// WebKit's memory limit for the web process (`WebKitMemoryPressureSettings`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct WebProcessMemoryLimit {
+    /// The limit, in MB (WebKit's unit).
+    mb: u32,
+}
+
+impl WebProcessMemoryLimit {
+    /// The settings for the web context: past the limit (a kill threshold of
+    /// 1, the limit itself) WebKit kills the web process and reports it as
+    /// [`WebProcessTerminationReason::ExceededMemoryLimit`], which
+    /// [`terminated`] words as running out of memory. Its conservative and
+    /// strict thresholds (a third and half of the limit by default) only
+    /// make it release caches sooner.
+    fn settings(self) -> MemoryPressureSettings {
+        let mut settings = MemoryPressureSettings::new();
+        settings.set_memory_limit(self.mb);
+        settings.set_kill_threshold(1.0);
+        settings.set_poll_interval(MEMORY_POLL_SECS);
+        settings
+    }
+}
+
+/// The web process limit for a worker capped at `cap` bytes: the same cap,
+/// in whole MB. `None` without a cap, or for one under a MB (WebKit refuses
+/// a zero limit). Pure.
+fn web_process_memory_limit(cap: Option<u64>) -> Option<WebProcessMemoryLimit> {
+    let mb = cap? / (1024 * 1024);
+    let mb = u32::try_from(mb).unwrap_or(u32::MAX);
+    (mb > 0).then_some(WebProcessMemoryLimit { mb })
+}
 
 /// Spin the default GLib main context until `done` says so or `limit`
 /// passes.
@@ -293,7 +345,12 @@ pub fn render(request: &RenderRequest) -> Result<(), String> {
     let data_manager = WebsiteDataManager::new_ephemeral();
     let mut proxy = NetworkProxySettings::new(Some(DEAD_PROXY), &[]);
     data_manager.set_network_proxy_settings(NetworkProxyMode::Custom, Some(&mut proxy));
-    let context = WebContext::with_website_data_manager(&data_manager);
+    let mut context = WebContext::builder().website_data_manager(&data_manager);
+    if let Some(limit) = web_process_memory_limit(memory_cap()) {
+        trace(format_args!("web process memory limit: {} MB", limit.mb));
+        context = context.memory_pressure_settings(&limit.settings());
+    }
+    let context = context.build();
     context.set_cache_model(webkit2gtk::CacheModel::DocumentViewer);
     let (page, base_dir) = (request.page.clone(), request.base_dir.clone());
     context.register_uri_scheme(super::MAC_DOC_SCHEME, move |req| {
@@ -535,6 +592,26 @@ mod tests {
         assert!(!guard.allows("pluryprint-doc://doc.pluryprint.example/other.html"));
         assert!(guard.allows("pluryprint-doc://DOC.pluryprint.example/.pluryprint-stage/page.html"));
         assert!(!guard.allows(page), "a refresh to the page is refused");
+    }
+
+    /// The web process is held to the worker's own cap, in MB; no cap, no
+    /// limit.
+    #[test]
+    fn nfr_security_the_web_process_memory_limit_is_the_workers_cap() {
+        assert_eq!(
+            web_process_memory_limit(Some(2 * 1024 * 1024 * 1024)),
+            Some(WebProcessMemoryLimit { mb: 2048 })
+        );
+        assert_eq!(
+            web_process_memory_limit(Some(64 * 1024 * 1024 + 5)),
+            Some(WebProcessMemoryLimit { mb: 64 })
+        );
+        assert_eq!(web_process_memory_limit(Some(1000)), None);
+        assert_eq!(web_process_memory_limit(None), None);
+        assert_eq!(
+            web_process_memory_limit(Some(u64::MAX)),
+            Some(WebProcessMemoryLimit { mb: u32::MAX })
+        );
     }
 
     /// Running out of memory reads as one to the engine; a crash does not.

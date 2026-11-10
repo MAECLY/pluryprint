@@ -980,3 +980,129 @@ fn fr_055_without_a_display_the_worker_fails_fast_and_says_why() {
     assert!(!dir.path().join("out.pdf").exists());
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+
+/// A 1-bit greyscale PNG of `side` × `side` blank pixels: a few dozen KB on
+/// disk, `side`² × 4 bytes once the web view decodes it.
+#[cfg(target_os = "linux")]
+fn png_bomb(path: &Path, side: u32) {
+    use std::io::Write;
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let mut crc = flate2::Crc::new();
+        crc.update(kind);
+        crc.update(data);
+        out.extend_from_slice(&crc.sum().to_be_bytes());
+    }
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&side.to_be_bytes());
+    ihdr.extend_from_slice(&side.to_be_bytes());
+    ihdr.extend_from_slice(&[1, 0, 0, 0, 0]); // 1-bit greyscale
+    let row = vec![0u8; 1 + (side as usize).div_ceil(8)];
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    for _ in 0..side {
+        z.write_all(&row).unwrap();
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    chunk(&mut png, b"IHDR", &ihdr);
+    chunk(&mut png, b"IDAT", &z.finish().unwrap());
+    chunk(&mut png, b"IEND", &[]);
+    std::fs::write(path, png).unwrap();
+}
+
+/// The page every memory test prints: a 20 000 px square image, which the
+/// web process decodes into 1.6 GB and holds twice over while it paints
+/// (measured: 3.2 GB of resident set, under Xvfb). Scripts are off in the
+/// worker, so a page cannot allocate from JavaScript; an image is how a page
+/// takes memory without one.
+#[cfg(target_os = "linux")]
+fn memory_bomb_page(dir: &Path) -> PathBuf {
+    png_bomb(&dir.join("bomb.png"), 20_000);
+    let page = dir.join("bomb.html");
+    std::fs::write(
+        &page,
+        "<!doctype html><meta charset=\"utf-8\"><p>bomb</p>\
+         <img src=\"bomb.png\" style=\"width:20000px;height:20000px\">",
+    )
+    .unwrap();
+    page
+}
+
+/// ADR-0014, round 7, on Linux, with the real worker: a page whose web
+/// process outgrows the render cap is stopped by the engine's watchdog over
+/// the worker's tree (the web process is the worker's child, not the worker
+/// itself) and the job fails with the terminal `page_too_large`, naming the
+/// cap, in well under the conversion timeout.
+#[cfg(target_os = "linux")]
+#[test]
+fn nfr_security_a_page_over_the_render_cap_is_stopped_as_page_too_large() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let page = memory_bomb_page(dir.path());
+    let started = Instant::now();
+    let err = convert(&page, &a4()).unwrap_err();
+    match &err {
+        EngineError::ConversionFailed(f) => {
+            assert_eq!(f.reason, Some("page_too_large"), "{f:?}");
+            assert_eq!(f.params["limit"], "2048", "{f:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(60));
+}
+
+/// The same page, with the worker started by hand under a 1 GB cap and no
+/// engine watching it (a crashed app): WebKit's own limit, which the worker
+/// sets to its cap, kills the web process, and the worker says it ran out of
+/// memory in the words the engine reads as `page_too_large`.
+#[cfg(target_os = "linux")]
+#[test]
+fn nfr_security_webkits_own_limit_holds_the_web_process_without_a_watchdog() {
+    if !can_render() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let page = memory_bomb_page(dir.path());
+    // The bare worker serves the page from its stage path: the image needs
+    // the document folder as its base, which the engine's staging adds.
+    let html = std::fs::read_to_string(&page).unwrap().replace(
+        "<p>bomb",
+        &format!(
+            "<base href=\"{}\"><p>bomb",
+            pluryprint_lib::render::base_href(dir.path())
+        ),
+    );
+    std::fs::write(&page, html).unwrap();
+    let started = Instant::now();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pluryprint"))
+        .args(["--worker", "render-pdf", "--page"])
+        .arg(&page)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--out")
+        .arg(dir.path().join("out.pdf"))
+        .arg("--data")
+        .arg(dir.path().join("webview"))
+        .env(
+            pluryprint_lib::engine::convert::process::MEMORY_CAP_ENV,
+            (1024u64 * 1024 * 1024).to_string(),
+        )
+        .env("PLURYPRINT_RENDER_TRACE", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("memory allocation of") && stderr.contains("failed"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("web process memory limit: 1024 MB"),
+        "{stderr}"
+    );
+    assert!(!dir.path().join("out.pdf").exists());
+    assert!(started.elapsed() < Duration::from_secs(60));
+}
