@@ -2,7 +2,7 @@
 
 > **TL;DR.** Pluryprint does not collect telemetry, does not phone home, does not transmit your file contents, and does not have user accounts. The only network call it makes by default is an update **check** that reads a small manifest (`latest.json`) from Pluryprint's GitHub releases — no binary, no identifiers, no payload. An update is downloaded only when you choose **Install now** (or run `pluryprint update install`). **This version transmits nothing else at all: there is no crash reporter and no usage-metrics reporter in the shipped code**, opt-in or otherwise. Logs stay on your machine.
 
-This document describes what data Pluryprint collects, transmits, stores, and shares — which is nearly nothing. It is current as of **2026-10-10** and applies to all installed versions of Pluryprint on Windows and macOS.
+This document describes what data Pluryprint collects, transmits, stores, and shares — which is nearly nothing. It is current as of **2026-11-09** and applies to all installed versions of Pluryprint on Windows and macOS, and on Linux (a preview platform from 0.0.5).
 
 ## Our principles
 
@@ -58,7 +58,7 @@ There is exactly one kind of outbound network call Pluryprint makes by default, 
 - It does not download or install updates unless you ask it to (see above).
 - It does not fetch fonts, scripts, styles or images from any CDN — the webview loads only the bundled app, and the one font it uses ships inside the bundle.
 - It does not check for updates of external converters.
-- It does not install a missing converter on its own. **Install…** on the Print Job screen shows the exact command (`winget`, `brew`), Store page or download page first, and runs or opens it only after you confirm; winget, Homebrew, the Microsoft Store or your browser then make their own requests.
+- It does not install a missing converter on its own. **Install…** on the Print Job screen shows the exact command (`winget`, `brew`), Store page or download page first, and runs or opens it only after you confirm; winget, Homebrew, the Microsoft Store or your browser then make their own requests. On Linux it only ever offers a web page, which your browser opens.
 - A file being printed cannot reach the network: HTML, Markdown and text pages are printed with scripts off and every request refused, SVG drawings load nothing remote, and LibreOffice's private profile blocks linked pictures and objects and points its own HTTP at a dead proxy. On Windows none of them opens a file share either, so printing a document cannot hand your Windows credentials to another machine.
 - It does not contact printer manufacturers' cloud services.
 - It does not contact `maecly.com` on its own. The **About** screen and the "report an issue" button open links in your normal browser when *you* click them; that is your browser making the request, not the app, and only `github.com`, `maecly.com` and `*.maecly.com` over HTTPS are accepted as link targets.
@@ -91,6 +91,18 @@ These are the real file names and locations, as resolved by `src-tauri/src/util/
 | Logs | `%LOCALAPPDATA%\Maecly\Pluryprint\data\logs\pluryprint-<date>.jsonl` | `~/Library/Logs/Pluryprint/pluryprint-<date>.jsonl` | JSON-lines tracing output. **May include file paths** of jobs you printed. Rolls on a new UTC day or at 10 MB, whichever comes first; a sweep at startup and on every roll deletes anything older than 14 days and then keeps only the 7 newest files. |
 | Enterprise policy (read-only) | `%ProgramData%\Pluryprint\policy.json` | `/Library/Application Support/Pluryprint/policy.json` | Provisioned by an administrator; the app only ever reads it. |
 
+On **Linux** the same files follow the XDG Base Directory specification (each folder moves with its `XDG_CONFIG_HOME`, `XDG_DATA_HOME` or `XDG_CACHE_HOME` variable):
+
+| Data | Linux |
+|---|---|
+| Settings, profiles | `~/.config/pluryprint/config.toml`, `profiles.toml` |
+| Print queue, update bookkeeping | `~/.local/share/pluryprint/queue.json`, `update-state.json` |
+| Converted PDFs | `~/.cache/pluryprint/conversions/` |
+| Logs | `~/.local/share/pluryprint/logs/pluryprint-<date>.jsonl` |
+| Enterprise policy (read-only) | `/etc/pluryprint/policy.json` |
+
+The AppImage and the `.deb` use the same folders, and removing either package leaves them in place; delete them by hand to remove every trace.
+
 If you used the app under its former name, MaeclyPrint, the same files lived in folders named `MaeclyPrint` (for example `~/Library/Application Support/com.Maecly.MaeclyPrint/`). The first launch of Pluryprint moves them to the locations above, on your machine, without sending anything anywhere, and never overwrites a file that is already there.
 
 This data stays on your device. We never transmit it. You can inspect or delete any of it manually at any time. Uninstalling the app prompts you to delete this data; the default is to preserve it (in case you reinstall).
@@ -100,7 +112,7 @@ This data stays on your device. We never transmit it. You can inspect or delete 
 When Pluryprint prints a file:
 
 - The file is read from disk by Pluryprint.
-- If it is not already a PDF, it is converted to one — images are converted **inside Pluryprint itself** (no external tool involved). HEIC photos are decoded by your operating system (`sips` on macOS, Windows Imaging Component on Windows). SVG drawings, Markdown and plain text are also converted inside Pluryprint. HTML, Markdown and text pages are paginated by your operating system's own web view (WebView2 on Windows, WebKit on macOS) in a hidden Pluryprint worker process. Office and OpenDocument files (and RTF on Windows) are handed to LibreOffice, installed on your machine, which runs as a normal subprocess under your user account with a private, temporary profile that is deleted afterwards.
+- If it is not already a PDF, it is converted to one — images are converted **inside Pluryprint itself** (no external tool involved). HEIC photos are decoded by your operating system (`sips` on macOS, Windows Imaging Component on Windows) or, on Linux, by a decoder you installed (libheif's `heif-dec` or `heif-convert`, or ImageMagick), run as a normal subprocess under your user account. SVG drawings, Markdown and plain text are also converted inside Pluryprint. HTML, Markdown and text pages are paginated by your operating system's own web view (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux) in a hidden Pluryprint worker process. Office and OpenDocument files (and RTF on Windows and Linux) are handed to LibreOffice, installed on your machine, which runs as a normal subprocess under your user account with a private, temporary profile that is deleted afterwards.
 - A **PDF password** you type is used only to decrypt that file for that print job. It is never written to disk, to a log or to a command line, and is forgotten when the job ends; the decrypted copy lives in Pluryprint's cache and is deleted with the job.
 - The resulting PDF is handed to the printing backend: SumatraPDF on Windows, the CUPS `lp` command on macOS/Linux.
 - The rendered output is sent to your printer (via the OS print spooler).
