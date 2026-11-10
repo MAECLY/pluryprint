@@ -407,6 +407,10 @@ done"#,
         assert_eq!(pages_of(&output), 1);
     }
 
+    /// The smallest file the HEIF header check lets through to a decoder: an
+    /// `ftyp` naming `heic` with `mif1` and `heic` compatible.
+    const HEIF_HEADER: &[u8] = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+
     /// A fake external HEIF decoder named `name` that records its argv and
     /// "decodes" by copying a real PNG to `target(argv)`, a shell expression.
     fn fake_heif_decoder(dir: &Path, name: &str, argv_log: &Path, target: &str) -> PathBuf {
@@ -432,14 +436,14 @@ cp '{png}' {target}"#,
     #[test]
     fn fr_052_external_heif_decoders_turn_their_png_into_a_one_page_pdf() {
         for (name, target, expect_in, expect_out) in [
-            ("heif-convert", r#""$2""#, "{in}", "{png}"),
+            ("heif-convert", r#""$2""#, "{staged}", "{png}"),
             ("magick", r#""${2#png:}""#, "heic:{staged}[0]", "png:{png}"),
         ] {
             let dir = tempfile::tempdir().unwrap();
             let log = dir.path().join("argv");
             let decoder = fake_heif_decoder(dir.path(), name, &log, target);
             let heic = dir.path().join("IMG 0001.HEIC");
-            std::fs::write(&heic, b"\0\0\0\x18ftypheic").unwrap();
+            std::fs::write(&heic, HEIF_HEADER).unwrap();
             let output = dir.path().join("o.pdf");
             let work = WorkDir::new("job").unwrap();
             heif::convert_with_external(
@@ -454,9 +458,11 @@ cp '{png}' {target}"#,
             .unwrap_or_else(|e| panic!("{name}: {e:?}"));
             assert_eq!(pages_of(&output), 1, "{name}");
             let png = work.path().join("heif.png").display().to_string();
-            let input = heic.display().to_string();
-            // ImageMagick gets a copy under a fixed name, never the original.
-            let staged = work.path().join("input.heic").display().to_string();
+            // Each decoder gets the private copy the header check read,
+            // under a fixed name, never the original.
+            let staged = work.path().join("input.heic");
+            assert_eq!(std::fs::read(&staged).unwrap(), HEIF_HEADER, "{name}");
+            let staged = staged.display().to_string();
             let argv: Vec<String> = std::fs::read_to_string(&log)
                 .unwrap()
                 .lines()
@@ -465,9 +471,7 @@ cp '{png}' {target}"#,
             assert_eq!(
                 argv,
                 [
-                    expect_in
-                        .replace("{in}", &input)
-                        .replace("{staged}", &staged),
+                    expect_in.replace("{staged}", &staged),
                     expect_out.replace("{png}", &png)
                 ],
                 "{name}"
@@ -482,7 +486,7 @@ cp '{png}' {target}"#,
         let dir = tempfile::tempdir().unwrap();
         let decoder = script(dir.path(), "heif-convert", "echo 'bad file' >&2");
         let heic = dir.path().join("x.heic");
-        std::fs::write(&heic, b"x").unwrap();
+        std::fs::write(&heic, HEIF_HEADER).unwrap();
         let work = WorkDir::new("job").unwrap();
         let err = heif::convert_with_external(
             &decoder,
@@ -509,7 +513,7 @@ cp '{png}' {target}"#,
     fn fr_058_a_vanished_external_decoder_pauses_with_its_remediation() {
         let dir = tempfile::tempdir().unwrap();
         let heic = dir.path().join("x.heic");
-        std::fs::write(&heic, b"x").unwrap();
+        std::fs::write(&heic, HEIF_HEADER).unwrap();
         let work = WorkDir::new("job").unwrap();
         let err = heif::convert_with_external(
             &dir.path().join("heif-dec"),

@@ -21,7 +21,8 @@
 //!   `heif-decoder` remediation.
 //!
 //! On Linux the decoder is a program the app did not choose and cannot pin,
-//! so what reaches it is narrowed twice ([`convert_external`]): the file must
+//! so what reaches it is narrowed twice ([`convert_with_external`]): the
+//! file is copied into the private conversion folder and that copy must
 //! start with an ISO-BMFF `ftyp` box naming a HEIF brand ([`header`]) before
 //! any process starts, and ImageMagick runs under a security policy that
 //! allows nothing but reading HEIC/HEIF and writing PNG
@@ -31,7 +32,7 @@
 pub mod header;
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -114,10 +115,10 @@ impl ExternalDecoder {
     /// file's content, so a hostile `.heic` that is really an SVG, a
     /// PostScript file or anything else would reach that coder or its
     /// delegate program. ImageMagick also expands `*`, `?` and `[…]` in a
-    /// file name, so it is only ever given the copy [`stage_input`] makes
-    /// under a fixed name. Neither decoder is asked to rotate: libheif
-    /// already applies the HEIF orientation while decoding, and rotating
-    /// again by the EXIF tag would turn the photo twice.
+    /// file name; both decoders are only ever given the copy
+    /// [`stage_input`] makes under a fixed name. Neither decoder is asked to
+    /// rotate: libheif already applies the HEIF orientation while decoding,
+    /// and rotating again by the EXIF tag would turn the photo twice.
     pub fn args(self, input: &Path, png: &Path) -> Vec<String> {
         let input = input.to_string_lossy().into_owned();
         let png = png.to_string_lossy().into_owned();
@@ -126,32 +127,42 @@ impl ExternalDecoder {
             Self::ImageMagick => vec![format!("heic:{input}[0]"), format!("png:{png}")],
         }
     }
+}
 
-    /// The file this decoder is given for `input`: the original for libheif,
-    /// which takes a path as it is; for ImageMagick a copy in the work folder
-    /// named `input.heic` (see [`ExternalDecoder::args`]).
-    fn stage_input(self, input: &Path, work: &WorkDir) -> Result<std::path::PathBuf, EngineError> {
-        match self {
-            Self::Libheif => Ok(input.to_path_buf()),
-            Self::ImageMagick => {
-                let staged = work.path().join("input.heic");
-                std::fs::copy(input, &staged).map_err(|e| {
-                    EngineError::ConversionFailed(Failure::new(
-                        "workdir_failed",
-                        format!("cannot prepare the conversion folder: {e}"),
-                    ))
-                })?;
-                Ok(staged)
-            }
-        }
-    }
+/// The name of the private copy every external decoder is given.
+const STAGED_NAME: &str = "input.heic";
+
+/// Copy `input` into `work` (mode 0700, this conversion's own) as
+/// [`STAGED_NAME`] and return the copy's path.
+///
+/// Everything after this reads the copy, never `input` again: the header
+/// check and the decoder see the same bytes, so a file swapped or rewritten
+/// at the original path after the check cannot reach a decoder. A file
+/// that cannot be read is `cannot_read_input`; a copy that cannot be
+/// written is `workdir_failed`.
+fn stage_input(input: &Path, work: &WorkDir) -> Result<PathBuf, EngineError> {
+    let staged = work.path().join(STAGED_NAME);
+    let mut source = std::fs::File::open(input).map_err(|e| header::unreadable(input, &e))?;
+    let workdir_failed = |e: std::io::Error| {
+        EngineError::ConversionFailed(Failure::new(
+            "workdir_failed",
+            format!("cannot prepare the conversion folder: {e}"),
+        ))
+    };
+    let mut copy = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staged)
+        .map_err(workdir_failed)?;
+    std::io::copy(&mut source, &mut copy).map_err(workdir_failed)?;
+    Ok(staged)
 }
 
 /// The PNG an external decoder wrote for `png`. libheif writes one file per
 /// top-level image and numbers them (`heif-1.png`, `heif-2.png`…) when the
 /// file holds more than one; the first is the photo. `None` when it wrote
 /// nothing.
-fn decoded_png(png: &Path) -> Option<std::path::PathBuf> {
+fn decoded_png(png: &Path) -> Option<PathBuf> {
     if png.is_file() {
         return Some(png.to_path_buf());
     }
@@ -204,36 +215,23 @@ pub fn imagemagick_policy_env(
 pub const EXTERNAL_DECODER_MEMORY_CAP: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Convert `input` with the external decoder at `decoder` (Linux), writing
-/// the PDF to `output`, once its header says it is a HEIF file.
+/// the PDF to `output`, once its header says it is a HEIF file. The only
+/// way a decoder is started.
 ///
-/// The header is checked first ([`header::check`], a bounded read): a file
-/// that is not HEIF whatever its name (an SVG, an MVG or PostScript program,
-/// a PBM, an empty or truncated file) is `heif_decode_failed` and no decoder
-/// process is started. This is the entry point the engine uses.
-pub fn convert_external(
-    decoder: &Path,
-    input: &Path,
-    output: &Path,
-    work: &WorkDir,
-    cancel: &AtomicBool,
-    timeout: Option<Duration>,
-    progress: &(dyn Fn(f32) + Send + Sync),
-) -> Result<(), EngineError> {
-    header::check(input)?;
-    convert_with_external(decoder, input, output, work, cancel, timeout, progress)
-}
-
-/// Convert with the external decoder at `decoder` (Linux), writing the PDF
-/// to `output`, without looking at the file first: the decoder plumbing
-/// alone. Callers go through [`convert_external`], which refuses a file that
-/// is not HEIF before this starts anything. ImageMagick runs under
-/// [`MAGICK_POLICY`].
+/// `input` is first copied into the private conversion folder
+/// ([`stage_input`]); the copy's header is checked ([`header::check_as`], a
+/// bounded read) and only the copy is handed to the decoder, so what was
+/// checked is what is decoded. A file that is not HEIF whatever its name
+/// (an SVG, an MVG or PostScript program, a PBM, an empty or truncated
+/// file) is `heif_decode_failed`, its copy is removed and no decoder process
+/// is started. ImageMagick runs under [`MAGICK_POLICY`].
 ///
 /// A decoder that disappeared between being found and being started pauses
 /// the job like a missing one (`heif-decoder`); one that runs and writes no
 /// image, or needs more than [`EXTERNAL_DECODER_MEMORY_CAP`], could not read
 /// the file (`heif_decode_failed`).
-pub fn convert_with_external(
+#[cfg_attr(any(target_os = "macos", windows), allow(dead_code))]
+pub(super) fn convert_with_external(
     decoder: &Path,
     input: &Path,
     output: &Path,
@@ -242,11 +240,15 @@ pub fn convert_with_external(
     timeout: Option<Duration>,
     progress: &(dyn Fn(f32) + Send + Sync),
 ) -> Result<(), EngineError> {
+    let staged = stage_input(input, work)?;
+    if let Err(e) = header::check_as(&staged, input) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(e);
+    }
     // Anything that is not a known decoder is treated as libheif's
     // interface, the simplest one.
     let kind = ExternalDecoder::of(decoder).unwrap_or(ExternalDecoder::Libheif);
     let png = work.path().join("heif.png");
-    let staged = kind.stage_input(input, work)?;
     let mut cmd = crate::util::appimage::host_command(decoder);
     cmd.args(kind.args(&staged, &png)).current_dir(work.path());
     if kind == ExternalDecoder::ImageMagick {
@@ -491,7 +493,7 @@ pub fn convert(
                 spec.remediation(),
             )));
         };
-        convert_external(decoder, input, output, work, cancel, timeout, progress)
+        convert_with_external(decoder, input, output, work, cancel, timeout, progress)
     }
 }
 
@@ -784,8 +786,7 @@ mod tests {
     /// `ETXTBSY`. A probe run (`FAKE_PROBE`, which exits before leaving any
     /// trace) is retried until it starts.
     #[cfg(unix)]
-    fn fake_decoder(dir: &Path, name: &str) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
+    fn fake_decoder(dir: &Path, name: &str) -> PathBuf {
         let png = dir.join("real.png");
         ::image::RgbImage::from_pixel(4, 3, ::image::Rgb([10, 200, 10]))
             .save_with_format(&png, ::image::ImageFormat::Png)
@@ -804,21 +805,30 @@ cp '{png}' "${{last#png:}}"
             env = dir.join("env").display(),
             png = png.display(),
         );
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_fake(&path, &body)
+    }
+
+    /// Write the `/bin/sh` script `body` (which must exit at once, leaving
+    /// nothing behind, when `FAKE_PROBE` is set) to `path` as an executable,
+    /// and return `path` once it can be started (see [`fake_decoder`]).
+    #[cfg(unix)]
+    fn write_fake(path: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         for _ in 0..100 {
-            match std::process::Command::new(&path)
+            match std::process::Command::new(path)
                 .env("FAKE_PROBE", "1")
                 .status()
             {
-                Ok(status) if status.success() => return path,
+                Ok(status) if status.success() => return path.to_path_buf(),
                 Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
                     std::thread::sleep(Duration::from_millis(20))
                 }
-                other => panic!("the fake {name} does not start: {other:?}"),
+                other => panic!("{} does not start: {other:?}", path.display()),
             }
         }
-        panic!("the fake {name} stayed busy");
+        panic!("{} stayed busy", path.display());
     }
 
     /// A `.heic` that is really something else, or no HEIF at all.
@@ -852,7 +862,7 @@ cp '{png}' "${{last#png:}}"
     /// as a damaged photo before any decoder process starts, through each
     /// kind of decoder; a real HEIF header does reach the decoder (the fake
     /// would have recorded every refused start), and ImageMagick is started
-    /// with the policy.
+    /// with the policy. The header checked is the private copy's.
     #[cfg(unix)]
     #[test]
     fn nfr_security_a_disguised_heic_never_reaches_a_decoder() {
@@ -864,7 +874,7 @@ cp '{png}' "${{last#png:}}"
                 std::fs::write(&input, &bytes).unwrap();
                 let output = dir.path().join("o.pdf");
                 let work = WorkDir::new("disguised").unwrap();
-                let err = convert_external(
+                let err = convert_with_external(
                     &decoder,
                     &input,
                     &output,
@@ -877,7 +887,9 @@ cp '{png}' "${{last#png:}}"
                 assert!(
                     matches!(&err, EngineError::ConversionFailed(f)
                         if f.reason == Some("heif_decode_failed")
-                            && f.contains("not a HEIC/HEIF photo")),
+                            && f.contains("not a HEIC/HEIF photo")
+                            // The user's file is named, not the copy.
+                            && f.contains("IMG_0001.HEIC")),
                     "{name}, {what}: {err:?}"
                 );
                 assert!(
@@ -885,7 +897,8 @@ cp '{png}' "${{last#png:}}"
                     "{name} was started for a disguised {what}"
                 );
                 assert!(!output.exists(), "{name}, {what}");
-                // Nothing was staged or prepared for a decoder either.
+                // The staged copy was removed and nothing was prepared for a
+                // decoder.
                 assert_eq!(
                     std::fs::read_dir(work.path()).unwrap().count(),
                     0,
@@ -898,7 +911,7 @@ cp '{png}' "${{last#png:}}"
             std::fs::write(&input, b"\0\0\0\x18ftypheic\0\0\0\0mif1heic").unwrap();
             let output = dir.path().join("o.pdf");
             let work = WorkDir::new("heif").unwrap();
-            convert_external(
+            convert_with_external(
                 &decoder,
                 &input,
                 &output,
@@ -925,6 +938,56 @@ cp '{png}' "${{last#png:}}"
                 assert_eq!((config, temp), ("unset", "unset"), "{name}");
             }
         }
+    }
+
+    /// NFR-security (TOCTOU): the header check and the decoder read the same
+    /// private copy. A fake decoder that swaps the user's file for an SVG the
+    /// moment it starts still finds the HEIF bytes that were checked, at the
+    /// staged path, and never the original's path in its argv.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_the_decoder_reads_the_copy_the_header_check_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("IMG_0003.HEIC");
+        let header = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+        std::fs::write(&input, header).unwrap();
+        let png = dir.path().join("real.png");
+        ::image::RgbImage::from_pixel(2, 2, ::image::Rgb([1, 2, 3]))
+            .save_with_format(&png, ::image::ImageFormat::Png)
+            .unwrap();
+        let decoder = write_fake(
+            &dir.path().join("heif-convert"),
+            &format!(
+                r#"#!/bin/sh
+[ -n "$FAKE_PROBE" ] && exit 0
+printf '<svg/>' > '{input}'
+printf '%s\n' "$1" > '{argv}'
+cp "$1" '{seen}'
+cp '{png}' "$2"
+"#,
+                input = input.display(),
+                argv = dir.path().join("argv").display(),
+                seen = dir.path().join("seen").display(),
+                png = png.display(),
+            ),
+        );
+        let work = WorkDir::new("toctou").unwrap();
+        let output = dir.path().join("o.pdf");
+        convert_with_external(
+            &decoder,
+            &input,
+            &output,
+            &work,
+            &AtomicBool::new(false),
+            None,
+            &|_| {},
+        )
+        .unwrap();
+        let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+        assert_eq!(Path::new(argv.trim_end()), work.path().join(STAGED_NAME));
+        assert_eq!(std::fs::read(dir.path().join("seen")).unwrap(), header);
+        assert_eq!(std::fs::read(&input).unwrap(), b"<svg/>");
+        assert_eq!(pages_of(&output), 1);
     }
 
     /// The policy closes every domain before opening the one use, in the
@@ -969,7 +1032,7 @@ cp '{png}' "${{last#png:}}"
     /// A HEIC made by the local ImageMagick (which encodes through libheif),
     /// or `None` with a note.
     #[cfg(target_os = "linux")]
-    fn real_heic(dir: &Path) -> Option<std::path::PathBuf> {
+    fn real_heic(dir: &Path) -> Option<PathBuf> {
         let png = dir.join("photo.png");
         let mut img = ::image::RgbImage::new(64, 48);
         for (x, y, px) in img.enumerate_pixels_mut() {
@@ -1000,7 +1063,7 @@ cp '{png}' "${{last#png:}}"
 
     /// An installed program named `name` on `PATH`.
     #[cfg(target_os = "linux")]
-    fn on_path(name: &str) -> Option<std::path::PathBuf> {
+    fn on_path(name: &str) -> Option<PathBuf> {
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::split_paths(&path)
             .map(|d| d.join(name))
@@ -1026,7 +1089,7 @@ cp '{png}' "${{last#png:}}"
             };
             let output = dir.path().join(format!("{name}.pdf"));
             let work = WorkDir::new(name).unwrap();
-            convert_external(
+            convert_with_external(
                 &decoder,
                 &heic,
                 &output,

@@ -97,34 +97,43 @@ pub fn check_prefix(prefix: &[u8]) -> Result<(), NotHeif> {
     }
 }
 
-/// Refuse `input` unless its header is a HEIF one ([`check_prefix`]),
-/// reading at most [`PREFIX_LEN`] bytes. A file that cannot be opened or read
-/// is `cannot_read_input`; one that is not HEIF is `heif_decode_failed`.
-pub fn check(input: &Path) -> Result<(), EngineError> {
+/// The `cannot_read_input` failure for `input`, which could not be opened or
+/// read (`e`).
+pub(crate) fn unreadable(input: &Path, e: &std::io::Error) -> EngineError {
     let name = input
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let unreadable = |e: std::io::Error| {
-        EngineError::ConversionFailed(
-            Failure::new(
-                "cannot_read_input",
-                format!("cannot read {}: {e}", input.display()),
-            )
-            .param("file", &name),
+    EngineError::ConversionFailed(
+        Failure::new(
+            "cannot_read_input",
+            format!("cannot read {}: {e}", input.display()),
         )
-    };
-    let file = std::fs::File::open(input).map_err(unreadable)?;
+        .param("file", name),
+    )
+}
+
+/// Refuse `input` unless its header is a HEIF one ([`check_prefix`]),
+/// reading at most [`PREFIX_LEN`] bytes. A file that cannot be opened or read
+/// is `cannot_read_input`; one that is not HEIF is `heif_decode_failed`.
+pub fn check(input: &Path) -> Result<(), EngineError> {
+    check_as(input, input)
+}
+
+/// [`check`] on `file`, the private copy of the user's `shown`, which the
+/// failure names instead (the copy's own name means nothing to the user).
+pub fn check_as(file: &Path, shown: &Path) -> Result<(), EngineError> {
+    let file = std::fs::File::open(file).map_err(|e| unreadable(shown, &e))?;
     let mut prefix = Vec::with_capacity(PREFIX_LEN);
     file.take(PREFIX_LEN as u64)
         .read_to_end(&mut prefix)
-        .map_err(unreadable)?;
+        .map_err(|e| unreadable(shown, &e))?;
     check_prefix(&prefix).map_err(|why| {
         EngineError::ConversionFailed(Failure::new(
             "heif_decode_failed",
             format!(
                 "{} is not a HEIC/HEIF photo: {}",
-                input.display(),
+                shown.display(),
                 why.describe()
             ),
         ))
