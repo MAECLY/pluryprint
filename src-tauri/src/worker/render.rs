@@ -16,6 +16,16 @@
 //! ([`crate::engine::convert::process::apply_memory_cap`]), as the SVG worker
 //! does: on Windows it waits until it is inside the parent's Job Object,
 //! whose limit covers the web view's processes too.
+//!
+//! Linux is the exception: the worker does not lower its own `RLIMIT_DATA`.
+//! WebKitGTK's JavaScript engine reserves several gigabytes of writable
+//! address space when it starts, scripts off or not, and `RLIMIT_DATA`
+//! counts reservations, not memory in use: under the 2 GB render cap the
+//! worker aborted before it loaded anything (measured: it needs between 4
+//! and 8 GB of it for a one-line page). There, as on macOS, the cap is the
+//! parent's watchdog over the worker's whole process group, the web
+//! process included ([`crate::engine::convert::process::run_capped`],
+//! `CapScope::Tree`).
 
 use std::ffi::OsString;
 
@@ -30,7 +40,9 @@ pub fn run(args: &[OsString]) -> i32 {
             return super::EXIT_USAGE;
         }
     };
-    // ADR-0014: the memory cap is in force before the page is read.
+    // ADR-0014: the memory cap is in force before the page is read (on
+    // Linux the parent's watchdog alone; module docs).
+    #[cfg(not(target_os = "linux"))]
     if let Err(e) = crate::engine::convert::process::apply_memory_cap() {
         eprintln!("pluryprint worker render-pdf: could not apply the memory limit: {e}");
         return super::EXIT_FAILED;
