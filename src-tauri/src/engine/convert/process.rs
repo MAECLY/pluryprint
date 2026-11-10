@@ -226,11 +226,31 @@ pub fn wait_bounded(
 /// helpers with it. Windows needs nothing up front: `taskkill /T` walks the
 /// tree by parent pid. The Windows console window is suppressed so a
 /// conversion does not flash a terminal in the user's face.
+///
+/// On Linux the child is also made the subreaper of everything it starts
+/// (`PR_SET_CHILD_SUBREAPER`, kept across `exec`): a helper whose parent
+/// exits (a double fork) is adopted by the child instead of by init, so it
+/// stays the child's descendant and [`tree::TreeSampler`] still finds it by
+/// its parent link, even after a `setsid` took it out of the group.
 pub(crate) fn isolate_process_tree(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: runs in the forked child before exec; prctl is a single
+        // async-signal-safe syscall that touches no memory of ours. Best
+        // effort: a kernel without it (before 3.4) leaves the old
+        // behaviour, an orphan adopted by init.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+                Ok(())
+            });
+        }
     }
     #[cfg(windows)]
     {
@@ -508,9 +528,12 @@ pub enum CapScope {
 ///     group (`setsid`, `bwrap --new-session`) is still counted. Which
 ///     processes belong is refreshed every [`TREE_SCAN_EVERY`] polls; the
 ///     resident set of each one already known is read on every poll, so a
-///     known helper cannot grow past the cap between two refreshes. A
-///     process stays a member once found, even after its parent exits (a
-///     double fork), until it exits itself; a pid the kernel reused for
+///     known helper cannot grow past the cap between two refreshes. The
+///     child is the subreaper of its tree ([`isolate_process_tree`]), so a
+///     helper whose parent exits (a double fork) is adopted by the child
+///     and found by the next walk while the child lives. A
+///     process stays a member once found, even after its parent exits,
+///     until it exits itself; a pid the kernel reused for
 ///     another process is told apart by its start time. Past the cap, on a
 ///     cancel or a timeout, the tree is frozen (every member stopped until
 ///     no new one appears) and then every member is killed, as well as the
@@ -964,11 +987,37 @@ pub(crate) mod tree {
     /// stopped, so this bounds only a tree that keeps out-forking the walk.
     const FREEZE_ROUNDS: usize = 32;
 
+    /// Whether [`signal_member`] falls back to a checked `kill` after
+    /// `pidfd_open` failed with `errno`: when the kernel has no pidfds
+    /// (`ENOSYS`, before 5.3) or none can be had now (`EMFILE`, `ENFILE`,
+    /// `ENOMEM`). A member stopped by the freeze and then left unsignalled
+    /// would stay frozen for good. Only `ESRCH` (already gone) and the
+    /// like end there. Pure.
+    pub(crate) fn falls_back_to_kill(errno: Option<i32>) -> bool {
+        matches!(
+            errno,
+            Some(libc::ENOSYS | libc::EMFILE | libc::ENFILE | libc::ENOMEM)
+        )
+    }
+
+    /// Send `signal` to `pid` with a plain `kill` if it is still the
+    /// process that started at `start`, checked just before (a pid reused
+    /// between the check and the signal is the one gap left).
+    pub(crate) fn kill_checked((pid, start): Member, signal: libc::c_int) {
+        let Ok(raw) = libc::pid_t::try_from(pid) else {
+            return;
+        };
+        if read_stat(pid).is_some_and(|stat| stat.start == start) {
+            // SAFETY: kill has no memory preconditions.
+            unsafe { libc::kill(raw, signal) };
+        }
+    }
+
     /// Send `signal` to `pid` if it is still the process that started at
     /// `start`. Through a pidfd where the kernel has one (Linux 5.3): the
     /// descriptor pins the process, so the check and the signal are about
-    /// the same one even if it exits in between; otherwise a plain `kill`,
-    /// checked just before.
+    /// the same one even if it exits in between; otherwise, and when no
+    /// descriptor can be had ([`falls_back_to_kill`]), [`kill_checked`].
     pub(crate) fn signal_member((pid, start): Member, signal: libc::c_int) {
         let Ok(raw) = libc::pid_t::try_from(pid) else {
             return;
@@ -996,15 +1045,12 @@ pub(crate) mod tree {
                 unsafe { libc::close(fd as libc::c_int) };
                 return;
             }
-            if std::io::Error::last_os_error().raw_os_error() != Some(libc::ENOSYS) {
+            if !falls_back_to_kill(std::io::Error::last_os_error().raw_os_error()) {
                 // ESRCH: already gone.
                 return;
             }
         }
-        if same() {
-            // SAFETY: kill has no memory preconditions.
-            unsafe { libc::kill(raw, signal) };
-        }
+        kill_checked((pid, start), signal);
     }
 }
 
@@ -1621,6 +1667,83 @@ mod reason_tests {
         tree.kill_all();
         kill_tree(&mut child);
         assert!(!still_alive(perl), "the helper outlived the kill");
+    }
+
+    /// Security note 8 on Linux: a helper orphaned by a double fork, out of
+    /// the group too (`setsid`), is adopted by the capped child (its
+    /// subreaper), so a walk after the orphaning still finds it by its
+    /// parent link, and it is killed with the tree. Adopted by init, it was
+    /// no one's descendant we knew and outlived the kill.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_a_double_forked_orphan_stays_in_the_tree_and_dies_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("orphan");
+        // The subshell starts the helper and exits at once, orphaning it.
+        let script = format!(
+            "(setsid sleep 600 & echo $! > '{}'); sleep 30",
+            pid_file.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let leader = child.id();
+        let orphan: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        // Adopted once its parent subshell has gone.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let stat = loop {
+            let stat = tree::read_stat(orphan).expect("the orphan is alive");
+            if stat.ppid == leader || Instant::now() >= deadline {
+                break stat;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(stat.ppid, leader, "the orphan was not adopted by the child");
+        assert_ne!(stat.pgrp, leader, "setsid did not move the orphan out");
+
+        // A first walk made after the orphaning finds it.
+        let mut tree = tree::TreeSampler::new(leader);
+        tree.sample().expect("the walk finds the tree");
+        assert!(
+            tree.members().iter().any(|&(pid, _)| pid == orphan),
+            "{:?}",
+            tree.members()
+        );
+        tree.kill_all();
+        kill_tree(&mut child);
+        assert!(!still_alive(orphan), "the orphan outlived the kill");
+    }
+
+    /// A member is signalled even when no pidfd can be had (`EMFILE`,
+    /// `ENFILE`: too many open files), through a `kill` checked against its
+    /// start time, so a member the freeze stopped is never left frozen; a
+    /// pid that names another process now is left alone.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_a_member_is_signalled_without_a_pidfd() {
+        for errno in [libc::ENOSYS, libc::EMFILE, libc::ENFILE, libc::ENOMEM] {
+            assert!(tree::falls_back_to_kill(Some(errno)), "{errno}");
+        }
+        assert!(!tree::falls_back_to_kill(Some(libc::ESRCH)));
+        assert!(!tree::falls_back_to_kill(None));
+
+        let mut child = Command::new("sleep").arg("600").spawn().unwrap();
+        let pid = child.id();
+        let start = tree::read_stat(pid).unwrap().start;
+        // Another start time: not this process, not signalled.
+        tree::kill_checked((pid, start + 1), libc::SIGKILL);
+        assert!(child.try_wait().unwrap().is_none());
+        tree::kill_checked((pid, start), libc::SIGSTOP);
+        tree::kill_checked((pid, start), libc::SIGKILL);
+        let status = child.wait().unwrap();
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(libc::SIGKILL)
+        );
     }
 
     /// Security note 8 on Linux: a member that keeps forking children into
