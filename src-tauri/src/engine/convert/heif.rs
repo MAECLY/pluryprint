@@ -132,32 +132,150 @@ impl ExternalDecoder {
 /// The name of the private copy every external decoder is given.
 const STAGED_NAME: &str = "input.heic";
 
-/// Copy `input` into `work` (mode 0700, this conversion's own) as
-/// [`STAGED_NAME`] and return the copy's path.
+/// How many bytes [`stage_input`] copies between two looks at the cancel
+/// flag and the deadline.
+const STAGE_CHUNK: usize = 64 * 1024;
+
+/// What stops [`stage_input`] early: the job's cancel flag (a user cancel, a
+/// pause, or the dispatcher's conversion timeout) and the converter's own
+/// `timeout`, counted from when staging started, as
+/// [`super::process::run_capped`] counts it for the decoder.
+struct StageStop<'a> {
+    cancel: &'a AtomicBool,
+    timeout: Option<Duration>,
+    started: Instant,
+    /// The decoder's name, for the timeout message.
+    label: &'a str,
+}
+
+impl StageStop<'_> {
+    fn check(&self) -> Result<(), EngineError> {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(EngineError::Cancelled);
+        }
+        if self
+            .timeout
+            .is_some_and(|limit| self.started.elapsed() >= limit)
+        {
+            return Err(super::process::timed_out_error(self.label, self.timeout));
+        }
+        Ok(())
+    }
+}
+
+/// `read`, retried while it is interrupted by a signal.
+fn read_some(source: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    loop {
+        match source.read(buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            other => return other,
+        }
+    }
+}
+
+/// Check `input`'s header and copy it into `work` (mode 0700, this
+/// conversion's own) as [`STAGED_NAME`]; return the copy's path.
 ///
-/// Everything after this reads the copy, never `input` again: the header
-/// check and the decoder see the same bytes, so a file swapped or rewritten
-/// at the original path after the check cannot reach a decoder. Only a
-/// regular file is copied ([`header::open_regular`]): a FIFO or a device
-/// named `.heic` would block the copy or never end it. A file that cannot
-/// be read, or is not a regular file, is `cannot_read_input`; a copy that
-/// cannot be written is `workdir_failed`.
-fn stage_input(input: &Path, work: &WorkDir) -> Result<PathBuf, EngineError> {
-    let staged = work.path().join(STAGED_NAME);
-    let mut source = header::open_regular(input).map_err(|e| header::unreadable(input, &e))?;
+/// Everything after this reads the copy, never `input` again, and the copy
+/// holds exactly the bytes whose header was checked: a file swapped or
+/// rewritten at the original path cannot reach a decoder. `input` is opened
+/// once ([`header::open_regular`]: a FIFO or a device named `.heic` would
+/// block the copy or never end it), and from that one handle:
+///
+/// 1. its size is taken, from the handle's own metadata;
+/// 2. at most [`header::PREFIX_LEN`] bytes are read and checked
+///    ([`header::check_prefix`]); a file that is not HEIF is refused
+///    (`heif_decode_failed`) before anything is written;
+/// 3. the prefix and then the rest are written to the copy, in
+///    [`STAGE_CHUNK`] pieces with a look at `stop` between two, and never
+///    more bytes than the size of step 1.
+///
+/// A file that yields more or fewer bytes than its size said (one written
+/// to while it is copied, or a `/proc` file whose size is 0 and whose
+/// reading never ends) is refused as `cannot_read_input`, as is one that
+/// cannot be opened or read; a copy that cannot be written is
+/// `workdir_failed`; a cancel or a timeout is what
+/// [`super::process::run_capped`] would return. Whatever the failure, the
+/// copy is removed.
+fn stage_input(input: &Path, work: &WorkDir, stop: &StageStop) -> Result<PathBuf, EngineError> {
+    let source = header::open_regular(input).map_err(|e| header::unreadable(input, &e))?;
+    let len = source
+        .metadata()
+        .map_err(|e| header::unreadable(input, &e))?
+        .len();
+    stage_from(source, len, input, work, stop)
+}
+
+/// [`stage_input`] from steps 2 on: `source` is `input` opened, and `len`
+/// its size when it was. Separate so a test can change the file between the
+/// two.
+fn stage_from(
+    mut source: impl std::io::Read,
+    len: u64,
+    input: &Path,
+    work: &WorkDir,
+    stop: &StageStop,
+) -> Result<PathBuf, EngineError> {
+    use std::io::{Read, Write};
+
+    let unreadable = |e: std::io::Error| header::unreadable(input, &e);
+    let changed = || {
+        header::unreadable(
+            input,
+            &std::io::Error::other("it changed while it was being copied"),
+        )
+    };
     let workdir_failed = |e: std::io::Error| {
         EngineError::ConversionFailed(Failure::new(
             "workdir_failed",
             format!("cannot prepare the conversion folder: {e}"),
         ))
     };
+    stop.check()?;
+    let mut prefix = Vec::with_capacity(header::PREFIX_LEN);
+    (&mut source)
+        .take(header::PREFIX_LEN as u64)
+        .read_to_end(&mut prefix)
+        .map_err(unreadable)?;
+    header::check_prefix(&prefix).map_err(|why| header::not_heif(input, why))?;
+    let Some(mut left) = len.checked_sub(prefix.len() as u64) else {
+        return Err(changed());
+    };
+
+    let staged = work.path().join(STAGED_NAME);
     let mut copy = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&staged)
         .map_err(workdir_failed)?;
-    std::io::copy(&mut source, &mut copy).map_err(workdir_failed)?;
-    Ok(staged)
+    let copied = (|| {
+        copy.write_all(&prefix).map_err(workdir_failed)?;
+        let mut buf = vec![0u8; STAGE_CHUNK];
+        while left > 0 {
+            stop.check()?;
+            let want = usize::try_from(left).map_or(STAGE_CHUNK, |l| l.min(STAGE_CHUNK));
+            let n = read_some(&mut source, &mut buf[..want]).map_err(unreadable)?;
+            if n == 0 {
+                // Shorter than its size said: it shrank.
+                return Err(changed());
+            }
+            copy.write_all(&buf[..n]).map_err(workdir_failed)?;
+            left -= n as u64;
+        }
+        // Longer than its size said: it grew, or it never ends.
+        if read_some(&mut source, &mut buf[..1]).map_err(unreadable)? != 0 {
+            return Err(changed());
+        }
+        Ok(())
+    })();
+    drop(copy);
+    match copied {
+        Ok(()) => Ok(staged),
+        Err(e) => {
+            let _ = std::fs::remove_file(&staged);
+            Err(e)
+        }
+    }
 }
 
 /// The PNG an external decoder wrote for `png`. libheif writes one file per
@@ -232,13 +350,13 @@ pub const EXTERNAL_DECODER_MEMORY_CAP: u64 = 2 * 1024 * 1024 * 1024;
 /// the PDF to `output`, once its header says it is a HEIF file. The only
 /// way a decoder is started.
 ///
-/// `input` is first copied into the private conversion folder
-/// ([`stage_input`]); the copy's header is checked ([`header::check_as`], a
-/// bounded read) and only the copy is handed to the decoder, so what was
-/// checked is what is decoded. A file that is not HEIF whatever its name
-/// (an SVG, an MVG or PostScript program, a PBM, an empty or truncated
-/// file) is `heif_decode_failed`, its copy is removed and no decoder process
-/// is started. ImageMagick runs under [`MAGICK_POLICY`].
+/// `input`'s header is checked as it is copied into the private conversion
+/// folder ([`stage_input`], bounded and cancellable) and only the copy is
+/// handed to the decoder, so what was checked is what is decoded. A file
+/// that is not HEIF whatever its name (an SVG, an MVG or PostScript program,
+/// a PBM, an empty or truncated file) is `heif_decode_failed`, nothing is
+/// written and no decoder process is started. ImageMagick runs under
+/// [`MAGICK_POLICY`].
 ///
 /// A decoder that disappeared between being found and being started pauses
 /// the job like a missing one (`heif-decoder`); one that runs and writes no
@@ -254,14 +372,16 @@ pub(super) fn convert_with_external(
     timeout: Option<Duration>,
     progress: &(dyn Fn(f32) + Send + Sync),
 ) -> Result<(), EngineError> {
-    let staged = stage_input(input, work)?;
-    if let Err(e) = header::check_as(&staged, input) {
-        let _ = std::fs::remove_file(&staged);
-        return Err(e);
-    }
     // Anything that is not a known decoder is treated as libheif's
     // interface, the simplest one.
     let kind = ExternalDecoder::of(decoder).unwrap_or(ExternalDecoder::Libheif);
+    let stop = StageStop {
+        cancel,
+        timeout,
+        started: Instant::now(),
+        label: kind.label(),
+    };
+    let staged = stage_input(input, work, &stop)?;
     let png = work.path().join("heif.png");
     let mut cmd = crate::util::appimage::host_command(decoder);
     cmd.args(kind.args(&staged, &png)).current_dir(work.path());
@@ -1025,6 +1145,126 @@ cp '{png}' "$2""#,
             );
         }
         assert!(!dir.path().join("ran").exists(), "a decoder was started");
+    }
+
+    /// NFR-security: a `.heic` that is a link to a `/proc` file whose size
+    /// is 0 and whose reading never ends (`/proc/self/pagemap`) is refused
+    /// at once and leaves nothing in the conversion folder. Staging used to
+    /// copy the whole file before the header check, without bound: this one
+    /// filled the temporary folder.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nfr_security_a_heic_linked_to_an_endless_proc_file_is_refused_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let decoder = fake_decoder(dir.path(), "heif-convert");
+        let input = dir.path().join("IMG.heic");
+        std::os::unix::fs::symlink("/proc/self/pagemap", &input).unwrap();
+        let work = WorkDir::new("pagemap").unwrap();
+        let work_dir = work.path().to_path_buf();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let out = dir.path().join("o.pdf");
+        // On its own thread, so an endless copy fails the test instead of
+        // filling the disk: the flag stops it if it ever starts.
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            let r = convert_with_external(&decoder, &input, &out, &work, &flag, None, &|_| {});
+            let left = std::fs::read_dir(work.path()).unwrap().count();
+            let _ = tx.send((r, left));
+        });
+        let received = rx.recv_timeout(Duration::from_secs(5));
+        cancel.store(true, Ordering::Relaxed);
+        worker.join().unwrap();
+        let (r, left) = received.expect("staging /proc/self/pagemap did not end");
+        let err = r.unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("heif_decode_failed") && f.contains("IMG.heic")),
+            "{err:?}"
+        );
+        assert_eq!(left, 0, "something was written to {}", work_dir.display());
+        assert!(!dir.path().join("ran").exists(), "a decoder was started");
+    }
+
+    /// NFR-security: the copy holds exactly the size the file had when it
+    /// was opened. A file that grows or shrinks after that (written to while
+    /// it is copied) is refused and its partial copy removed; one that does
+    /// not is copied byte for byte, past one [`STAGE_CHUNK`].
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_a_heic_that_changes_while_it_is_staged_is_refused() {
+        use std::io::Write;
+        let header = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
+        let mut body = header.to_vec();
+        body.extend((0..3 * STAGE_CHUNK).map(|i| (i % 251) as u8));
+        let stop_flag = AtomicBool::new(false);
+        let stop = StageStop {
+            cancel: &stop_flag,
+            timeout: None,
+            started: Instant::now(),
+            label: "libheif",
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("IMG_0005.HEIC");
+        let open = || {
+            std::fs::write(&input, &body).unwrap();
+            let file = header::open_regular(&input).unwrap();
+            let len = file.metadata().unwrap().len();
+            (file, len)
+        };
+
+        let (file, len) = open();
+        let work = WorkDir::new("grows").unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&input)
+            .unwrap()
+            .write_all(b"<svg/>")
+            .unwrap();
+        let err = stage_from(file, len, &input, &work, &stop).unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("changed")),
+            "grew: {err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+
+        let (file, len) = open();
+        let work = WorkDir::new("shrinks").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&input)
+            .unwrap()
+            .set_len(len - 100)
+            .unwrap();
+        let err = stage_from(file, len, &input, &work, &stop).unwrap_err();
+        assert!(
+            matches!(&err, EngineError::ConversionFailed(f)
+                if f.reason == Some("cannot_read_input") && f.contains("changed")),
+            "shrank: {err:?}"
+        );
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
+
+        let work = WorkDir::new("same").unwrap();
+        std::fs::write(&input, &body).unwrap();
+        let staged = stage_input(&input, &work, &stop).unwrap();
+        assert_eq!(staged, work.path().join(STAGED_NAME));
+        assert_eq!(std::fs::read(&staged).unwrap(), body);
+
+        // A cancel stops the copy and leaves nothing behind.
+        let cancelled = AtomicBool::new(true);
+        let work = WorkDir::new("cancelled").unwrap();
+        let err = stage_input(
+            &input,
+            &work,
+            &StageStop {
+                cancel: &cancelled,
+                ..stop
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::Cancelled), "{err:?}");
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 0);
     }
 
     /// The policy closes every domain before opening the one use, in the
