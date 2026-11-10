@@ -19,7 +19,7 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `tauri-plugin-dialog` | 2 | MIT / Apache-2.0 | Native file picker | Yes |
 | `tauri-plugin-opener` | 2 | MIT / Apache-2.0 | Open URLs / reveal folders | Yes |
 | `tauri-plugin-single-instance` | 2 | MIT / Apache-2.0 | Forward a second launch (NFR-014) | Yes |
-| `tauri-plugin-notification` | ~2.5 | MIT / Apache-2.0 | Native OS notifications (FR-072) | Yes |
+| `tauri-plugin-notification` | ~2.8 | MIT / Apache-2.0 | Native OS notifications (FR-072) | Yes |
 | `tauri-plugin-updater` | ~2.13 | MIT / Apache-2.0 | Signed update download, verification and install (FR-082/083) | Yes |
 | `serde`, `serde_json` | 1 | MIT / Apache-2.0 | Serialization | Yes |
 | `toml` | 1 | MIT / Apache-2.0 | `config.toml`, `profiles.toml` | Yes |
@@ -33,7 +33,7 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `clap` | 4 (`derive`) | MIT / Apache-2.0 | Headless CLI surface | Yes |
 | `wait-timeout` | 0.2 | MIT / Apache-2.0 | Bounded wait on the print child process | Yes |
 | `semver` | 1 | MIT / Apache-2.0 | Update-check version comparison | Yes |
-| `ureq` | 3.4 | MIT / Apache-2.0 | Blocking HTTPS for the GitHub release check | Yes |
+| `ureq` | 3.5 | MIT / Apache-2.0 | Blocking HTTPS for the GitHub release check | Yes |
 | `percent-encoding` | 2.3 | MIT / Apache-2.0 | Prefilled "report issue" URL | Yes |
 | `url` | 2.5 | MIT / Apache-2.0 | WHATWG URL parsing for the external-link allow-list | Yes |
 | `specta` | `=2.0.0-rc.22` | MIT / Apache-2.0 | Type reflection for the IPC bindings | Yes |
@@ -78,9 +78,9 @@ This crate is deliberately **not** a workspace member (see [`../04-architecture/
 | Package | Declared version | License | Used for |
 |---|---|---|---|
 | `react`, `react-dom` | ^19.3.0 | MIT | UI runtime |
-| `@tauri-apps/api` | ^2.12.1 | MIT / Apache-2.0 | IPC + event bridge |
-| `@tauri-apps/plugin-dialog` | ^2.8.1 | MIT / Apache-2.0 | File picker binding |
-| `zustand` | ^5.0.15 | MIT | Frontend state |
+| `@tauri-apps/api` | ^2.12.4 | MIT / Apache-2.0 | IPC + event bridge |
+| `@tauri-apps/plugin-dialog` | ^2.8.4 | MIT / Apache-2.0 | File picker binding |
+| `zustand` | ^5.0.16 | MIT | Frontend state |
 | `sonner` | ^2.0.8 | MIT | Toasts |
 | JetBrains Mono (font, bundled `.woff2`) | — | SIL OFL 1.1 | Monospace typeface shipped offline |
 
