@@ -273,23 +273,27 @@ where
 /// path on the command line: this process' working directory, except inside
 /// a Linux AppImage. Its `AppRun` changes into `$APPDIR/usr` before starting
 /// the app (WebKitGTK's helpers resolve from there, see
-/// [`crate::engine::convert::html`]) and keeps the caller's folder in `OWD`,
-/// so `./Pluryprint.AppImage print --files a.pdf` would otherwise look for
-/// `a.pdf` inside the mounted image. The process never changes folder back:
-/// the GUI's own web view needs `$APPDIR/usr` too.
+/// [`crate::engine::convert::html`]), so `./Pluryprint.AppImage print --files
+/// a.pdf` would otherwise look for `a.pdf` inside the image. The runtime keeps
+/// the caller's folder in `OWD` when it mounts the image; run unpacked
+/// (`--appimage-extract-and-run`, or without FUSE) it sets no `OWD`, and the
+/// caller's `PWD`, which `AppRun` does not touch, says the same. The process
+/// never changes folder back: the GUI's own web view needs `$APPDIR/usr` too.
 pub fn caller_dir() -> Option<PathBuf> {
     caller_dir_from(
         cfg!(target_os = "linux"),
         std::env::var_os("APPIMAGE").as_deref(),
-        std::env::var_os("OWD").as_deref(),
+        std::env::var_os("OWD")
+            .or_else(|| std::env::var_os("PWD"))
+            .as_deref(),
         std::env::current_dir().ok(),
     )
 }
 
 /// [`caller_dir`] as a pure function: `linux` whether this is Linux,
-/// `appimage` and `owd` the variables the AppImage runtime and `AppRun` set,
-/// `cwd` the working directory. `OWD` counts only inside an AppImage and only
-/// when it is an absolute path.
+/// `appimage` the variable the AppImage runtime sets, `owd` the caller's
+/// folder (`OWD`, else `PWD`), `cwd` the working directory. `owd` counts only
+/// inside an AppImage and only when it is an absolute path.
 pub fn caller_dir_from(
     linux: bool,
     appimage: Option<&std::ffi::OsStr>,
