@@ -6,7 +6,7 @@
 
 **Select 5, 50 or 500 files. Print them all.**
 
-Free batch printing for Windows and macOS. No 15-file limit, no Adobe and no $149 licence.
+Free batch printing for Windows, macOS and Linux. No 15-file limit, no Adobe and no $149 licence.
 
 Free · No account · No telemetry · AGPL-3.0
 
@@ -31,7 +31,8 @@ Free · No account · No telemetry · AGPL-3.0
 > [!WARNING]
 > **Pre-alpha.** Expect rough edges. The installers are not signed with Apple or
 > Microsoft certificates, so Windows and macOS warn the first time you open
-> them: see [First launch](#first-launch).
+> them: see [First launch](#first-launch). Linux is a preview: built and tested
+> in CI, not yet on real machines.
 
 <p align="center">
   <picture>
@@ -72,7 +73,11 @@ with one set of print settings.
   default profile. Built into the app; no extension to enable.
 - **Windows, with the installer:** an Explorer submenu, with no file limit. On
   Windows 11 it is under “Show more options”.
-- **On both:** drag files or folders onto the window, with or without
+- **Linux (preview), with the .deb:** “Open with › Pluryprint” in any file
+  manager, plus “Print now”, “Configure print job…” and “Add to print queue” in
+  Dolphin (a Pluryprint submenu) and Nemo. The AppImage gets “Open with” once
+  you integrate it with your desktop.
+- **Everywhere:** drag files or folders onto the window, with or without
   subfolders.
 
 The Windows Explorer submenu:
@@ -100,6 +105,7 @@ not stated.
 | From the right-click menu | Finder › Services and Explorer, yes (on Windows 11, under “Show more options”) | Explorer menu (adds files to its window)   | No (command line) | No                        | No (hot folders)       |
 | Command line              | Yes, with `--json`                                                             | Partial                                    | Yes               | Yes                       | No                     |
 | macOS                     | Yes                                                                            | No                                         | No                | No                        | No                     |
+| Linux                     | Yes (preview)                                                                  | No                                         | No                | No                        | No                     |
 | Account or telemetry      | None                                                                           | —                                          | —                 | —                         | —                      |
 
 **Where others are ahead:** many more formats, years of use and published
@@ -123,8 +129,10 @@ file becomes a PDF on your computer and goes straight to your printer.
 
 - **27 extensions.** PDFs (password-protected ones too), images, SVG, text, HTML
   and Markdown, inside the app and with no network access. Office and
-  OpenDocument need LibreOffice, and HEIC on Windows the Microsoft Store codecs:
-  if they are missing, the app offers to install them, always asking first.
+  OpenDocument need LibreOffice, HEIC on Windows the Microsoft Store codecs and
+  on Linux a HEIF decoder (libheif or ImageMagick): if they are missing, the
+  app offers to install them, always asking first (on Linux it tells you which
+  package to install).
 - **Named profiles.** Copies, collation, duplex, colour or grayscale, paper,
   orientation, scaling, page ranges, tray and quality. Three built in and as
   many of your own as you like, to import and export.
@@ -192,19 +200,26 @@ Get the installer for your computer from the
 from the [website’s download section](https://pluryprint.maecly.com/en/#status),
 which always links the current files.
 
-| Computer                                | File   | Notes                                                                                                       |
-| --------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| Windows 10 and 11 · x64 (Intel or AMD)  | `.exe` | Built and tested in CI. Per-user installer, no administrator rights. Not yet tried on a Windows 10 machine. |
-| Windows 11 · ARM64 (Snapdragon)         | `.exe` | Its own installer, tested on Windows 11 on ARM. The x64 one also works there, emulated.                     |
-| macOS 13 or later · Apple silicon (M1+) | `.dmg` | Built and tested in CI.                                                                                     |
-| macOS 13 or later · Intel               | `.dmg` | Tested only under Rosetta 2 on an Apple silicon Mac, not yet on an Intel Mac.                               |
-| Linux                                   | —      | Planned, not available yet: follow [#66](https://github.com/MAECLY/pluryprint/issues/66).                   |
+| Computer                                | File                  | Notes                                                                                                          |
+| --------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Windows 10 and 11 · x64 (Intel or AMD)  | `.exe`                | Built and tested in CI. Per-user installer, no administrator rights. Not yet tried on a Windows 10 machine.    |
+| Windows 11 · ARM64 (Snapdragon)         | `.exe`                | Its own installer, tested on Windows 11 on ARM. The x64 one also works there, emulated.                        |
+| macOS 13 or later · Apple silicon (M1+) | `.dmg`                | Built and tested in CI.                                                                                        |
+| macOS 13 or later · Intel               | `.dmg`                | Tested only under Rosetta 2 on an Apple silicon Mac, not yet on an Intel Mac.                                  |
+| Linux · x64 (preview)                   | `.AppImage` or `.deb` | Built in CI and unit-tested there; not yet run on a real machine. Ubuntu 22.04, Debian 12, Fedora 38 or later. |
+| Linux · ARM64 (preview)                 | `.AppImage` or `.deb` | Built and fully tested in CI (with a CUPS PDF queue); not yet run on a real machine.                           |
 
 **Right-click. Print everything.** In Finder, from Services; in Explorer, from
 the submenu the installer registers.
 
 The Windows installers register the Explorer menu and include SumatraPDF, which
-Pluryprint prints PDFs with. On macOS, drag Pluryprint to Applications.
+Pluryprint prints PDFs with. On macOS, drag Pluryprint to Applications. On
+Linux, install the `.deb` on Debian, Ubuntu and their derivatives
+(`sudo apt install ./Pluryprint_<version>_linux_x64.deb`, keep the `./`); it
+depends on the CUPS client tools and adds the file-manager entries. On any
+other distribution, make the AppImage executable (`chmod +x`) and run it; it
+needs FUSE's `fusermount3` (the `fuse3` package, already there on most
+desktops). Both update from inside the app.
 
 ## First launch
 
@@ -221,6 +236,11 @@ Gatekeeper warn. Each release’s notes explain it step by step.
    shasum -a 256 -c SHA256SUMS --ignore-missing
    ```
 
+   ```sh
+   # Linux
+   sha256sum -c SHA256SUMS --ignore-missing
+   ```
+
    ```powershell
    # Windows: compare the hash with the installer's line in SHA256SUMS
    Get-FileHash .\Pluryprint_*_windows_*.exe -Algorithm SHA256
@@ -235,6 +255,8 @@ Gatekeeper warn. Each release’s notes explain it step by step.
    Open no longer gets past it. The app is ad-hoc signed and not notarized; if
    you prefer the terminal:
    `xattr -dr com.apple.quarantine /Applications/Pluryprint.app`.
+4. **Linux:** there is no warning to get past. A `.deb` update asks for your
+   administrator password, as installing it did.
 
 **Updates are signed.** The app tells you when there is a new version and you
 choose: install now (signature verified, no administrator rights), remind me
@@ -249,6 +271,9 @@ channels, stable and beta.
      options” (or Shift+F10). It does not appear when Explorer runs elevated.
    - **macOS:** Services › “Print with Pluryprint”, or “Print with Pluryprint
      (default profile)”.
+   - **Linux (.deb):** “Open with › Pluryprint” anywhere; in Dolphin, the
+     Pluryprint submenu; in Nemo, “Print now with Pluryprint” and its two
+     companions.
 3. On Windows, choose **Print N files**, a **Print with “profile”** row, or
    **Configure print job…** to review every setting first. On macOS, “Print
    with Pluryprint” opens the Print Job screen and “(default profile)” prints
@@ -262,7 +287,9 @@ You can also drag files or folders onto the app window.
 The command line ships with the app. On Windows it is a separate console
 executable next to the app, `pluryprint-cli.exe`, so scripts see its exit code;
 on macOS it is `Pluryprint.app/Contents/MacOS/pluryprint-cli`. It is not added
-to `PATH` yet: call it by the executable’s path. The command name may change
+to `PATH` there yet: call it by the executable’s path. The Linux `.deb` puts
+`pluryprint` on `PATH`; an AppImage is the command itself
+(`./Pluryprint_<version>_linux_x64.AppImage print …`). The command name may change
 before the first stable release.
 
 Output shortened:
@@ -280,15 +307,15 @@ option, the JSON output and the exit codes are in
 
 ## Supported files
 
-| Kind                    | Extensions                                     | How                                                                        |
-| ----------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
-| PDF                     | PDF                                            | Printed as-is after a structural check. Password-protected PDFs too.       |
-| Images                  | JPG, JPEG, PNG, TIF, TIFF, BMP, WebP           | Converted in the app (transparency on white).                              |
-| Vector                  | SVG, SVGZ                                      | Vector PDF pages, in the app.                                              |
-| Text                    | TXT, HTML, HTM, MD, MARKDOWN                   | In the app, paginated by the system web view with scripts and network off. |
-| HEIC                    | HEIC, HEIF                                     | `sips` on macOS; the Microsoft Store HEIF and HEVC codecs on Windows.      |
-| Rich text               | RTF                                            | `textutil` on macOS; LibreOffice on Windows.                               |
-| Office and OpenDocument | DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP | LibreOffice, installed separately (the app offers to install it).          |
+| Kind                    | Extensions                                     | How                                                                                                                                            |
+| ----------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| PDF                     | PDF                                            | Printed as-is after a structural check. Password-protected PDFs too.                                                                           |
+| Images                  | JPG, JPEG, PNG, TIF, TIFF, BMP, WebP           | Converted in the app (transparency on white).                                                                                                  |
+| Vector                  | SVG, SVGZ                                      | Vector PDF pages, in the app.                                                                                                                  |
+| Text                    | TXT, HTML, HTM, MD, MARKDOWN                   | In the app, paginated by the system web view with scripts and network off.                                                                     |
+| HEIC                    | HEIC, HEIF                                     | `sips` on macOS; the Microsoft Store HEIF and HEVC codecs on Windows; libheif's `heif-convert` or ImageMagick, installed separately, on Linux. |
+| Rich text               | RTF                                            | `textutil` on macOS; LibreOffice on Windows and Linux.                                                                                         |
+| Office and OpenDocument | DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP | LibreOffice, installed separately (the app offers to install it).                                                                              |
 
 Not supported: GIF (refused with a note to convert it to PNG or JPEG), EPUB,
 email (EML, MSG), CAD, PostScript and archives. Details in
@@ -308,9 +335,10 @@ printer you chose. See [privacy.md](./docs/09-legal/privacy.md).
 - On Windows 11, the Explorer menu entry is only under “Show more options”: the
   top-level menu needs a signed package, and there is no certificate yet
   ([ADR-0013](./docs/adr/0013-explorer-command-per-user-verb.md)).
-- Office and OpenDocument (and RTF on Windows) need LibreOffice, and HEIC on
-  Windows the Microsoft Store codecs. They do not come with the app: it offers
-  to install them and does nothing until you confirm.
+- Office and OpenDocument (and RTF on Windows and Linux) need LibreOffice, HEIC
+  on Windows the Microsoft Store codecs and on Linux a HEIF decoder. They do
+  not come with the app: it offers to install them (on Linux, it names the
+  package) and does nothing until you confirm.
 - No GIF, EPUB, email, CAD or PostScript.
 - A PDF whose permissions forbid printing is refused, even if you know its
   password.
@@ -319,8 +347,10 @@ printer you chose. See [privacy.md](./docs/09-legal/privacy.md).
 - English and Spanish only.
 - Not built: N-up, watermarks, separator pages, hot folders, a Windows service
   mode, a plugin API or file-list import.
-- No Linux build yet: it is planned in
-  [#66](https://github.com/MAECLY/pluryprint/issues/66).
+- Linux is a preview: built and tested in CI, not yet on real machines (and
+  Wayland not tried at all). Nautilus (GNOME Files) gets only “Open with”, and
+  an AppImage adds no right-click entry by itself. Its bundled WebKitGTK only
+  updates with Pluryprint, so prefer the `.deb` on Debian and Ubuntu.
 
 Where it is heading: the [roadmap](./docs/06-roadmap/milestones.md) and the
 [changelog](./CHANGELOG.md).
@@ -355,7 +385,7 @@ installer includes; if it is not found, the job pauses and tells you.
 <summary><strong>Why does Word need LibreOffice?</strong></summary>
 
 Because every file is turned into a PDF before it is printed, and for Word,
-Excel, PowerPoint and OpenDocument (and RTF on Windows) Pluryprint uses
+Excel, PowerPoint and OpenDocument (and RTF on Windows and Linux) Pluryprint uses
 LibreOffice, which you install separately. If it is missing, the job pauses and
 the app offers to install it (with winget, Homebrew or the official website),
 always after asking you. Images, SVG, text, HTML and Markdown need nothing: they
@@ -396,7 +426,8 @@ it. A PDF whose permissions forbid printing is refused.
 <summary><strong>Does it work from the right-click menu?</strong></summary>
 
 On macOS, yes: select the files in Finder and choose Services › Print with
-Pluryprint. On Windows, the installer registers the Explorer submenu (print N
+Pluryprint. On Linux, the `.deb` adds “Open with” everywhere and the three
+actions to Dolphin and Nemo. On Windows, the installer registers the Explorer submenu (print N
 files, print with a profile, configure the job or add it to the queue): it is
 meant for the Windows 10 menu (not yet tried on a Windows 10 machine) and, on
 Windows 11, appears under “Show more options”. A top-level entry in the
@@ -410,8 +441,9 @@ Windows 11 menu needs a signed package, and there is no certificate yet.
 Apple silicon, yes: that is where it is tested in CI. Windows ARM64 too: it has
 its own installer, tested on Windows 11 on ARM, which registers the Explorer
 menu. Intel Macs have their own .dmg, tested only under Rosetta 2, not yet on an
-Intel Mac. Linux is planned but not available yet: follow
-[#66](https://github.com/MAECLY/pluryprint/issues/66).
+Intel Mac. Linux x64 and ARM64 are a preview, as an AppImage and a `.deb`
+each: ARM64 is fully tested in CI and x64 unit-tested, neither yet on a real
+machine. They need Ubuntu 22.04, Debian 12, Fedora 38 or later, with CUPS.
 
 </details>
 
@@ -428,8 +460,9 @@ signed with the project’s own key and checked before they install.
 
 You need Rust stable (1.90 or later), Node 24 LTS (the minimum is 22.22.2) with
 pnpm 9, and the platform’s native build tools: Visual Studio Build Tools 2022 with “Desktop
-development with C++” on Windows, the Xcode Command Line Tools on macOS. The
-full checklist is in [local-setup.md](./docs/08-development/local-setup.md).
+development with C++” on Windows, the Xcode Command Line Tools on macOS, and on
+Linux (Ubuntu 22.04 or later) `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
+`libdbus-1-dev` and `librsvg2-dev`. The full checklist is in [local-setup.md](./docs/08-development/local-setup.md).
 
 ```sh
 git clone https://github.com/MAECLY/pluryprint.git
@@ -458,10 +491,10 @@ pnpm tauri dev   # the real app, with hot reload
 
 Tauri 2 with a Rust backend and a React + TypeScript + Vite + Tailwind CSS
 frontend. Printing goes through the bundled SumatraPDF on Windows and CUPS
-(`lp`) on macOS. Images become PDF in Rust (`image`, `printpdf`, `lopdf`); SVG
+(`lp`) on macOS and Linux. Images become PDF in Rust (`image`, `printpdf`, `lopdf`); SVG
 through `usvg` + `svg2pdf` in an isolated worker process; HTML, Markdown
-(`pulldown-cmark`) and text are paginated by the system web view (WebView2 or
-WebKit) in a second worker, with scripts and network off. Explorer integration
+(`pulldown-cmark`) and text are paginated by the system web view (WebView2,
+WebKit or WebKitGTK) in a second worker, with scripts and network off. Explorer integration
 is a per-user `IExplorerCommand` COM DLL; Finder integration is an `NSServices` provider
 inside the app. Updates use the Tauri updater with minisign-signed manifests on
 GitHub Releases. Reasons in [tech-stack.md](./docs/04-architecture/tech-stack.md)
