@@ -581,11 +581,13 @@ pub const HEIF_DECODERS_LINUX: &[&str] = &["heif-dec", "heif-convert", "magick",
 const VERSION_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// At most this many bytes of `convert -version` are read.
+#[cfg(unix)]
 const VERSION_PROBE_CAP: u64 = 4096;
 
 /// How long a `convert` that has exited may keep its output open (a helper
 /// it left behind holding the pipe) before what it wrote so far is taken
 /// as its answer ([`identifies_as_imagemagick`]).
+#[cfg(unix)]
 const VERSION_PROBE_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How long [`is_heif_decoder`] keeps a probe that gave no answer (it timed
