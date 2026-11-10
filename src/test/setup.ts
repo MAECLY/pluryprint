@@ -2,6 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { toast } from 'sonner';
 import { afterEach } from 'vitest';
 
+import { resetHostPlatform } from '@/lib/platform';
+
 // sonner keeps its toasts in a module-level store, and since 2.0.8 a `Toaster`
 // replays every toast still active in it when it mounts (so a toast raised
 // before the Toaster subscribed is not lost). A toast a test left on screen
@@ -10,6 +12,14 @@ import { afterEach } from 'vitest';
 // stacked hooks it runs after the tree is unmounted.
 afterEach(() => {
   toast.dismiss();
+});
+
+// Every `app_info` answer is remembered as the host platform (`lib/platform`),
+// a module-level fact like sonner's store: a test that mocked a macOS or Linux
+// host would otherwise word the next test's tips for that platform. Each test
+// starts again from the webview's own platform (Windows under jsdom).
+afterEach(() => {
+  resetHostPlatform();
 });
 
 // jsdom runs on an opaque origin (about:blank), where `window.localStorage`
