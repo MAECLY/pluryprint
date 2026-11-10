@@ -512,9 +512,10 @@ pub enum CapScope {
 ///     process stays a member once found, even after its parent exits (a
 ///     double fork), until it exits itself; a pid the kernel reused for
 ///     another process is told apart by its start time. Past the cap, on a
-///     cancel or a timeout, every member is killed one by one as well as
-///     the group, and once the child has exited the members it left behind
-///     are killed too, as the Job Object does on Windows.
+///     cancel or a timeout, the tree is frozen (every member stopped until
+///     no new one appears) and then every member is killed, as well as the
+///     group; once the child has exited the members it left behind are
+///     killed the same way, as the Job Object does on Windows.
 ///
 /// A child that ran out of memory is [`CappedError::OverMemory`]; a cancel,
 /// a timeout or any other failure is what [`run_bounded`] would return.
@@ -917,36 +918,58 @@ pub(crate) mod tree {
             self.leader_ours = read_stat(self.leader).is_none();
         }
 
-        /// SIGKILL every member, refreshing the membership between rounds
-        /// so a helper started meanwhile is caught too (a killed process
-        /// starts nothing, so a few rounds settle it).
+        /// Freeze the whole tree, then kill it: SIGSTOP every member,
+        /// refreshing the membership after each round until a walk finds no
+        /// member not yet stopped (at most [`FREEZE_ROUNDS`] walks), then
+        /// SIGKILL every member stopped, the leader last.
+        ///
+        /// A stopped process starts nothing, and a process whose parent is
+        /// stopped keeps that parent, so each walk finds whatever was forked
+        /// before the last stop by its parent link, and the tree settles.
+        /// Killing round by round instead left a gap: a member killed while
+        /// it was forking orphaned the child it had just started, which then
+        /// belonged to no one we knew (a `setsid` child has left the group
+        /// too) and survived.
         pub(crate) fn kill_all(&mut self) {
-            let mut killed: HashSet<Member> = HashSet::new();
-            for _ in 0..4 {
+            let mut stopped: Vec<Member> = Vec::new();
+            let mut seen: HashSet<Member> = HashSet::new();
+            for _ in 0..FREEZE_ROUNDS {
                 self.refresh();
                 let fresh: Vec<Member> = self
                     .members
                     .iter()
-                    .filter(|m| !killed.contains(*m))
+                    .filter(|m| !seen.contains(*m))
                     .copied()
                     .collect();
                 if fresh.is_empty() {
-                    return;
+                    break;
                 }
                 for member in fresh {
-                    kill_member(member);
-                    killed.insert(member);
+                    signal_member(member, libc::SIGSTOP);
+                    seen.insert(member);
+                    stopped.push(member);
                 }
+            }
+            let (leader, rest): (Vec<Member>, Vec<Member>) = stopped
+                .into_iter()
+                .partition(|&(pid, _)| self.leader_ours && pid == self.leader);
+            for member in rest.into_iter().chain(leader) {
+                signal_member(member, libc::SIGKILL);
             }
         }
     }
 
-    /// SIGKILL `pid` if it is still the process that started at `start`.
-    /// Through a pidfd where the kernel has one (Linux 5.3): the descriptor
-    /// pins the process, so the check and the signal are about the same one
-    /// even if it exits in between; otherwise a plain `kill`, checked just
-    /// before.
-    pub(crate) fn kill_member((pid, start): Member) {
+    /// How many walks of `/proc` [`TreeSampler::kill_all`] makes, at most,
+    /// while it stops the tree: one finds nothing new once every member is
+    /// stopped, so this bounds only a tree that keeps out-forking the walk.
+    const FREEZE_ROUNDS: usize = 32;
+
+    /// Send `signal` to `pid` if it is still the process that started at
+    /// `start`. Through a pidfd where the kernel has one (Linux 5.3): the
+    /// descriptor pins the process, so the check and the signal are about
+    /// the same one even if it exits in between; otherwise a plain `kill`,
+    /// checked just before.
+    pub(crate) fn signal_member((pid, start): Member, signal: libc::c_int) {
         let Ok(raw) = libc::pid_t::try_from(pid) else {
             return;
         };
@@ -963,7 +986,7 @@ pub(crate) mod tree {
                         libc::syscall(
                             libc::SYS_pidfd_send_signal,
                             fd,
-                            libc::SIGKILL,
+                            signal,
                             std::ptr::null::<libc::siginfo_t>(),
                             0,
                         );
@@ -980,7 +1003,7 @@ pub(crate) mod tree {
         }
         if same() {
             // SAFETY: kill has no memory preconditions.
-            unsafe { libc::kill(raw, libc::SIGKILL) };
+            unsafe { libc::kill(raw, signal) };
         }
     }
 }
@@ -1598,6 +1621,75 @@ mod reason_tests {
         tree.kill_all();
         kill_tree(&mut child);
         assert!(!still_alive(perl), "the helper outlived the kill");
+    }
+
+    /// Security note 8 on Linux: a member that keeps forking children into
+    /// sessions of their own is killed with every child it managed to start.
+    /// Killed round by round, the looping member died between two forks and
+    /// orphaned the child it had just started, outside the group and no
+    /// longer anyone's descendant we knew; frozen first, it keeps its
+    /// children until all of them are found and killed.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn nfr_security_kill_all_leaves_no_survivor_of_a_member_forking_in_a_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let pids = dir.path().join("pids");
+        let looper = dir.path().join("looper");
+        // Forks `setsid sleep` children as fast as it can, recording each
+        // one; the shell around it leads the group.
+        let script = format!(
+            "sh -c 'echo $$ > \"$1\"; while :; do setsid sleep 600 & echo $! >> \"$2\"; done' \
+               sh '{}' '{}' & wait",
+            looper.display(),
+            pids.display()
+        );
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", &script]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let looper: u32 = wait_for_file(&looper, Duration::from_secs(10))
+            .trim()
+            .parse()
+            .unwrap();
+        let mut tree = tree::TreeSampler::new(child.id());
+        tree.sample().expect("the walk finds the tree");
+        // Let it fork well past one walk's worth of children.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(&pids).map_or(0, |p| p.lines().count()) < 50 {
+            assert!(Instant::now() < deadline, "the loop never forked");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        tree.kill_all();
+        kill_tree(&mut child);
+
+        assert!(!still_alive(looper), "the forking member outlived kill_all");
+        let started: Vec<u32> = std::fs::read_to_string(&pids)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        // SIGKILL is delivered at once, but give the kernel a moment.
+        let alive = |pid: u32| {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| Some(s.rsplit_once(')')?.1.split_whitespace().next()? != "Z"))
+                .unwrap_or(false)
+        };
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let survivors = loop {
+            let survivors: Vec<u32> = started.iter().copied().filter(|&p| alive(p)).collect();
+            if survivors.is_empty() || Instant::now() >= deadline {
+                break survivors;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(
+            survivors.is_empty(),
+            "{} of {} children survived: {survivors:?}",
+            survivors.len(),
+            started.len()
+        );
     }
 
     /// Security note 8 on Linux: a helper that leaves the child's process
