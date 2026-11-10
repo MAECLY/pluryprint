@@ -1595,6 +1595,58 @@ mod reason_tests {
         }
     }
 
+    /// What a Linux tree test started, SIGKILLed if the test panics (a
+    /// failed assertion included), so a failure never leaves a `sleep 600`
+    /// behind: the process whose pid the test's `pid_file` holds (an
+    /// orphan, read when the guard drops, so a panic before the test read
+    /// it is covered), the process `group`, and the `child`, the latter
+    /// checked against its start time so a pid the kernel reused is left
+    /// alone. A test that passes cleans up itself and asserts it did.
+    #[cfg(target_os = "linux")]
+    #[derive(Default)]
+    struct KillOnPanic {
+        pid_file: Option<std::path::PathBuf>,
+        group: Option<u32>,
+        child: Option<tree::Member>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl KillOnPanic {
+        /// Guard `child` (pid and start time).
+        fn child(mut self, pid: u32) -> Self {
+            self.child = tree::read_stat(pid).map(|stat| (pid, stat.start));
+            self
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for KillOnPanic {
+        fn drop(&mut self) {
+            if !std::thread::panicking() {
+                return;
+            }
+            // Never 0 or 1: kill(0) is our own group, kill(1) init.
+            let real = |pid: u32| pid > 1 && i32::try_from(pid).is_ok();
+            let orphan = self
+                .pid_file
+                .as_ref()
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .filter(|&pid| real(pid));
+            if let Some(pid) = orphan {
+                // SAFETY: a plain syscall on a positive pid.
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+            if let Some(group) = self.group.filter(|&g| real(g)) {
+                // SAFETY: a plain syscall on another process group.
+                unsafe { libc::killpg(group as i32, libc::SIGKILL) };
+            }
+            if let Some(member) = self.child {
+                tree::kill_checked(member, libc::SIGKILL);
+            }
+        }
+    }
+
     /// Whether `pid` is a live process (not gone, not a zombie), checked for
     /// up to two seconds while it is.
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1689,6 +1741,12 @@ mod reason_tests {
         isolate_process_tree(&mut cmd);
         let mut child = cmd.spawn().unwrap();
         let leader = child.id();
+        let _guard = KillOnPanic {
+            pid_file: Some(pid_file.clone()),
+            group: Some(leader),
+            ..KillOnPanic::default()
+        }
+        .child(leader);
         let orphan: u32 = wait_for_file(&pid_file, Duration::from_secs(10))
             .trim()
             .parse()
@@ -1733,6 +1791,7 @@ mod reason_tests {
 
         let mut child = Command::new("sleep").arg("600").spawn().unwrap();
         let pid = child.id();
+        let _guard = KillOnPanic::default().child(pid);
         let start = tree::read_stat(pid).unwrap().start;
         // Another start time: not this process, not signalled.
         tree::kill_checked((pid, start + 1), libc::SIGKILL);
