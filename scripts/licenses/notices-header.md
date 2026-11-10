@@ -174,14 +174,30 @@ Pango, ATK and AT-SPI, GStreamer and its base plug-ins, cairo, HarfBuzz,
 libsecret, Enchant, libgcrypt, GnuTLS, Nettle, libidn2, libunistring,
 librsvg, ICU, libxml2 and libxslt, the X11 and Wayland client libraries and
 the GObject introspection data that comes with them. Each keeps its own
-licence; most of the GNOME and freedesktop.org libraries are under the GNU
+licence. Most of the GNOME and freedesktop.org libraries are under the GNU
 Lesser General Public License, version 2.1 or later (WebKitGTK also has
-BSD-licensed parts), and the rest are under permissive licences (MIT, BSD,
-ISC, Apache-2.0, the ICU and libpng licences). The full text of each library's
+BSD-licensed parts). Some are under the GNU General Public License or LGPL
+version 3: JBIG-KIT's `libjbig` (which libtiff loads) is GPL-2.0-or-later;
+Nettle and `libhogweed`, `libunistring`, `libidn2` and elfutils' `libdw` and
+`libelf` are LGPL-3.0-or-later or GPL-2.0-or-later, at the recipient's choice;
+Enchant and systemd's `libsystemd` carry some files under LGPL-3.0-or-later
+or GPL-2.0. The rest are under permissive licences (MIT, BSD, ISC,
+Apache-2.0, the ICU and libpng licences). The full text of each library's
 licence and copyright notices is in its Debian package's `copyright` file
 (`/usr/share/doc/<package>/copyright` on any Debian or Ubuntu system, or the
-source package named below). The LGPL-2.1 text is
-https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
+source package named below). The licence texts are at
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html,
+https://www.gnu.org/licenses/lgpl-3.0.html,
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html and
+https://www.gnu.org/licenses/gpl-3.0.html.
+
+Every AppImage also starts with the AppImage project's static type2-runtime
+(https://github.com/AppImage/type2-runtime, MIT), which mounts the image. It
+has these libraries linked into it: libfuse (LGPL-2.1), squashfuse
+(BSD-2-Clause), zstd (BSD-3-Clause) and the musl C library (MIT). `AppRun`,
+which then starts Pluryprint, is MIT-licensed (Copyright the AppImage project
+contributors), and so is linuxdeploy's GTK plug-in hook script (Copyright the
+linuxdeploy contributors).
 
 **Corresponding Source.** Every Pluryprint release attaches, for each Linux
 architecture, `Pluryprint_<version>_linux_x64_appimage-sources.txt` and
@@ -189,20 +205,24 @@ architecture, `Pluryprint_<version>_linux_x64_appimage-sources.txt` and
 (`scripts/release/appimage-sources.sh`, run on the build machine right after
 the AppImage is made). They name every package the AppImage carries files
 from, with the exact version and the Ubuntu source package and version it was
-built from. That source is published by Ubuntu, at
+built from, and the type2-runtime commit the AppImage starts with. That
+source is published by Ubuntu, at
 `https://launchpad.net/ubuntu/+source/<source>/<source version>` or with
-`apt-get source <source>=<source version>`. In addition, for at least three
-years after each release, Maecly will give anyone who asks a copy of the
-complete corresponding source of every LGPL library in that release's
-AppImages, at the versions its list names, for no more than the cost of
-providing it; ask through https://github.com/MAECLY/pluryprint/issues.
+`apt-get source <source>=<source version>`, and the runtime's (libfuse
+included) at `https://github.com/AppImage/type2-runtime/commit/<commit>`. In
+addition, for at least three years after each release, Maecly will give
+anyone who asks a copy of the complete corresponding source of every GPL- or
+LGPL-licensed component in that release's AppImages, the runtime included, at
+the versions its list names, on a medium customarily used for software
+interchange, for no more than the cost of providing it; ask through
+https://github.com/MAECLY/pluryprint/issues.
 
 Pluryprint uses these libraries only through their public interfaces, and
 an AppImage can be unpacked (`--appimage-extract`), so a user can replace any
-of them with a modified version, as LGPL-2.1 section 6 requires. The AppImage
-runtime and `AppRun` that start it are MIT-licensed (Copyright the AppImage
-project contributors), as are linuxdeploy's GTK plug-in hook script
-(Copyright the linuxdeploy contributors).
+of them with a modified version, as LGPL-2.1 section 6 requires. The
+runtime's libfuse is linked statically: its object files are not shipped
+separately, so the runtime's complete source (above) is what lets a user
+rebuild it with a modified libfuse.
 
 ---
 
@@ -241,22 +261,23 @@ not modified.
 Every licence in the shipped set lets its code be combined with, or shipped
 beside, code under the AGPL-3.0:
 
-| Licence                                                                                       | Where                                            | Why it is compatible                                                                                                                         |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| MIT, MIT-0, ISC, BSD-2-Clause, BSD-3-Clause, Zlib, 0BSD, Unlicense, CC0-1.0, BSL-1.0, OpenSSL | most crates, the frontend packages               | Permissive; ask only for a notice                                                                                                            |
-| Apache-2.0 (alone, or with LLVM-exception)                                                    | many crates, `ring`, choices used under Apache   | Compatible with GPLv3 and so with AGPLv3 (its patent terms are what GPLv2 could not accept)                                                  |
-| Unicode-3.0, Unicode-DFS-2016, CDLA-Permissive-2.0                                            | the ICU4X crates, `webpki-roots` data            | Permissive data licences; ask only for a notice                                                                                              |
-| MPL-2.0                                                                                       | `option-ext`, `cssparser`, `selectors`           | Section 3.3 allows combination with the GNU licences; none carries an Exhibit B notice                                                       |
-| OFL-1.1                                                                                       | JetBrains Mono                                   | A font licence; the fonts are shipped unmodified with their licence                                                                          |
-| BSD-style Microsoft licence                                                                   | the WebView2 loader                              | Permissive; asks for the notice reproduced above                                                                                             |
-| GPL-3.0                                                                                       | SumatraPDF                                       | A separate program, shipped beside Pluryprint; AGPL-3.0 section 13 and GPL-3.0 section 13 also allow the two to be combined                  |
-| AGPL-3.0                                                                                      | MuPDF, inside SumatraPDF                         | The same licence as Pluryprint                                                                                                               |
-| LGPL-2.0, LGPL-2.1 or LGPL-3.0, each "or later"                                               | WebKitGTK, GTK, GLib and others, in the AppImage | Lets a work that uses the library be conveyed under its own terms; the libraries ship unmodified, replaceable, with their source named above |
-| zlib/libpng, bzip2, CPL-1.0                                                                   | the NSIS installer stub                          | The setup program that carries Pluryprint, not part of it: an aggregate, which the AGPL-3.0 (section 5) permits                              |
+| Licence                                                                                       | Where                                                                           | Why it is compatible                                                                                                                         |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| MIT, MIT-0, ISC, BSD-2-Clause, BSD-3-Clause, Zlib, 0BSD, Unlicense, CC0-1.0, BSL-1.0, OpenSSL | most crates, the frontend packages                                              | Permissive; ask only for a notice                                                                                                            |
+| Apache-2.0 (alone, or with LLVM-exception)                                                    | many crates, `ring`, choices used under Apache                                  | Compatible with GPLv3 and so with AGPLv3 (its patent terms are what GPLv2 could not accept)                                                  |
+| Unicode-3.0, Unicode-DFS-2016, CDLA-Permissive-2.0                                            | the ICU4X crates, `webpki-roots` data                                           | Permissive data licences; ask only for a notice                                                                                              |
+| MPL-2.0                                                                                       | `option-ext`, `cssparser`, `selectors`                                          | Section 3.3 allows combination with the GNU licences; none carries an Exhibit B notice                                                       |
+| OFL-1.1                                                                                       | JetBrains Mono                                                                  | A font licence; the fonts are shipped unmodified with their licence                                                                          |
+| BSD-style Microsoft licence                                                                   | the WebView2 loader                                                             | Permissive; asks for the notice reproduced above                                                                                             |
+| GPL-3.0                                                                                       | SumatraPDF                                                                      | A separate program, shipped beside Pluryprint; AGPL-3.0 section 13 and GPL-3.0 section 13 also allow the two to be combined                  |
+| AGPL-3.0                                                                                      | MuPDF, inside SumatraPDF                                                        | The same licence as Pluryprint                                                                                                               |
+| LGPL-2.0, LGPL-2.1 or LGPL-3.0, each "or later"                                               | WebKitGTK, GTK, GLib and others, in the AppImage                                | Lets a work that uses the library be conveyed under its own terms; the libraries ship unmodified, replaceable, with their source named above |
+| GPL-2.0-or-later; LGPL-3.0-or-later or GPL-2.0-or-later                                       | `libjbig`; Nettle, `libunistring`, `libidn2`, `libdw`/`libelf`, in the AppImage | Usable under GPL-3.0, which AGPL-3.0 section 13 allows to be combined with Pluryprint; shipped unmodified, with their source named above     |
+| zlib/libpng, bzip2, CPL-1.0                                                                   | the NSIS installer stub                                                         | The setup program that carries Pluryprint, not part of it: an aggregate, which the AGPL-3.0 (section 5) permits                              |
 
 The MPL-2.0 crates are used unmodified; their source is available from
-crates.io at the versions listed below. The LGPL libraries ship only in the
-Linux AppImages, unmodified, with their Corresponding Source as described
-above. No shipped component is GPL-2.0-only, EPL, CDDL, SSPL or proprietary.
+crates.io at the versions listed below. The GPL and LGPL libraries ship
+only in the Linux AppImages, unmodified, with their Corresponding Source as
+described above. No shipped component is GPL-2.0-only, EPL, CDDL, SSPL or proprietary.
 
 ---

@@ -2,7 +2,7 @@
 #
 # List the system packages an extracted AppImage carries libraries from.
 #
-#   scripts/release/appimage-sources.sh SQUASHFS_ROOT OUT
+#   scripts/release/appimage-sources.sh SQUASHFS_ROOT OUT [APPIMAGE]
 #
 # linuxdeploy copies WebKitGTK, GTK, GLib, libsoup and the rest of their
 # dependency tree from the build machine into the AppImage, unmodified. Most
@@ -16,26 +16,49 @@
 # knows those versions, and attaches the list to the release
 # (THIRD-PARTY-NOTICES.md, "Libraries bundled in the Linux AppImage").
 #
+# With APPIMAGE (the AppImage file itself), the list also names the AppImage
+# runtime it starts with: the static type2-runtime, which links libfuse
+# (LGPL-2.1), squashfuse, zstd and musl into the file, so its commit is
+# recorded too (https://github.com/AppImage/type2-runtime/commit/<commit>).
+#
 # Fails when a bundled library cannot be traced to a package: the list would
 # then be incomplete.
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 SQUASHFS_ROOT OUT" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "usage: $0 SQUASHFS_ROOT OUT [APPIMAGE]" >&2
   exit 2
 fi
 root="$1"
 out="$2"
+image="${3:-}"
 [[ -d "$root/usr/lib" ]] || { echo "$root has no usr/lib; extract the AppImage first" >&2; exit 1; }
 
-# The package that installed the file whose path ends with `rel`. Development
-# packages own the unversioned .so symlinks, never the library itself.
+# The package that installed the file whose path ends with `rel`, or nothing.
+# Development packages own the unversioned .so symlinks, never the library
+# itself. `dpkg -S` fails for a file no package owns; under pipefail that
+# would end the script before the fallbacks below get their turn.
 owner() {
   local rel="$1"
-  dpkg -S "*/$rel" 2>/dev/null | cut -d: -f1 | tr ',' '\n' | sed 's/^ *//' |
-    { grep -v -- '-dev$' || true; } | head -n1
+  { dpkg -S "*/$rel" 2>/dev/null || true; } | cut -d: -f1 | tr ',' '\n' |
+    sed 's/^ *//' | { grep -v -- '-dev$' || true; } | head -n1
 }
+
+# The type2-runtime commit the AppImage `image` starts with, from the URL the
+# runtime prints with --appimage-version (read from the file, not run: the
+# staged copy need not be executable). The squashfs image after it is
+# compressed, so the first match is the runtime's.
+runtime_commit() {
+  { LC_ALL=C grep -aoE -m1 'github\.com/AppImage/type2-runtime/commit/[0-9a-f]+' "$image" || true; } |
+    head -n1 | sed 's|.*/||'
+}
+
+commit=""
+if [[ -n "$image" ]]; then
+  commit=$(runtime_commit)
+  [[ -n "$commit" ]] || { echo "::error::$image names no type2-runtime commit" >&2; exit 1; }
+fi
 
 packages=$(mktemp)
 missing=0
@@ -72,6 +95,10 @@ done < <(find "$root/usr/lib" -path "$root/usr/lib/Pluryprint" -prune -o \
   echo "# Columns: package, version, architecture, source package, source version."
   echo "# The source of each: apt-get source <source>=<source version>, or"
   echo "# https://launchpad.net/ubuntu/+source/<source>/<source version>"
+  if [[ -n "$commit" ]]; then
+    echo "# AppImage runtime (statically links libfuse, squashfuse, zstd and musl):"
+    echo "# https://github.com/AppImage/type2-runtime/commit/$commit"
+  fi
   sort -u "$packages" | while read -r pkg; do
     dpkg-query -W -f='${binary:Package} ${Version} ${Architecture} ${source:Package} ${source:Version}\n' "$pkg"
   done

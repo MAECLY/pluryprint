@@ -400,7 +400,7 @@ The CUPS backend is shared with macOS and already compiled for Linux. The work f
 - **Updates:** the AppImage updates itself (`linux-x86_64`, `linux-aarch64`); a `.deb` install updates in the app through `pkexec dpkg -i` (`linux-x86_64-deb`, `linux-aarch64-deb`).
 - **Engine:** process-group memory accounting from `/proc`, so the memory cap covers a capped tool's children; process groups signalled without the ambiguous `kill -<sig> -<pgid>` form.
 - **CI:** `ubuntu-22.04` in the pull-request gate (fmt, clippy, `--lib`); `linux.yml` with the full suite on `ubuntu-22.04-arm`, Xvfb and a `cups-pdf` queue (push to `main`, weekly, by hand).
-- **Licences:** the AppImage's LGPL libraries listed with a Corresponding Source pointer.
+- **Licences:** the AppImage's GPL and LGPL libraries, and the runtime's static libfuse, listed with a Corresponding Source pointer and a written offer.
 
 ### Exit criteria
 

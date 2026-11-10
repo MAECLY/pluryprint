@@ -507,7 +507,8 @@ jobs:
           set -euo pipefail
           version=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
           scripts/release/appimage-sources.sh "$RUNNER_TEMP/squashfs-root" \
-            "release-staging/Pluryprint_${version}_${LABEL}_appimage-sources.txt"
+            "release-staging/Pluryprint_${version}_${LABEL}_appimage-sources.txt" \
+            "release-staging/Pluryprint_${version}_${LABEL}.AppImage"
 
       - name: Upload the unsigned files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

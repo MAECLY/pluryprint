@@ -420,9 +420,15 @@ permissions it granted the previous version.
   they came from, with the exact Ubuntu source package and version
   (`scripts/release/appimage-sources.sh` on the extracted AppImage), and the
   release attaches the list as
-  `Pluryprint_X.Y.Z_linux_<arch>_appimage-sources.txt`. The notices point
-  there, to Ubuntu's source archive, and carry a written offer of that source
-  for three years. The `.deb` carries none of these libraries: it depends on
+  `Pluryprint_X.Y.Z_linux_<arch>_appimage-sources.txt`, which also names the
+  type2-runtime commit the AppImage starts with (the runtime links libfuse,
+  LGPL-2.1, statically). The notices point there, to Ubuntu's source archive
+  and the runtime's repository, and carry a written offer of the source of
+  every GPL- or LGPL-licensed component for three years. Ubuntu's archive
+  drops a version once a security update supersedes it, so the written offer
+  is what keeps that promise afterwards: keep a copy of each release's
+  source packages (`apt-get source` on a matching 22.04 machine, while the
+  version is current). The `.deb` carries none of these libraries: it depends on
   the distribution's packages.
 
 - **SumatraPDF pin.** 3.6.1, x64 and ARM64. The archive hashes in
