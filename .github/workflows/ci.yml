@@ -1,11 +1,13 @@
 # The essential checks a pull request must pass: lint, typecheck, format and
 # unit tests for the frontend; fmt, clippy and the full test suite for the
-# Rust backend on Windows, and clippy plus the unit tests on macOS (the
-# cfg-gated CUPS code). Dependency audits are not here: a new advisory must
-# not fail a pull request that changes no dependency, so audit.yml runs them
-# on a schedule, on lockfile changes and before every release. Nothing here
-# builds an installer or reads a secret; release.yml builds, measures and
-# signs the shipped artifacts (and checks THIRD-PARTY-NOTICES.md first).
+# Rust backend on Windows, and clippy plus the unit tests on macOS and Linux
+# (the cfg-gated CUPS and process code). linux.yml runs the full Linux suite
+# (a display, a CUPS queue, the converters) after a merge, not here.
+# Dependency audits are not here either: a new advisory must not fail a pull
+# request that changes no dependency, so audit.yml runs them on a schedule,
+# on lockfile changes and before every release. Nothing here builds an
+# installer or reads a secret; release.yml builds, measures and signs the
+# shipped artifacts (and checks THIRD-PARTY-NOTICES.md first).
 # `make check-full` runs everything, audits included, locally.
 name: CI
 
@@ -55,14 +57,17 @@ jobs:
         run: pnpm test
 
   # The Rust code is heavily cfg-gated (WinSpool and the Explorer handler on
-  # Windows, CUPS on macOS), so it is checked on both shipped platforms.
+  # Windows, CUPS on macOS and Linux, /proc and WebKitGTK on Linux), so it is
+  # checked on every shipped platform. Linux runs on ubuntu-22.04, the image
+  # release.yml builds the Linux packages on (glibc 2.35), so the baseline
+  # that ships is the one that is linted; x64 only: ARM64 is in linux.yml.
   backend:
     name: Backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-22.04]
     env:
       # A test run never moves a MaeclyPrint-era data directory (ADR-0009).
       PLURYPRINT_SKIP_MIGRATION: '1'
@@ -81,6 +86,16 @@ jobs:
           rustup default stable
           rustc --version
 
+      # What tauri links against on Linux (WebKitGTK, GTK, librsvg, and
+      # D-Bus through tao: libdbus-sys panics at build time without it), plus
+      # the two tools the bundler calls. The hosted image has none of it.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file
+
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -90,9 +105,9 @@ jobs:
             ~/.cargo/git/db/
             src-tauri/target/
             shell-ext-win/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'shell-ext-win/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'shell-ext-win/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       # Formatting does not depend on the platform: once is enough.
       - name: cargo fmt
@@ -106,14 +121,15 @@ jobs:
 
       # Windows: a full run, never filtered: tests/ipc_surface.rs regenerates
       # src/ipc/bindings.ts and fails when the committed copy is stale. The
-      # integration tests do not depend on the platform, so macOS runs only
-      # the unit tests, which hold its cfg-gated code (CUPS, Finder).
+      # integration tests do not depend on the platform, so macOS and Linux
+      # run only the unit tests, which hold their cfg-gated code (CUPS,
+      # Finder, /proc). They need no display: linux.yml runs the rest.
       - name: cargo test
         if: runner.os == 'Windows'
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: cargo test (unit)
-        if: runner.os == 'macOS'
+        if: runner.os != 'Windows'
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       # The Explorer context-menu DLL is its own crate (own target dir, own

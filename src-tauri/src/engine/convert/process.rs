@@ -246,10 +246,12 @@ pub(crate) fn kill_tree(child: &mut Child) {
     let pid = child.id();
     #[cfg(unix)]
     {
-        // `kill -KILL -<pgid>` signals the whole group the child leads. Run
-        // through the `kill` utility so no `libc` binding is needed.
+        // `kill -KILL -- -<pgid>` signals the whole group the child leads.
+        // The `--` is not optional: procps-ng's `kill` (3.3.17, Ubuntu 22.04)
+        // reads a bare `-<pgid>` after the signal as a second signal option
+        // and then signals the *caller's* group, killing this process.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -283,8 +285,9 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
     let pid = child.id();
     #[cfg(unix)]
     {
+        // `--` as in [`kill_tree`]: without it procps-ng signals our group.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-KILL", "--", &format!("-{pid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -336,8 +339,10 @@ pub(crate) fn kill_tree_confirmed(child: &mut Child) -> bool {
 /// `None` when it cannot be told (`kill` would not run).
 #[cfg(unix)]
 pub(crate) fn group_alive(pgid: u32) -> Option<bool> {
+    // `--` as in [`kill_tree`]: procps-ng otherwise probes our own group,
+    // which is always alive, and every tree would look like it survived.
     let probe = Command::new("kill")
-        .args(["-0", &format!("-{pgid}")])
+        .args(["-0", "--", &format!("-{pgid}")])
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -483,9 +488,12 @@ pub enum CapScope {
 ///   for `mmap`, so this process also samples the child's memory every
 ///   [`MEMORY_POLL`] (macOS: its physical footprint, compressed pages
 ///   included; Linux: its resident set) and kills it past the cap. For
-///   [`CapScope::Tree`] it samples the child's whole process group on macOS.
-///   (WebKit's own web-content and networking processes are XPC services that
-///   launchd starts, outside that group: they are not covered.)
+///   [`CapScope::Tree`] it samples the child's whole process group
+///   ([`group_memory_in_use`]). On macOS, WebKit's own web-content and
+///   networking processes are XPC services that launchd starts, outside that
+///   group: they are not covered. On Linux a helper is covered for as long
+///   as it stays in the group; one that starts its own session or group
+///   (`setsid`) leaves it, and the cap with it.
 ///
 /// A child that ran out of memory is [`CappedError::OverMemory`]; a cancel,
 /// a timeout or any other failure is what [`run_bounded`] would return.
@@ -626,8 +634,9 @@ pub fn memory_in_use(pid: u32) -> Option<u64> {
 }
 
 /// The memory the process group `pgid` (a child [`isolate_process_tree`]
-/// made a group leader) is using together, as [`memory_in_use`] counts it.
-/// On Linux only the leader is counted. `None` when the group is gone.
+/// made a group leader) is using together, as [`memory_in_use`] counts it:
+/// every member, not only the leader, so a helper the child starts cannot
+/// grow past the cap unseen. `None` when the group is gone.
 #[cfg(unix)]
 pub fn group_memory_in_use(pgid: u32) -> Option<u64> {
     #[cfg(target_os = "macos")]
@@ -654,8 +663,42 @@ pub fn group_memory_in_use(pgid: u32) -> Option<u64> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        memory_in_use(pgid)
+        // Linux has no call that lists a group's members, so every process
+        // in /proc is asked for its group. A process that exits between the
+        // listing and the read is simply skipped.
+        let mut members = 0usize;
+        let mut total = 0u64;
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|n| n.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            if proc_stat_pgrp(&stat) != Some(pgid) {
+                continue;
+            }
+            if let Some(used) = memory_in_use(pid) {
+                members += 1;
+                total = total.saturating_add(used);
+            }
+        }
+        (members > 0).then_some(total)
     }
+}
+
+/// The process group in the text of a `/proc/<pid>/stat` file (its fifth
+/// field). The second field is the command name in parentheses, which may
+/// itself hold spaces and parentheses, so the fields are counted from the
+/// last `)`: state, parent pid, then the group.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn proc_stat_pgrp(stat: &str) -> Option<u32> {
+    let (_, rest) = stat.rsplit_once(')')?;
+    rest.split_whitespace().nth(2)?.parse().ok()
 }
 
 /// Called by a capped child ([`run_capped`]) before it touches its input:
@@ -1137,6 +1180,42 @@ mod reason_tests {
     /// child that grows past its cap is killed as `OverMemory`; one that
     /// stays under it runs to the end; cancel and timeout behave as in
     /// `run_bounded`.
+    /// The group probe and the group kill address the child's group, never
+    /// ours. procps-ng's `kill` (Ubuntu 22.04) reads `kill -0 -<pgid>` as two
+    /// signal options and probes, or kills, the caller's own group: the
+    /// probe then said every finished tree was alive, and the kill took the
+    /// test runner with it.
+    #[cfg(unix)]
+    #[test]
+    fn kill_tree_ends_the_childs_group_and_the_probe_sees_it_gone() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 30 & sleep 30"]);
+        isolate_process_tree(&mut cmd);
+        let mut child = cmd.spawn().unwrap();
+        let pgid = child.id();
+        assert_eq!(group_alive(pgid), Some(true));
+        assert!(kill_tree_confirmed(&mut child));
+        // We are still here, and the group really is gone.
+        assert_eq!(group_alive(pgid), Some(false));
+    }
+
+    /// The group is read from the fields after the command name, whatever
+    /// that name holds.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn proc_stat_pgrp_reads_the_group_after_the_command_name() {
+        let stat = "4242 (a) b (c) S 4100 4200 4100 0 -1 4194560 120 0 0 0";
+        assert_eq!(proc_stat_pgrp(stat), Some(4200));
+        assert_eq!(proc_stat_pgrp("4242 (sh) S 1 4242 1"), Some(4242));
+        assert_eq!(proc_stat_pgrp("4242 (sh"), None);
+        assert_eq!(proc_stat_pgrp(""), None);
+        // This process's own group, as the kernel reports it.
+        let own = std::fs::read_to_string("/proc/self/stat").unwrap();
+        // SAFETY: getpgrp has no preconditions.
+        let expected = u32::try_from(unsafe { libc::getpgrp() }).unwrap();
+        assert_eq!(proc_stat_pgrp(&own), Some(expected));
+    }
+
     #[cfg(unix)]
     #[test]
     fn nfr_security_run_capped_kills_a_child_over_its_memory_cap() {
@@ -1166,7 +1245,10 @@ mod reason_tests {
         assert!(started.elapsed() < Duration::from_secs(20));
         // Round 7: a tree cap also counts a helper the child starts (the
         // shell stays, perl runs as its child in the same group).
+        // On Linux that needs every member of the group summed: counting the
+        // leader alone let the shell sleep out perl's 30 s and exit 0.
         let helper = "perl -e '$x = q(a) x (400*1024*1024); sleep 30'; exit 0";
+        let started = Instant::now();
         let r = run_capped(
             sh(helper),
             "grow",
@@ -1177,6 +1259,7 @@ mod reason_tests {
             CapScope::Tree,
         );
         assert!(matches!(r, Err(CappedError::OverMemory)), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(20));
 
         assert!(run_capped(
             sh("exit 0"),
