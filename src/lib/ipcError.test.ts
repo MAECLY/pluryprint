@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { errorTechnical, IpcFailure, localizeIpcError } from './ipcError';
+import { rememberHostInfo } from '@/lib/platform';
 
 describe('localizeIpcError', () => {
   it('FR-092: translates a known code + reason with its params', () => {
@@ -171,5 +172,39 @@ describe('localizeIpcError', () => {
     expect(err.detail).toBe('`ippfind` is not installed');
     expect(err.code).toBe('DependencyMissing');
     expect(err.reason).toBe('ippfind_missing');
+  });
+
+  it('on Linux, a reason with a Linux sentence says how to fix it there', () => {
+    const payload = {
+      code: 'DependencyMissing',
+      reason: 'ippfind_missing',
+      message: '`ippfind` is not installed',
+    } as const;
+    // Off Linux (jsdom's webview reads as Windows), the generic sentence.
+    expect(localizeIpcError(payload, 'en-US')).not.toMatch(/cups-ipp-utils/);
+    rememberHostInfo({ os: 'linux' });
+    expect(localizeIpcError(payload, 'en-US')).toMatch(
+      /apt install cups-ipp-utils/,
+    );
+    expect(localizeIpcError(payload, 'es-ES')).toMatch(
+      /apt install cups-ipp-utils/,
+    );
+    // A reason without a Linux variant keeps its one sentence.
+    expect(
+      localizeIpcError(
+        { code: 'PrintFailed', reason: 'set_default_failed', message: 'x' },
+        'en-US',
+      ),
+    ).toBe('The system could not set the default printer.');
+  });
+
+  it('on Linux, a missing dependency reaching a command names its Linux remedy', () => {
+    rememberHostInfo({ os: 'linux' });
+    expect(
+      localizeIpcError(
+        { code: 'DependencyMissing', reason: 'libre-office', message: 'x' },
+        'en-US',
+      ),
+    ).toMatch(/apt install libreoffice/);
   });
 });

@@ -144,15 +144,18 @@
         "password_empty": "Enter the PDF's password."
       },
       "DependencyMissing": {
-        "ippfind_missing": "Network discovery needs the CUPS client tools (ippfind), which are not installed."
+        "ippfind_missing": "Network discovery needs the CUPS client tools (ippfind), which are not installed.",
+        "ippfind_missingLinux": "Network discovery needs ippfind, from the CUPS IPP tools, which is not installed. Install the cups-ipp-utils package (on Debian and Ubuntu: sudo apt install cups-ipp-utils)."
       },
       "PrintFailed": {
         "set_default_failed": "The system could not set the default printer.",
         "add_printer_needs_admin": "Adding a printer may require administrator rights. Use “Open printer settings” to add it from Windows.",
+        "add_printer_needs_adminLinux": "Adding a printer may require administrator rights (on many systems, membership of the lpadmin group). Use “Open printer settings” to add it from your system's printer settings.",
         "spooler_down": "The Windows Print Spooler service is not running. Start it (Services → Print Spooler) and try again.",
         "add_printer_no_ippurl": "This version of Windows cannot add an IPP printer from Pluryprint. Use “Open printer settings” to add it from Windows.",
         "add_printer_failed": "The system could not add the printer. The logs folder has the details.",
         "cups_unavailable": "The system print service (CUPS) did not respond.",
+        "cups_unavailableLinux": "The system print service (CUPS) did not respond. Check that it is installed and running (systemctl status cups).",
         "test_page_failed": "The test page could not be prepared."
       },
       "UpdateSignatureInvalid": {
@@ -208,7 +211,8 @@
     },
     "libre-office": {
       "remediation": "LibreOffice is missing, so Office, OpenDocument and RTF files cannot be printed. Download it free from https://www.libreoffice.org/download",
-      "remediationMac": "LibreOffice is missing, so Office and OpenDocument files cannot be printed. Download it free from https://www.libreoffice.org/download"
+      "remediationMac": "LibreOffice is missing, so Office and OpenDocument files cannot be printed. Download it free from https://www.libreoffice.org/download",
+      "remediationLinux": "LibreOffice is missing, so Office, OpenDocument and RTF files cannot be printed. Install it from your distribution's packages (on Debian and Ubuntu: sudo apt install libreoffice), or download it free from https://www.libreoffice.org/download"
     },
     "chromium": {
       "remediation": "Pluryprint no longer uses Microsoft Edge or Google Chrome: HTML, Markdown and text files print with the system web view. Resume the job to print it."
@@ -223,16 +227,21 @@
       "remediation": "The HEVC video decoder this HEIC photo needs is missing. Install “HEVC Video Extensions” from the Microsoft Store. A job paused for it can then be resumed from the queue."
     },
     "no-heif-decoder": {
-      "remediation": "No HEIF image decoder is available on this system. Convert the photo to JPEG or PNG first."
+      "remediation": "No HEIF image decoder is available on this system. Convert the photo to JPEG or PNG first.",
+      "remediationLinux": "No HEIF image decoder is installed. Install heif-convert (the libheif-examples package on Debian and Ubuntu, libheif-tools on Fedora) or ImageMagick, or convert the photo to JPEG or PNG first."
     },
     "sips": {
       "remediation": "sips, the macOS image tool, could not be found."
     },
     "cups": {
-      "remediation": "The system print service (CUPS) could not be started. Check that printing is set up on this computer."
+      "remediation": "The system print service (CUPS) could not be started. Check that printing is set up on this computer.",
+      "remediationLinux": "The system print service (CUPS) is not available, so nothing can be printed. Install the CUPS client tools (the cups-client package on Debian and Ubuntu) and check that the cups service is running."
     },
     "no-print-backend": {
       "remediation": "Printing is not available on this platform."
+    },
+    "heif-decoder": {
+      "remediation": "No HEIF image decoder was found, so HEIC/HEIF photos cannot be printed. Install heif-convert (the libheif-examples package on Debian and Ubuntu, libheif-tools on Fedora) or ImageMagick. A job paused for it can then be resumed from the queue."
     }
   },
   "testPage": {
