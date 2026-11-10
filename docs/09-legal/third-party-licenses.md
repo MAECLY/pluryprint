@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-> **TL;DR.** Pluryprint is AGPL-3.0-only. It bundles SumatraPDF on Windows (GPL-3.0, with MuPDF inside under AGPL-3.0 — fetched at packaging time by `scripts/fetch-sumatrapdf.*`, never committed) and depends on Tauri/Rust/React (all permissive licenses, AGPL-compatible). External tools we invoke as subprocesses (LibreOffice, CUPS `lp`, macOS `sips` and `textutil`) are not embedded; per FSF guidance, subprocess invocation does not create a derivative work, so their licenses do not constrain our license. The notices themselves ship in every bundle as [`THIRD-PARTY-NOTICES.md`](../../THIRD-PARTY-NOTICES.md), with `LICENSE` and the texts in `LICENSES/`.
+> **TL;DR.** Pluryprint is AGPL-3.0-only. It bundles SumatraPDF on Windows (GPL-3.0, with MuPDF inside under AGPL-3.0 — fetched at packaging time by `scripts/fetch-sumatrapdf.*`, never committed) and depends on Tauri/Rust/React (all permissive licenses, AGPL-compatible). On Linux the AppImage also carries the LGPL-2.1-or-later WebKitGTK/GTK/GLib stack as shared libraries, with a Corresponding Source pointer ([ADR-0015](../adr/0015-linux-support.md)); the `.deb` uses the distribution's. External tools we invoke as subprocesses (LibreOffice, CUPS `lp`, macOS `sips` and `textutil`, and on Linux libheif's tools or ImageMagick for HEIC) are not embedded; per FSF guidance, subprocess invocation does not create a derivative work, so their licenses do not constrain our license. The notices themselves ship in every bundle as [`THIRD-PARTY-NOTICES.md`](../../THIRD-PARTY-NOTICES.md), with `LICENSE` and the texts in `LICENSES/`.
 
 This document inventories every third-party component Pluryprint depends on, with its license, our usage pattern (embedded vs subprocess), and the AGPL-3.0 compatibility analysis. This is the source of truth for legal compliance; the notice that ships with the app, covering every transitive crate as well, is [`THIRD-PARTY-NOTICES.md`](../../THIRD-PARTY-NOTICES.md) at the repository root.
 
@@ -48,7 +48,7 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `encoding_rs` | 0.8 | MIT / Apache-2.0 (+ BSD-3-Clause data) | Decoding text files that are not UTF-8 (FR-057) | Yes |
 | `zeroize` | 1 | MIT / Apache-2.0 | Wiping a PDF password from memory (FR-059, NFR-082) | Yes |
 | `flate2` | 1 | MIT / Apache-2.0 | Inflating an SVGZ with a size cap (FR-052a); already in the tree through `usvg`, `lopdf` and `png` | Yes |
-| `libc` *(macOS/Linux targets only)* | 0.2 | MIT / Apache-2.0 | The SVG worker's memory cap: `setrlimit(RLIMIT_DATA)` and the parent's memory watchdog (`proc_pid_rusage`); already in the tree through `tokio` and others | Yes |
+| `libc` *(macOS/Linux targets only)* | 0.2 | MIT / Apache-2.0 | The SVG worker's memory cap: `setrlimit(RLIMIT_DATA)` and the parent's memory watchdog (`proc_pid_rusage` on macOS; on Linux the watchdog reads `/proc`); already in the tree through `tokio` and others | Yes |
 | `uuid` | 1 (`v7`) | MIT / Apache-2.0 | Time-sortable job ids | Yes |
 | `time` | 0.3 | MIT / Apache-2.0 | RFC 3339 timestamps | Yes |
 | `windows` *(Windows targets only)* | 0.62 | MIT / Apache-2.0 | winspool + GDI `DeviceCapabilities`, PrintTicket ↔ DEVMODE, console attach, policy registry/owner checks, and `IStream` / `SHCreateMemStream` for the render worker (the line `webview2-com` and wry use) | Yes |
@@ -103,11 +103,13 @@ Two notes: **Tailwind CSS is MIT and its generated CSS *is* distributed** in the
 | Chromium / Microsoft Edge | BSD 3-Clause (Chromium core) | Nothing any more: the headless-browser fallback for HTML, Markdown and text was removed in round 6; pages print with the system web view | No (subprocess) | Yes (separate) |
 | sips / Windows Imaging Component | OS components | HEIC/HEIF decoding (`sips` on macOS; WIC plus the Store *HEIF Image Extensions* and *HEVC Video Extensions* on Windows); macOS `textutil` likewise turns RTF into HTML | No (system tool / OS API) | Yes (separate) |
 | CUPS `lp` | Apache 2.0 (system component) | Printing on macOS/Linux | No (system binary) | Yes (separate) |
+| libheif tools (`heif-dec`, `heif-convert`) / ImageMagick (Linux) | libheif: LGPL-3.0 library, MIT example programs; ImageMagick License (Apache-2.0-style) | HEIC/HEIF decoding on Linux, found at run time and installed by the user | No (subprocess) | Yes (separate) |
 | WebView2 loader | BSD-style Microsoft license (loader); Edge engine system-installed | Webview rendering, and printing HTML, Markdown and text in the render worker | Loader statically linked; engine system | Yes (loader); engine N/A |
 | WKWebView (macOS) | Apple SLA | Webview rendering, and printing HTML, Markdown and text in the render worker | No (system framework) | N/A (system) |
+| WebKitGTK 4.1, GTK 3, GLib, libsoup 3 and their dependencies (Linux) | LGPL-2.1-or-later (WebKitGTK also BSD-2-Clause in parts; some dependencies MIT or similar) | Webview rendering, and printing HTML, Markdown and text in the render worker | `.deb`: no (the distribution's shared libraries). AppImage: yes, as separate shared libraries inside the image | Yes: dynamic linking, replaceable libraries, Corresponding Source offered (see below) |
 | NSIS (via `tauri build`) | zlib/libpng | Windows installer | No (build-time only) | N/A |
 
-**Removed from this inventory because they are not used:** `reqwest` (replaced by `ureq`), `tauri-plugin-cli` (the CLI is plain `clap`), `winreg`, `which`, `mime_guess`, `infer`, `rayon`, `notify`, `react-i18next`, `@radix-ui/*`, `react-hook-form`, `@tanstack/react-query`, `lucide-react`, `clsx`, `tailwind-merge`, `playwright`, Inno Setup, create-dmg, and Pandoc (Markdown converts in-process with `pulldown-cmark` since round 3). **ImageMagick and qpdf are not invoked at all**: images are converted in-process with the `image` crate, and there is no PDF preprocessing step.
+**Removed from this inventory because they are not used:** `reqwest` (replaced by `ureq`), `tauri-plugin-cli` (the CLI is plain `clap`), `winreg`, `which`, `mime_guess`, `infer`, `rayon`, `notify`, `react-i18next`, `@radix-ui/*`, `react-hook-form`, `@tanstack/react-query`, `lucide-react`, `clsx`, `tailwind-merge`, `playwright`, Inno Setup, create-dmg, and Pandoc (Markdown converts in-process with `pulldown-cmark` since round 3). **qpdf is not invoked at all**, and ImageMagick only on Linux as the last HEIC decoder: images are converted in-process with the `image` crate, and there is no PDF preprocessing step.
 
 For each entry below: the license text source, how we use it, and any compliance notes.
 
@@ -160,6 +162,13 @@ These are statically or dynamically linked into `pluryprint.exe`/`pluryprint` an
 
 - **Provided by macOS** as a system framework. We link against it dynamically.
 - **Compatibility:** system library; same exception applies.
+
+### WebKitGTK and the GTK stack (Linux webview)
+
+- **Used for:** the app's own window and web view (Tauri's Linux runtime, through the gtk-rs and `webkit2gtk` bindings, which are MIT crates in the inventory's transitive notices) and the render worker's printing (FR-055), from 0.0.5 ([ADR-0015](../adr/0015-linux-support.md)).
+- **`.deb`:** links dynamically against the distribution's `libwebkit2gtk-4.1-0`, `libgtk-3-0` and the rest, declared as package dependencies. Nothing of them is shipped, so this is the [system library exception](https://www.gnu.org/licenses/gpl-faq.en.html#SystemLibraryException) case again.
+- **AppImage:** carries those libraries (WebKitGTK, GTK 3, GLib, libsoup 3 and what they need from Ubuntu 22.04) as separate shared objects inside the image, so they are *distributed* by us. The LGPL-2.1-or-later allows it with conditions we meet: the libraries stay dynamically linked and replaceable (`--appimage-extract` unpacks the image; any `.so` can be swapped), their licence texts and copyright notices travel with the notices, and `THIRD-PARTY-NOTICES.md` names each bundled library and points at its Corresponding Source (the matching Ubuntu 22.04 source packages). AGPL-3.0 code may be combined with LGPL-2.1-or-later libraries this way.
+- **Compatibility:** yes.
 
 ## Embedded data (bundled binaries we ship)
 
@@ -220,7 +229,7 @@ This is the legal foundation for using LibreOffice (MPL 2.0) in an AGPL-3.0 proj
 
 ### Image conversion — no third party involved
 
-Image → PDF conversion happens **inside** Pluryprint using the `image` and `lopdf` crates (both permissive, both in the inventory above). **ImageMagick is not used**, and `magick` is never invoked. Likewise there is **no qpdf step**: nothing linearizes or decrypts PDFs. Earlier versions of this document listed both; they were never dependencies.
+Image → PDF conversion happens **inside** Pluryprint using the `image` and `lopdf` crates (both permissive, both in the inventory above). **ImageMagick is not used for images**; on Linux it is only the last-resort HEIC decoder, run as a subprocess when libheif's tools are absent. Likewise there is **no qpdf step**: nothing linearizes or decrypts PDFs. Earlier versions of this document listed both; they were never dependencies.
 
 ## Build-time only (not distributed)
 
@@ -271,9 +280,9 @@ Every bundle carries, via `bundle.resources` in `tauri.conf.json` (checked by `s
     └── LICENSE.txt            # SumatraPDF's own licence file, when its archive has one
 ```
 
-On macOS `<resource-dir>` is `Pluryprint.app/Contents/Resources/`; on Windows it is the install folder.
+On macOS `<resource-dir>` is `Pluryprint.app/Contents/Resources/`; on Windows it is the install folder; on Linux it is the package's folder under `/usr/lib/` (inside the AppImage, the same path in the mounted image).
 
-`THIRD-PARTY-NOTICES.md` is generated. Its first part (SumatraPDF, the native code, the WebView2 loader, the NSIS installer stub, the font, the compatibility table) is hand-written in `scripts/licenses/notices-header.md`; the rest reproduces the licence text, with its copyright lines, of every crate compiled into the app or the Explorer DLL for the four release targets (cargo-about, `scripts/licenses/about.toml`) and of every frontend package in the bundle (`pnpm licenses list --prod`):
+`THIRD-PARTY-NOTICES.md` is generated. Its first part (SumatraPDF, the native code, the WebView2 loader, the NSIS installer stub, the font, the compatibility table) is hand-written in `scripts/licenses/notices-header.md`; the rest reproduces the licence text, with its copyright lines, of every crate compiled into the app or the Explorer DLL for the release targets (the four Windows and macOS triples and, from 0.0.5, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`; cargo-about, `scripts/licenses/about.toml`) and of every frontend package in the bundle (`pnpm licenses list --prod`):
 
 ```bash
 cargo install cargo-about --locked --features cli --version 0.9.2   # once

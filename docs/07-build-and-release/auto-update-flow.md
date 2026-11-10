@@ -104,7 +104,7 @@ Fields:
 | `version` | string | SemVer. Tauri client compares against the running version using SemVer precedence (so `1.2.3-beta.2` < `1.2.3`). |
 | `notes` | string | Plain text or Markdown. Shown to the user in the update prompt. Keep < 2 KB. |
 | `pub_date` | string | ISO 8601 UTC. Informational only. |
-| `platforms` | object | Keys: `<os>-<arch>`. Values: `{signature, url}`. Missing key means no update available for that platform. |
+| `platforms` | object | Keys: `<os>-<arch>`, or `<os>-<arch>-<installer>` for a platform with more than one package. Values: `{signature, url}`. Missing key means no update available for that platform. As built, the published manifest carries `windows-x86_64`, `windows-aarch64`, `darwin-x86_64`, `darwin-aarch64` and, from 0.0.5 ([ADR-0015](../adr/0015-linux-support.md)), `linux-x86_64` and `linux-aarch64` (the AppImage) plus `linux-x86_64-deb` and `linux-aarch64-deb` (the `.deb`, installed with `pkexec dpkg -i`). The client tries `<os>-<arch>-<installer>` first. |
 | `platforms.*.signature` | string | Base64-encoded Ed25519 signature with Tauri's framing. |
 | `platforms.*.url` | string | HTTPS URL to the binary. Must be on a domain whose certificate is trusted by the OS. |
 

@@ -34,10 +34,10 @@ Please include:
 
 ## What is in scope
 
-- The Tauri application (Rust core + React frontend).
-- The Windows shell extension DLL.
-- The auto-updater pipeline (manifest signing, delta verification).
-- The installer (Inno Setup script + Sparse MSIX).
+- The Tauri application (Rust core + React frontend), on Windows, macOS and Linux (Linux is a preview platform).
+- The Windows shell extension DLL, the macOS Finder service, and the Linux desktop entries (the `.desktop` file and the Dolphin and Nemo entries the `.deb` installs).
+- The auto-updater pipeline (update signatures, the release workflow that signs and publishes them, and the in-app install, including `pkexec dpkg -i` for `.deb` installs).
+- The installers and packages: the per-user NSIS installer (Windows), the `.dmg` (macOS), and the AppImage and `.deb` (Linux).
 - Any code shipped on `updates.maecly.com` infrastructure.
 
 ## What is out of scope

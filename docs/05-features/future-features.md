@@ -185,8 +185,8 @@ Apply a PDF letterhead/template as background overlay on every printed page.
 
 ### Linux
 
-- Tauri supports Linux trivially; the harder part is the file-manager integration (Nautilus, Dolphin, Files all have different extension models).
-- CUPS is already what we'd use, so the print backend is free.
+- Shipped as a preview in 0.0.5 ([ADR-0015](../adr/0015-linux-support.md)): x86_64 and ARM64, AppImage and `.deb`, "Open with" everywhere and Dolphin / Nemo actions from the `.deb`.
+- Still future: a GNOME Files (Nautilus) entry, Thunar and Caja actions, per-profile rows in the file-manager menus, an opt-in way for the AppImage to register itself, and a package repository, Flatpak or `.rpm` if there is demand.
 
 ### Windows on ARM
 

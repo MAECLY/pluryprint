@@ -1,6 +1,6 @@
 # Pluryprint — Documentation
 
-> Open source batch file printing for Windows and macOS. Right-click → print everything, with no 15-file limit, no Adobe required, and no $149 license fee.
+> Open source batch file printing for Windows, macOS and Linux (Linux in preview). Right-click → print everything, with no 15-file limit, no Adobe required, and no $149 license fee.
 
 This directory contains the full documentation for the **Pluryprint** project: vision, research, requirements, architecture, features, roadmap, build/release pipelines, development guidelines, legal information, and Architecture Decision Records (ADRs).
 

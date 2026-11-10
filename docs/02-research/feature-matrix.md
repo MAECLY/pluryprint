@@ -66,7 +66,7 @@ For the source materials behind each cell, see [competitor-analysis.md](./compet
 | **Windows x64 support** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Windows ARM64 support** | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
 | **macOS support** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Planned (macOS 13+) |
-| **Linux support** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Out of scope (community fork welcome) |
+| **Linux support** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Preview from 0.0.5: x86_64 and ARM64, AppImage and `.deb` ([ADR-0015](../adr/0015-linux-support.md)) |
 | **Plugin / extension API** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Planned (Rust trait + WIT) |
 
 ## Reading the Matrix
@@ -109,7 +109,6 @@ A few things to notice when scanning the table:
 - Cloud folder monitor (Dropbox/Drive — out of scope, privacy-first).
 - Barcode watermarks (use a dedicated label tool).
 - Page text matching as a *core* feature (plugin only).
-- Linux support in the official build (welcomed as a community fork; the Rust core is portable, the shell integration layer is not).
 
 ## Format Coverage Detail
 
@@ -122,12 +121,12 @@ Because the comparison table compresses "multi-format input" into a single cell,
 | Legacy Office (DOC, XLS, PPT) | Partial | ✓ | Same path as modern Office. |
 | Plain text (TXT) | ✓ | ✓ | Native renderer. |
 | Markdown (MD) | ✓ | ✓ | Rendered to HTML, then printed via WebView2. |
-| HTML / XHTML | ✓ | ✓ | Via WebView2 (Windows) or WKWebView (macOS). |
+| HTML / XHTML | ✓ | ✓ | Via WebView2 (Windows), WKWebView (macOS) or WebKitGTK (Linux). |
 | RTF | ✗ | ✓ | Via headless LibreOffice. |
 | CSV | Partial | ✓ | As tabular text or via spreadsheet engine. |
 | JPEG, PNG, TIFF, BMP, GIF, WebP | ✓ | ✓ | `image-rs`. |
 | SVG | ✗ | ✓ | `resvg`. |
-| HEIC/HEIF | ✗ | Planned | Via `libheif` plugin. |
+| HEIC/HEIF | ✗ | ✓ | The OS decoder (`sips` on macOS, WIC on Windows); on Linux libheif's tools or ImageMagick, installed by the user. |
 | EPUB | ✗ | Planned | v1+ plugin. |
 | DjVu | ✗ | Planned | v1+ plugin. |
 | AutoCAD DWG/DXF | ✗ | Planned | Plugin via `oda-libraries` or `dxf-rs`. |

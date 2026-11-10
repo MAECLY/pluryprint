@@ -114,7 +114,7 @@ Tauri 2 changes this calculus. A Rust core plus a system-WebView frontend gives 
 
 - 5–10 MB installers (vs. 100+ MB for Electron).
 - 30–60 MB resident memory (vs. 200+ MB for Electron).
-- A single React/TypeScript codebase for the UI across Windows and macOS.
+- A single React/TypeScript codebase for the UI across Windows, macOS and Linux.
 - A first-class story for native shell integration via Rust's mature COM and Win32 ecosystems (`windows`, `windows-rs`, `winapi`).
 - Built-in auto-updater, code-signing helpers, and CI templates.
 
@@ -163,7 +163,7 @@ In the spirit of intellectual honesty, the conditions could turn against us.
 | Microsoft removes the 15-file cap entirely | Low (it has been unchanged since at least Windows 7) | Even if removed, the cap is only one of several reasons users want Pluryprint. |
 | A commercial vendor releases a free tier with shell integration | Medium | Even a free Print Conductor tier would not be open source; we keep the OSS, privacy, and lightweight pillars. |
 | Tauri 2 ecosystem stalls | Low (Tauri 2.x is on a stable cadence and has institutional sponsorship) | Rust core is portable; UI layer is the only Tauri-specific piece. |
-| A competing OSS project enters the gap | Medium | Coopetition. We collaborate where possible, differentiate on shell integration and Windows/macOS dual focus. |
+| A competing OSS project enters the gap | Medium | Coopetition. We collaborate where possible, differentiate on shell integration and on covering Windows, macOS and Linux. |
 | Maintainer burnout (the historical OSS failure mode) | High if not actively managed | Document everything, lower the bar to first contribution, set up a 2–3 person maintainer rotation by v1.0. |
 
 The biggest risk is the last one. The structural reason every prior OSS attempt failed was unsustainable solo maintenance, not technical inability. Pluryprint's success depends on building governance and contributor onboarding from day one, not bolting them on at v2.0.

@@ -96,7 +96,7 @@ Rust `Printer` (snake_case, `src-tauri/src/ipc/printers.rs`) → UI `UiPrinter` 
 - **Rust smoke**: `list_printers()` against the host's real spooler — asserts shape and normalized levels, tolerating **zero** printers (headless CI).
 - **Windows-without-Windows**: the FFI is type-checked on macOS via `cargo check --target x86_64-pc-windows-msvc` (no linker needed); runtime is exercised on the `windows-latest` CI job.
 - **Frontend smoke** (`PrintersScreen.test.tsx`): `@tauri-apps/api/mocks` `mockIPC` feeds fixtures → asserts rendering, the **degradation** case (mono printer hides supplies), the unavailable-outside-Tauri state, discovery, and the empty state.
-- **CI lanes**: `windows-latest` (spooler path) + `macos-latest` (CUPS path + frontend). True WebDriver e2e (`tauri-driver`) is **not supported on macOS** by Apple's WKWebView, so it's reserved for the Windows/Linux CI as a follow-up.
+- **CI lanes**: `windows-latest` (spooler path) + `macos-latest` (CUPS path + frontend); from 0.0.5 `ubuntu-22.04` runs the CUPS path's unit tests in the pull-request gate, and `linux.yml` runs the full suite against a real `cups-pdf` queue on `ubuntu-22.04-arm` ([ADR-0015](../adr/0015-linux-support.md)). True WebDriver e2e (`tauri-driver`) is **not supported on macOS** by Apple's WKWebView, so it's reserved for the Windows/Linux CI as a follow-up.
 
 ## Add-printer & discovery — status
 

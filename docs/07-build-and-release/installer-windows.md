@@ -571,7 +571,8 @@ Two builds from the same commit must produce byte-identical `setup.exe`. To achi
 ## See also
 
 - [installer-macos.md](./installer-macos.md) — macOS counterpart
-- [code-signing.md](./code-signing.md) — signing details for both platforms
+- [code-signing.md](./code-signing.md) — signing details for Windows and macOS
+- [installer-linux.md](./installer-linux.md) — the Linux AppImage and `.deb`
 - [auto-update-flow.md](./auto-update-flow.md) — how installed apps receive updates
 - [ci-cd.md](./ci-cd.md) — what CI really builds, and the list of release machinery that does not exist
 - [../adr/0006-installer-inno-setup.md](../adr/0006-installer-inno-setup.md) — the decision this document is measured against

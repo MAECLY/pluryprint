@@ -30,13 +30,13 @@ Implementation: a COM DLL implementing `IExplorerCommand`, written in Rust rathe
 
 | Format | Engine | Notes |
 |---|---|---|
-| **PDF** (`.pdf`) | Passthrough → SumatraPDF (Win) / `lp` (macOS) | Native, no conversion |
+| **PDF** (`.pdf`) | Passthrough → SumatraPDF (Win) / `lp` (macOS, Linux) | Native, no conversion |
 | **JPG/JPEG, PNG** | Rust `image` → one-page PDF (`lopdf`) → spooler | Standard image batch |
 | **TIFF, BMP, WebP** | Rust `image` → one-page PDF (`lopdf`) → spooler | Less common but cheap to include |
-| **HEIC/HEIF** | OS decoder (`sips` on macOS, WIC on Windows) → one-page PDF | Windows needs the Store *HEIF Image Extensions* (and *HEVC Video Extensions* for `.heic`). Without them the job pauses and offers the install |
+| **HEIC/HEIF** | OS decoder (`sips` on macOS, WIC on Windows; on Linux libheif's tools or ImageMagick) → one-page PDF | Windows needs the Store *HEIF Image Extensions* (and *HEVC Video Extensions* for `.heic`), Linux one of its decoders. Without them the job pauses and offers the install (on Linux, a web link) |
 | **SVG, SVGZ** | `usvg` + `svg2pdf` → one vector page, in a worker process | Nothing to install |
-| **DOCX, XLSX, PPTX, DOC, XLS, PPT, ODT, ODS, ODP** (and RTF on Windows) | LibreOffice headless → PDF | Needs LibreOffice. Pulled forward from v0.2 |
-| **HTML** | The system web view (WebView2 / WKWebView) in a worker process | Nothing to install. Pulled forward from v0.2 |
+| **DOCX, XLSX, PPTX, DOC, XLS, PPT, ODT, ODS, ODP** (and RTF on Windows and Linux) | LibreOffice headless → PDF | Needs LibreOffice. Pulled forward from v0.2 |
+| **HTML** | The system web view (WebView2 / WKWebView / WebKitGTK) in a worker process | Nothing to install. Pulled forward from v0.2 |
 | **Markdown, TXT** (and RTF on macOS) | In-process to HTML (`textutil` for RTF), then the HTML row | Nothing to install. Pulled forward from v0.2 |
 | **GIF** | — | Refused with its own message (decision D9) |
 
