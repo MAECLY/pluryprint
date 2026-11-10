@@ -572,8 +572,75 @@ const LIBREOFFICE_INSTALL_LINUX: &[InstallRecipe] = &[InstallRecipe::new(
 /// libheif's own tools (`heif-dec` from libheif 1.17, `heif-convert` before
 /// it), then ImageMagick 7 (`magick`) and 6 (`convert`), which decode HEIF
 /// through libheif too. [`crate::engine::convert::heif`] builds the argument
-/// vector from the name it was given.
+/// vector from the name it was given. A `convert` that is not ImageMagick's
+/// is passed over ([`is_heif_decoder`]).
 pub const HEIF_DECODERS_LINUX: &[&str] = &["heif-dec", "heif-convert", "magick", "convert"];
+
+/// How long `convert -version` may take to say what it is
+/// ([`is_heif_decoder`]).
+const VERSION_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// At most this many bytes of `convert -version` are read.
+const VERSION_PROBE_CAP: u64 = 4096;
+
+/// The [`Probe::exists`] for [`Dependency::HeifDecoder`]: a file, and for
+/// `convert`, one that says it is ImageMagick.
+///
+/// `convert` is a common name. GraphicsMagick's compatibility package
+/// installs one, and GraphicsMagick does not read ImageMagick's
+/// `policy.xml`, so it would decode outside the policy the HEIF converter
+/// runs ImageMagick under; other packages ship an unrelated `convert`. So
+/// `convert -version` is run (bounded by [`VERSION_PROBE_TIMEOUT`], at most
+/// [`VERSION_PROBE_CAP`] bytes read) and the program is used only if it
+/// names ImageMagick. `magick` is ImageMagick 7's own name and comes first
+/// in [`HEIF_DECODERS_LINUX`], so it is preferred whenever it is there.
+pub fn is_heif_decoder(path: &Path) -> bool {
+    path.is_file()
+        && (path.file_name() != Some(std::ffi::OsStr::new("convert"))
+            || identifies_as_imagemagick(path, VERSION_PROBE_TIMEOUT))
+}
+
+/// Whether `program -version` prints `ImageMagick` within `timeout`. A
+/// program that does not start, runs past `timeout` (then killed with its
+/// group), or says anything else is not ImageMagick. Only the first
+/// [`VERSION_PROBE_CAP`] bytes are read; the pipe is then closed, so a
+/// program that keeps writing stops.
+pub fn identifies_as_imagemagick(program: &Path, timeout: std::time::Duration) -> bool {
+    use std::io::Read;
+    use std::process::Stdio;
+    use wait_timeout::ChildExt;
+
+    let mut cmd = crate::util::appimage::host_command(program);
+    cmd.arg("-version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    crate::engine::convert::process::isolate_process_tree(&mut cmd);
+    let Ok(mut child) = cmd.spawn() else {
+        return false;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        crate::engine::convert::process::kill_tree(&mut child);
+        return false;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = Vec::new();
+        let _ = stdout.take(VERSION_PROBE_CAP).read_to_end(&mut text);
+        let _ = tx.send(text);
+    });
+    match child.wait_timeout(timeout) {
+        Ok(Some(_)) => {}
+        _ => {
+            crate::engine::convert::process::kill_tree(&mut child);
+            return false;
+        }
+    }
+    // The reader ends at the cap or when the last writer is gone; a helper
+    // the program left holding the pipe is not waited on.
+    rx.recv_timeout(std::time::Duration::from_secs(1))
+        .is_ok_and(|text| String::from_utf8_lossy(&text).contains("ImageMagick"))
+}
 
 /// The HEIF decoder on Linux: a package from the distribution, so only the
 /// project's page can be offered (see [`LIBREOFFICE_INSTALL_LINUX`]).
@@ -1088,7 +1155,11 @@ pub fn resolve_on_host(dep: Dependency, os: Os, configured: Option<&Path>) -> Re
         path_dirs: &path_dirs(&env),
         install_dirs: &installed,
         executables: spec.executables,
-        exists: is_file,
+        exists: if dep == Dependency::HeifDecoder {
+            is_heif_decoder
+        } else {
+            is_file
+        },
     })
 }
 
@@ -1235,6 +1306,64 @@ mod tests {
             ..empty_probe(&["magick", "convert"])
         });
         assert_eq!(resolution.path().unwrap(), local.path().join("magick"));
+    }
+
+    /// NFR-security: GraphicsMagick's `convert` (which ignores ImageMagick's
+    /// `policy.xml`) or any other program of that name is never chosen as
+    /// the HEIF decoder; ImageMagick's is, and `magick` beats it. A `convert`
+    /// that hangs or floods its output is bounded.
+    #[cfg(unix)]
+    #[test]
+    fn nfr_security_only_imagemagicks_convert_is_a_heif_decoder() {
+        use crate::util::fake_program::script;
+        let resolve_in = |dir: &Path| {
+            resolve(&Probe {
+                path_dirs: &[dir.to_path_buf()],
+                exists: is_heif_decoder,
+                ..empty_probe(HEIF_DECODERS_LINUX)
+            })
+        };
+        let gm = tempfile::tempdir().unwrap();
+        script(
+            gm.path(),
+            "convert",
+            "echo 'GraphicsMagick 1.3.38 2022-03-26 Q16 http://www.GraphicsMagick.org/'",
+        );
+        assert_eq!(resolve_in(gm.path()), Resolution::Missing);
+
+        let im = tempfile::tempdir().unwrap();
+        let convert = script(
+            im.path(),
+            "convert",
+            "echo 'Version: ImageMagick 6.9.11-60 Q16 aarch64 2021-01-25 https://imagemagick.org'",
+        );
+        assert_eq!(resolve_in(im.path()).path(), Some(convert.as_path()));
+        // `magick` is preferred whenever it is there, and not asked.
+        let magick = script(im.path(), "magick", "exit 1");
+        assert_eq!(resolve_in(im.path()).path(), Some(magick.as_path()));
+
+        let odd = tempfile::tempdir().unwrap();
+        let hangs = script(odd.path(), "hangs", "sleep 30");
+        let started = std::time::Instant::now();
+        assert!(!identifies_as_imagemagick(
+            &hangs,
+            std::time::Duration::from_millis(300)
+        ));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // A flood is cut at the cap: the name past it is never seen.
+        let floods = script(
+            odd.path(),
+            "floods",
+            "yes GraphicsMagick | head -c 100000; echo ImageMagick",
+        );
+        assert!(!identifies_as_imagemagick(
+            &floods,
+            std::time::Duration::from_secs(5)
+        ));
+        assert!(!identifies_as_imagemagick(
+            &odd.path().join("missing"),
+            std::time::Duration::from_secs(5)
+        ));
     }
 
     #[test]
