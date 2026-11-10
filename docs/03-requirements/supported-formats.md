@@ -202,7 +202,7 @@ A future plugin API (v2) may allow third-party converters as separate crates loa
 |---|---|---|---|
 | SumatraPDF | `SumatraPDF.exe` (bundled by the installer) | On Windows, **every** supported format, because it is the final printer. Never reported off Windows, where CUPS `lp` prints. | `winget install SumatraPDF.SumatraPDF`, or the download page |
 | LibreOffice | `soffice` / `soffice.exe` (Linux also `libreoffice`) | Windows and Linux: `docx doc xlsx xls pptx ppt odt ods odp rtf`. macOS: the same without `rtf` | Windows: `winget` (its MSI asks for administrator approval, which the dialog says). macOS: `brew install --cask libreoffice`. Linux: no command, a web link only. Always the download page |
-| HEIF decoder (Linux) | `heif-dec`, `heif-convert`, then ImageMagick | `heic heif` | a web link only: the distribution's `libheif-examples` (or newer libheif tools) package |
+| HEIF decoder (Linux) | `heif-dec`, `heif-convert`, then ImageMagick | `heic heif` | a web link only, to the libheif project; the message names the packages (`libheif-examples` on Debian and Ubuntu, `libheif` on Arch, and on Fedora `libheif-tools` plus RPM Fusion's `libheif-freeworld`, without which Fedora's libheif decodes no HEIC) |
 | HEIF Image Extensions (Windows) | asked of WIC | `heic heif` | `winget` from the `msstore` source (free), the Store page, or the web page |
 | HEVC Video Extensions (Windows) | asked of Media Foundation | `heic` | the Store page only: it may be paid, and winget cannot buy |
 | Edge / Chrome / Chromium | `msedge.exe`, `chrome.exe` (Win) · `Microsoft Edge`, `Google Chrome`, `Chromium` (macOS) | nothing: no longer used since the browser fallback was removed (round 6), kept so an old `queue.json` still loads | the Edge download page |

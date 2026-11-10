@@ -38,7 +38,7 @@ chmod +x Pluryprint_<version>_linux_x64.AppImage
 ./Pluryprint_<version>_linux_x64.AppImage
 ```
 
-The AppImage needs FUSE 2 (`sudo apt install libfuse2` on Ubuntu 22.04, `libfuse2t64` on Ubuntu 24.04) and the CUPS client tools (`lp`, `lpstat`), which most desktops already have. Both update themselves from inside the app: the AppImage replaces its own file, and the `.deb` asks for your administrator password to install the update.
+The AppImage needs FUSE (the `fuse3` package, `sudo apt install fuse3` if it is missing; `libfuse2` is not needed) and the CUPS client tools (`lp`, `lpstat`), which most desktops already have. Without FUSE, run it with `--appimage-extract-and-run`. Both update themselves from inside the app: the AppImage replaces its own file, and the `.deb` asks for your administrator password to install the update.
 
 ### macOS will refuse to open it the first time.
 
@@ -103,7 +103,7 @@ chmod +x Pluryprint_<versión>_linux_x64.AppImage
 ./Pluryprint_<versión>_linux_x64.AppImage
 ```
 
-La AppImage necesita FUSE 2 (`sudo apt install libfuse2` en Ubuntu 22.04, `libfuse2t64` en Ubuntu 24.04) y las herramientas de cliente de CUPS (`lp`, `lpstat`), que la mayoría de escritorios ya traen. Las dos se actualizan desde la propia app: la AppImage sustituye su propio archivo y el `.deb` pide tu contraseña de administrador para instalar la actualización.
+La AppImage necesita FUSE (el paquete `fuse3`, `sudo apt install fuse3` si falta; no hace falta `libfuse2`) y las herramientas de cliente de CUPS (`lp`, `lpstat`), que la mayoría de escritorios ya traen. Sin FUSE, ejecútala con `--appimage-extract-and-run`. Las dos se actualizan desde la propia app: la AppImage sustituye su propio archivo y el `.deb` pide tu contraseña de administrador para instalar la actualización.
 
 ### macOS no la abrirá la primera vez.
 

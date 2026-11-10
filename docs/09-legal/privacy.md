@@ -100,12 +100,13 @@ On **Linux** the same files follow the XDG Base Directory specification (each fo
 | Converted PDFs | `~/.cache/pluryprint/conversions/` |
 | Logs | `~/.local/share/pluryprint/logs/pluryprint-<date>.jsonl` |
 | Enterprise policy (read-only) | `/etc/pluryprint/policy.json` |
+| The window's web view data | `~/.local/share/com.maecly.pluryprint/` (WebKitGTK's own storage, cache and HSTS list for the app's window; Pluryprint loads only its own pages there) |
 
 The AppImage and the `.deb` use the same folders, and removing either package leaves them in place; delete them by hand to remove every trace.
 
 If you used the app under its former name, MaeclyPrint, the same files lived in folders named `MaeclyPrint` (for example `~/Library/Application Support/com.Maecly.MaeclyPrint/`). The first launch of Pluryprint moves them to the locations above, on your machine, without sending anything anywhere, and never overwrites a file that is already there.
 
-This data stays on your device. We never transmit it. You can inspect or delete any of it manually at any time. Uninstalling the app prompts you to delete this data; the default is to preserve it (in case you reinstall).
+This data stays on your device. We never transmit it. You can inspect or delete any of it manually at any time. On Windows, uninstalling the app prompts you to delete this data; the default is to preserve it (in case you reinstall). Removing the macOS app or a Linux package never deletes it.
 
 ## File contents
 

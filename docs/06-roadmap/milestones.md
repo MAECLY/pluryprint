@@ -414,7 +414,7 @@ The CUPS backend is shared with macOS and already compiled for Linux. The work f
 |---|---|
 | The first Linux release has no earlier Linux build to update from | Required manifest keys on every release; the update path is proven by the release after it. |
 | WebKitGTK traps: AppArmor and the `bubblewrap` sandbox inside an AppImage (Ubuntu 24.04), NVIDIA on Wayland, the Wayland `app_id`, 16K-page kernels | Test each on real hardware before dropping "preview"; document workarounds. |
-| AppImage needs `libfuse2` | Say so in the release notes and on the landing page. |
+| AppImage needs FUSE (`fusermount3`, package `fuse3`; not `libfuse2`) | Say so in the release notes and on the landing page; `--appimage-extract-and-run` without it. |
 | The `ubuntu-22.04` runner image is retired | Move the baseline (and raise the stated minimum) when GitHub announces it. |
 
 ### Dependencies

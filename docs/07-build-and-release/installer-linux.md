@@ -36,7 +36,7 @@ Description: Batch file printing
 | Path | What |
 |---|---|
 | `/usr/bin/pluryprint` | the app; also the CLI (`pluryprint print …`) |
-| `/usr/bin/pluryprint-cli` | the same CLI under the name the other platforms use |
+| `/usr/bin/pluryprint-cli` | the same CLI under the name Windows uses for its console front end (on macOS the app binary itself is the CLI) |
 | `/usr/lib/Pluryprint/` | `LICENSE`, `LICENSES/`, `THIRD-PARTY-NOTICES.md` (`bundle.resources`), and the `resources/sumatrapdf` and `resources/shellext` READMEs, which every non-Windows bundle carries |
 | `/usr/share/applications/Pluryprint.desktop` | from `src-tauri/linux/pluryprint.desktop.hbs` (`bundle.linux.deb.desktopTemplate`): the menu entry and **Open with Pluryprint** (`MimeType=`, `Exec=pluryprint %F`) |
 | `/usr/share/icons/hicolor/{32x32,64x64,128x128,512x512}/apps/pluryprint.png` | `bundle.icon` |
@@ -56,7 +56,7 @@ No maintainer scripts: the system's own dpkg triggers update the desktop, MIME a
 
 `--bundles appimage` makes `Pluryprint_<version>_<x86_64|aarch64>.AppImage`, renamed `Pluryprint_<version>_linux_<x64|arm64>.AppImage`. Measured on ARM64: 84.68 MiB. It is large because linuxdeploy and its GTK plug-in copy WebKitGTK, GTK, GLib, libsoup, GStreamer's base libraries and the rest of their tree (124 Ubuntu packages on ARM64) into it, so it runs on distributions whose own versions differ. `bundleMediaFramework` is off: nothing plays audio or video, so the extra GStreamer plug-ins (15-35 MB) stay out. It carries no Dolphin or Nemo files (`deb.files` is for the `.deb` only) and does not register itself with the desktop in this release.
 
-Running it needs FUSE 2: `libfuse2` on Ubuntu 22.04 and Debian 12, `libfuse2t64` on Ubuntu 24.04. Without it, `--appimage-extract-and-run` or `APPIMAGE_EXTRACT_AND_RUN=1` runs it unpacked.
+Running it needs FUSE, but not `libfuse2`: the bundler now starts every AppImage with the static type2-runtime, which has libfuse 3 linked in and needs only a `fusermount3` (or `fusermount`) program on `PATH`. That is the `fuse3` package, installed by default on Ubuntu 22.04 and later, Debian 12 desktops and Fedora. Without it the runtime says "No suitable fusermount binary found on the $PATH", and `--appimage-extract-and-run` or `APPIMAGE_EXTRACT_AND_RUN=1` runs it unpacked.
 
 The CLI inside an AppImage is the AppImage itself: `./Pluryprint_X.Y.Z_linux_x64.AppImage print …`. `pluryprint-cli` inside it is not reachable from outside.
 
@@ -137,7 +137,7 @@ Checked on 2026-11-09 in an Ubuntu 22.04 arm64 container (WebKitGTK 2.50.4, GTK 
 
 ## Known issues and things to test on real hardware
 
-- **FUSE.** Ubuntu 24.04 ships `libfuse3` only; the AppImage needs `libfuse2t64`. The release notes say so.
+- **FUSE.** The AppImage's static runtime needs only `fusermount3` (package `fuse3`), not `libfuse2`/`libfuse2t64`; this was read from the runtime itself (static-pie, libfuse 3 linked in), not yet tried on a clean desktop without `libfuse2`.
 - **AppArmor and user namespaces.** Ubuntu 24.04 restricts unprivileged user namespaces, which WebKitGTK's bubblewrap sandbox uses. A blank window from the AppImage there is the first thing to check (`WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` confirms it; it is not a fix).
 - **NVIDIA on Wayland** can show an empty window with WebKitGTK's DMA-BUF renderer; `WEBKIT_DISABLE_DMABUF_RENDERER=1` is the usual workaround.
 - **Wayland app id.** The dock icon matches the window only when the app id equals the desktop file's name (`Pluryprint.desktop`); check for a duplicated or generic icon on GNOME and KDE.

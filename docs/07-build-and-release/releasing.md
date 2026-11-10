@@ -381,7 +381,8 @@ support answers).
 > Use the `.deb` on Debian, Ubuntu and their derivatives:
 > `sudo apt install ./Pluryprint_X.Y.Z_linux_x64.deb` (keep the `./`). On any
 > other distribution, use the AppImage: `chmod +x` it and run it. It needs
-> FUSE 2 (`libfuse2`, `libfuse2t64` on Ubuntu 24.04). Check either against
+> FUSE's `fusermount3` (package `fuse3`, already there on most desktops), not
+> `libfuse2`. Check either against
 > `SHA256SUMS` first: `sha256sum -c SHA256SUMS --ignore-missing`.
 
 The older advice, right-click the app and choose **Open**, is wrong on current

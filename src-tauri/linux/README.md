@@ -35,6 +35,15 @@ screen, and `queue` adds the files to the queue paused, the same three actions
 as the Explorer submenu. Folders qualify and are walked one level deep for
 `print-default` and `queue`; `configure` asks, as a drop does.
 
+## Default handler
+
+`MimeType=` makes Pluryprint a candidate for every printable type. Where no
+other installed program claims a type (HEIC or Markdown on a bare Debian or
+KDE system, for instance), a double-click can open Pluryprint's Print Job
+screen, which only loads the file and prints nothing until asked. The `.deb`
+writes no `mimeapps.list`, so it never makes itself the default over another
+program.
+
 ## Not covered here
 
 - Nautilus (GNOME Files) has no static action format; it only gets "Open with".

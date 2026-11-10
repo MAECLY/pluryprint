@@ -15,7 +15,7 @@ If you are reading this on GitHub, every link below is clickable.
 | A user wanting to know what this is | [Product Vision](./01-vision/product-vision.md) → [Value Proposition](./01-vision/value-proposition.md) |
 | A contributor / developer | [Local Setup](./08-development/local-setup.md) → [Contributing](./08-development/contributing.md) → [Coding Standards](./08-development/coding-standards.md) |
 | A reviewer / decision-maker | [Tech Stack](./04-architecture/tech-stack.md) → [System Architecture](./04-architecture/system-architecture.md) → [ADRs](./adr/README.md) |
-| A packager / sysadmin | [Installer Windows](./07-build-and-release/installer-windows.md) → [Releasing](./07-build-and-release/releasing.md) → [Auto-Update Flow](./07-build-and-release/auto-update-flow.md) |
+| A packager / sysadmin | [Installer Windows](./07-build-and-release/installer-windows.md) / [Installer Linux](./07-build-and-release/installer-linux.md) → [Releasing](./07-build-and-release/releasing.md) → [Auto-Update Flow](./07-build-and-release/auto-update-flow.md) |
 | Curious about prior art | [Competitor Analysis](./02-research/competitor-analysis.md) → [Market Gap](./02-research/market-gap.md) |
 
 ---
@@ -30,15 +30,17 @@ These decisions are not up for re-debate during the MVP cycle. They are recorded
 | Application stack | **Tauri 2 + Rust + React (TypeScript)** | [ADR-0001](./adr/0001-stack-tauri-rust-react.md) |
 | License | **AGPL-3.0-only**, contributions under a CLA (was GPLv3 until 2026-10-09) | [ADR-0010](./adr/0010-relicense-to-agpl-3.0.md) (supersedes [ADR-0002](./adr/0002-license-gplv3.md)) |
 | Print engine strategy | **Hybrid: SumatraPDF / CUPS as final hop, format-specific converters upstream** | [ADR-0003](./adr/0003-hybrid-print-engine-strategy.md) |
-| HTML, Markdown and text | **The system web view (WebView2 / WebKit) in a worker process** | [ADR-0012](./adr/0012-system-web-view-renderer.md) |
+| HTML, Markdown and text | **The system web view (WebView2 / WebKit / WebKitGTK) in a worker process** | [ADR-0012](./adr/0012-system-web-view-renderer.md) |
 | Auto-update | **Tauri Updater plugin (built-in)**, one manifest per channel on GitHub Releases | [ADR-0004](./adr/0004-auto-updater-tauri-builtin.md), [ADR-0011](./adr/0011-release-channel.md) |
 | Release signing | **No OS certificates; updates signed with minisign** | [ADR-0011](./adr/0011-release-channel.md) |
 | Windows shell extension | **IExplorerCommand COM DLL (Rust), registered per user; sparse package when a certificate exists** | [ADR-0013](./adr/0013-explorer-command-per-user-verb.md) (supersedes [ADR-0005](./adr/0005-shell-extension-sparse-msix.md)) |
 | Windows installer | **Tauri's per-user NSIS bundle** | [ADR-0008](./adr/0008-installer-nsis-per-user.md) (supersedes [ADR-0006](./adr/0006-installer-inno-setup.md)) |
-| Platform priority | **Windows first, macOS second** | [ADR-0007](./adr/0007-windows-first-mac-second.md) |
+| Platform priority | **Windows first, macOS second, Linux from 0.0.5 (preview)** | [ADR-0007](./adr/0007-windows-first-mac-second.md), [ADR-0015](./adr/0015-linux-support.md) |
+| Linux packages | **AppImage and `.deb`, x86_64 and ARM64, built on Ubuntu 22.04** (supersedes decision D20, "Linux out of scope") | [ADR-0015](./adr/0015-linux-support.md) |
 | Documentation language | English | — |
 | Initial supported OS | Windows 10/11 (x64 + ARM64) | — |
 | Next supported OS | macOS 13+ (Apple Silicon + Intel) | — |
+| Linux (preview, from 0.0.5) | Ubuntu 22.04, Debian 12, Fedora 38 or later (x86_64 + ARM64), with CUPS | [ADR-0015](./adr/0015-linux-support.md) |
 
 ---
 
@@ -100,6 +102,7 @@ These decisions are not up for re-debate during the MVP cycle. They are recorded
 - [Releasing](./07-build-and-release/releasing.md) — the runbook: signing key, channels, cutting and verifying a release
 - [Installer (Windows)](./07-build-and-release/installer-windows.md) — per-user NSIS, Explorer registration
 - [Installer (macOS)](./07-build-and-release/installer-macos.md) — ad-hoc-signed `.dmg` per architecture (and the Developer ID plan)
+- [Installer (Linux)](./07-build-and-release/installer-linux.md) — AppImage and `.deb` per architecture, the file-manager entries and the bundled libraries
 - [Auto-Update Flow](./07-build-and-release/auto-update-flow.md) — end-to-end
 - [Code Signing](./07-build-and-release/code-signing.md) — what is signed today (updates, minisign) and the certificate plan
 - [CI / CD](./07-build-and-release/ci-cd.md) — GitHub Actions matrix

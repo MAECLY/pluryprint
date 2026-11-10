@@ -52,7 +52,7 @@ For a stable release, run the manual QA suite on **every** combination below. Fo
 | macOS 14 Sonoma | aarch64 (M-series) | Default | Full QA suite (M5+ only) |
 | macOS 15 Sequoia | aarch64 (M-series) | Default | Smoke (M5+ only) |
 | Ubuntu 22.04, GNOME on X11 | x86_64 | 100% | Full QA suite, AppImage and `.deb` |
-| Ubuntu 24.04, GNOME on Wayland | x86_64 | 100% | Full QA suite, AppImage (AppArmor user namespaces, `libfuse2t64`) |
+| Ubuntu 24.04, GNOME on Wayland | x86_64 | 100% | Full QA suite, AppImage (AppArmor user namespaces; runs with `fuse3` alone, no `libfuse2t64`) |
 | Debian 12, KDE Plasma | x86_64 | 100% | Smoke, `.deb`, the Dolphin entries |
 | Fedora (current), GNOME | x86_64 | 100% | Smoke, AppImage |
 | Linux Mint (Cinnamon) or Ubuntu with Nemo | x86_64 | 100% | The Nemo entries, `.deb` |

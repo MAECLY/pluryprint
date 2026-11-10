@@ -190,6 +190,8 @@ The one exception is **uninstalling the WebView2 Runtime** — but we don't ship
 - An in-app update of a `.deb` install runs `pkexec dpkg -i` on the verified package, so the system asks for an administrator password each time; an AppImage replaces its own file, which must be writable by the user.
 - All state in `~/.config/pluryprint/`, `~/.local/share/pluryprint/` and `~/.cache/pluryprint/` (the XDG directories; `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` move them).
 - Printing, queue management and adding a printer go through the CUPS client tools as the user; whether `lpadmin` needs a password is the system's CUPS policy, not Pluryprint's.
+- The AppImage carries its own WebKitGTK, libsoup and GnuTLS, frozen at the versions of the release that built it: the distribution's security updates do not reach them, and the render worker parses untrusted HTML with that WebKitGTK. A new Pluryprint release is the only way they are updated. The `.deb` uses the distribution's copies and gets its fixes, so on Debian and Ubuntu it is the safer package.
+- Programs of the host (LibreOffice, the HEIF decoder, the CUPS tools, a printer settings panel) are started without the variables the AppImage sets to point GTK, GIO and GDK at its bundled modules (`util::appimage::host_command`); only Pluryprint's own render worker keeps them.
 
 ### 4.3 Enterprise policy (`policy.json`)
 

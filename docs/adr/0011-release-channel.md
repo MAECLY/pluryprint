@@ -99,7 +99,8 @@ The runbook, with the secrets and settings to add, is
   reaches users until a person publishes the draft.
 - The same manifest drives the notice and the install, on both channels.
 - Every release is checked before it can be published: four platforms in
-  `latest.json`, valid signatures, the installer under 20 MB, SumatraPDF and
+  `latest.json` (eight keys from 0.0.5, with the four Linux ones of
+  [ADR-0015](./0015-linux-support.md)), valid signatures, the installer under 20 MB, SumatraPDF and
   both DLLs in each Windows installer, the right architecture in each Mac app.
 - The licence obligations travel with the binaries: notices, licence texts,
   source archives and the written offer.
@@ -116,7 +117,8 @@ The runbook, with the secrets and settings to add, is
 
 ### Risks / Open Questions
 
-- The four builds merge their entries into one `latest.json`; two finishing
+- The four builds (six from 0.0.5, [ADR-0015](./0015-linux-support.md))
+  merge their entries into one `latest.json`; two finishing
   together can drop one. `finalise` refuses such a manifest; the fix is to
   re-run that build.
 - The endpoint URLs are compiled into every copy. Renaming or moving the
