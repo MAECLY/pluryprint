@@ -408,7 +408,8 @@ jobs:
 
       # Each Linux build is the architecture its name says, the CLI
       # included, in both packages; the .deb asks for the CUPS client tools
-      # every print runs; every .desktop entry it installs is valid; nothing
+      # every print runs and names Maecly as its maintainer; every .desktop
+      # entry it installs is valid; nothing
       # Windows-only rides along; and the app answers --version (handled
       # before any window or GTK starts, so the runner needs no display).
       - name: Architecture and package checks (Linux)
@@ -430,6 +431,11 @@ jobs:
           # The binary binds every symbol at start and needs WebKitGTK 2.42.
           grep -Eq '(^|, )libwebkit2gtk-4\.1-0 \(>= 2\.42\)' <<<"$depends" \
             || { echo "::error::$deb does not require WebKitGTK 2.42"; exit 1; }
+          # From the Cargo.toml authors (tauri_conf_contract.rs).
+          maintainer=$(dpkg-deb -f "$deb" Maintainer)
+          echo "Maintainer: $maintainer"
+          [ "$maintainer" = 'Maecly <hola@maecly.com>' ] \
+            || { echo "::error::$deb has Maintainer '$maintainer', expected 'Maecly <hola@maecly.com>'"; exit 1; }
           rm -rf "$RUNNER_TEMP/deb" "$RUNNER_TEMP/squashfs-root"
           dpkg-deb -x "$deb" "$RUNNER_TEMP/deb"
           dpkg-deb -c "$deb"

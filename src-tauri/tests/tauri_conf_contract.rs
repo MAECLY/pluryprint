@@ -4,7 +4,8 @@
 //!   the updater and `CARGO_PKG_VERSION` can never disagree);
 //! - Linux ships as an AppImage and a .deb next to the Windows and macOS
 //!   bundles (the ADR that supersedes decision D20); the .deb depends on the
-//!   CUPS client tools and installs the file-manager actions;
+//!   CUPS client tools, installs the file-manager actions and names its
+//!   maintainer;
 //! - the NSIS installer speaks English and Spanish (FR-093);
 //! - the Explorer extension DLLs ship under `resources/shellext/<arch>/`
 //!   (directory form, so the per-architecture folders survive bundling);
@@ -77,6 +78,22 @@ fn nfr_070_deb_depends_on_the_cups_client_tools() {
     assert_eq!(
         conf["bundle"]["linux"]["appimage"]["bundleMediaFramework"],
         false
+    );
+}
+
+/// The .deb's `Maintainer` is `Maecly <hola@maecly.com>`. tauri's deb
+/// bundler writes the Cargo.toml `authors` there (joined by ", ") and falls
+/// back to `bundle.publisher` only when there are none; `bundle.publisher`
+/// is also the Windows installer's publisher, which stays `Maecly`. The
+/// release workflow checks the built package's field too.
+#[test]
+fn nfr_070_deb_maintainer_is_maecly() {
+    assert_eq!(env!("CARGO_PKG_AUTHORS"), "Maecly <hola@maecly.com>");
+    assert_eq!(conf()["bundle"]["publisher"], "Maecly");
+    assert!(
+        read("../.github/workflows/release.yml")
+            .contains(r#"[ "$maintainer" = 'Maecly <hola@maecly.com>' ]"#),
+        "release.yml checks the .deb's Maintainer"
     );
 }
 

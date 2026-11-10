@@ -2,7 +2,10 @@
 name = "pluryprint"
 version = "0.0.4"
 description = "Open source batch file printing for Windows, macOS and Linux."
-authors = ["Maecly maintainers"]
+# The .deb's Maintainer field: tauri's deb bundler writes the authors here,
+# falling back to bundle.publisher only without them. bundle.publisher
+# ("Maecly") stays what the Windows installer shows as the publisher.
+authors = ["Maecly <hola@maecly.com>"]
 license = "AGPL-3.0-only"
 repository = "https://github.com/MAECLY/pluryprint"
 edition = "2021"

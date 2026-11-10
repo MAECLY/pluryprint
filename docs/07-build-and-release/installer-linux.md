@@ -27,6 +27,7 @@ The floor comes from the build machine, not from a setting:
 
 ```
 Package: pluryprint
+Maintainer: Maecly <hola@maecly.com>
 Section: utils
 Depends: cups-client, libwebkit2gtk-4.1-0, libgtk-3-0
 Recommends: cups-ipp-utils, libheif-examples
@@ -49,6 +50,8 @@ The dependencies are `bundle.linux.deb` in `tauri.conf.json`; tauri adds the Web
 - **`cups-ipp-utils`** (Recommends): `ipptool` and `ippfind`, for the IPP queries. apt installs recommended packages by default; a user who turned that off still prints.
 - **`libheif-examples`** (Recommends): `heif-convert`, the HEIC/HEIF decoder. On Ubuntu 22.04 it is libheif 1.12 and has no `heif-dec` (that arrived in 1.17); the app looks for either, and ImageMagick as a fallback.
 - **LibreOffice** would be a `Suggests`, for Word, Excel, PowerPoint and OpenDocument files. Tauri 2's `DebConfig` has no `suggests` field (only `depends`, `recommends`, `provides`, `conflicts`, `replaces`), so the package does not name it; the app's dependency screen links to the download instead, as it does on Windows and macOS.
+
+`Maintainer` is `Maecly <hola@maecly.com>`. Tauri's deb bundler takes it from `authors` in `src-tauri/Cargo.toml` and uses `bundle.publisher` only when there are no authors. `bundle.publisher` stays `Maecly`, because it is also the publisher the Windows installer shows. `tauri_conf_contract.rs` checks both values, and the release workflow checks the field in the built package (`dpkg-deb -f <deb> Maintainer`).
 
 No maintainer scripts: the system's own dpkg triggers update the desktop, MIME and icon caches.
 
@@ -112,7 +115,7 @@ Two rows of the `build` matrix in `release.yml`:
 
 1. **System libraries (Linux)**: `apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev patchelf file desktop-file-utils`. D-Bus because tauri's default `dbus` feature builds `libdbus-sys`, which panics without `dbus-1.pc`; librsvg for linuxdeploy's GTK plug-in. No `libssl-dev` (rustls, no `openssl-sys`), no `libxdo-dev`, no appindicator (no tray icon), no CUPS headers (printing runs the CUPS tools).
 2. **Build**: `pnpm tauri build --target <triple> --bundles appimage,deb --ci`, with `APPIMAGE_EXTRACT_AND_RUN=1` (linuxdeploy is itself an AppImage and the runners have no FUSE). The bundler downloads linuxdeploy, its GTK and AppImage plug-ins and the AppImage runtime from GitHub at this point, unpinned: the one download in the release that is not pinned.
-3. **Architecture and package checks (Linux)**: unpacks both packages (`dpkg-deb -x`, `--appimage-extract`) and fails unless every binary in `usr/bin` is the row's `machine`; the `.deb`'s `Depends` names `cups-client`; `usr/lib/Pluryprint/` holds `LICENSE`, `THIRD-PARTY-NOTICES.md` and `LICENSES/`; no `SumatraPDF.exe` or `shell_ext_win.dll` is inside; the application entries pass `desktop-file-validate` and carry a `MimeType`; the Dolphin and Nemo files are installed; and `pluryprint --version` runs from the `.deb` tree and through the AppImage's `AppRun`. `--version` is answered before GTK starts, so no display is needed. The sizes go to the job summary; no size budget applies to Linux.
+3. **Architecture and package checks (Linux)**: unpacks both packages (`dpkg-deb -x`, `--appimage-extract`) and fails unless every binary in `usr/bin` is the row's `machine`; the `.deb`'s `Depends` names `cups-client` and its `Maintainer` is `Maecly <hola@maecly.com>`; `usr/lib/Pluryprint/` holds `LICENSE`, `THIRD-PARTY-NOTICES.md` and `LICENSES/`; no `SumatraPDF.exe` or `shell_ext_win.dll` is inside; the application entries pass `desktop-file-validate` and carry a `MimeType`; the Dolphin and Nemo files are installed; and `pluryprint --version` runs from the `.deb` tree and through the AppImage's `AppRun`. `--version` is answered before GTK starts, so no display is needed. The sizes go to the job summary; no size budget applies to Linux.
 4. **Stage the release files**, then **Record the AppImage's system libraries (Linux)** (`appimage-sources.sh`) into the same `unsigned-<label>` artifact.
 
 The `.desktop` checks skip the Dolphin service menu: it is `Type=Service` with `MimeType=all/allfiles`, which KDE reads and `desktop-file-validate` rejects by design.
