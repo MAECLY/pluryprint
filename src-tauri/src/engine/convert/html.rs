@@ -667,20 +667,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn nfr_render_worker_timeout_is_terminal_with_reason() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("fake-worker.sh");
         let args_log = dir.path().join("args.txt");
-        std::fs::write(
-            &fake,
-            format!(
-                "#!/bin/sh\necho \"$@\" > '{}'\necho '{}: the render did not finish within 7s' >&2\nexit 1\n",
+        let fake = crate::util::fake_program::script(
+            dir.path(),
+            "fake-worker.sh",
+            &format!(
+                "echo \"$@\" > '{}'\necho '{}: the render did not finish within 7s' >&2\nexit 1",
                 args_log.display(),
                 crate::render::TIMEOUT_MARKER
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let work = WorkDir::new("timeout-test").unwrap();
         let cancel = AtomicBool::new(false);
         let err = render_system_with(
@@ -836,18 +833,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fr_055_render_worker_without_a_display_is_terminal_with_reason() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let fake = dir.path().join("fake-worker.sh");
-        std::fs::write(
-            &fake,
-            format!(
-                "#!/bin/sh\necho '{}: no X11 or Wayland display' >&2\nexit 1\n",
+        let fake = crate::util::fake_program::script(
+            dir.path(),
+            "fake-worker.sh",
+            &format!(
+                "echo '{}: no X11 or Wayland display' >&2\nexit 1",
                 crate::render::NO_DISPLAY_MARKER
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let work = WorkDir::new("no-display-test").unwrap();
         let cancel = AtomicBool::new(false);
         let err = render_system_with(
