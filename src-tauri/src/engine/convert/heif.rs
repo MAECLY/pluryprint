@@ -97,16 +97,41 @@ impl ExternalDecoder {
     /// Both paths are absolute (the engine only receives canonical paths), so
     /// neither can be read as an option. libheif 1.12, still the version on
     /// Ubuntu 22.04, takes no `--`. ImageMagick decodes only the first image
-    /// of the file (`[0]`) and is told the output format explicitly (`png:`),
-    /// whatever the name ends in. Neither is asked to rotate: libheif already
-    /// applies the HEIF orientation while decoding, and rotating again by the
-    /// EXIF tag would turn the photo twice.
+    /// of the file (`[0]`) with its HEIC coder (`heic:`, which reads every
+    /// HEIF file through libheif) and is told the output format explicitly
+    /// (`png:`). Without the coder prefix it would pick a decoder from the
+    /// file's content, so a hostile `.heic` that is really an SVG, a
+    /// PostScript file or anything else would reach that coder or its
+    /// delegate program. ImageMagick also expands `*`, `?` and `[…]` in a
+    /// file name, so it is only ever given the copy [`stage_input`] makes
+    /// under a fixed name. Neither decoder is asked to rotate: libheif
+    /// already applies the HEIF orientation while decoding, and rotating
+    /// again by the EXIF tag would turn the photo twice.
     pub fn args(self, input: &Path, png: &Path) -> Vec<String> {
         let input = input.to_string_lossy().into_owned();
         let png = png.to_string_lossy().into_owned();
         match self {
             Self::Libheif => vec![input, png],
-            Self::ImageMagick => vec![format!("{input}[0]"), format!("png:{png}")],
+            Self::ImageMagick => vec![format!("heic:{input}[0]"), format!("png:{png}")],
+        }
+    }
+
+    /// The file this decoder is given for `input`: the original for libheif,
+    /// which takes a path as it is; for ImageMagick a copy in the work folder
+    /// named `input.heic` (see [`ExternalDecoder::args`]).
+    fn stage_input(self, input: &Path, work: &WorkDir) -> Result<std::path::PathBuf, EngineError> {
+        match self {
+            Self::Libheif => Ok(input.to_path_buf()),
+            Self::ImageMagick => {
+                let staged = work.path().join("input.heic");
+                std::fs::copy(input, &staged).map_err(|e| {
+                    EngineError::ConversionFailed(Failure::new(
+                        "workdir_failed",
+                        format!("cannot prepare the conversion folder: {e}"),
+                    ))
+                })?;
+                Ok(staged)
+            }
         }
     }
 }
@@ -124,12 +149,20 @@ fn decoded_png(png: &Path) -> Option<std::path::PathBuf> {
     first.is_file().then_some(first)
 }
 
+/// The memory an external HEIF decoder may use (resident set, sampled by
+/// [`super::process::run_capped`]): a hostile file can claim huge
+/// dimensions, and the decoder runs outside the in-process image limits.
+/// Generous enough for a 100-megapixel photo through ImageMagick's 16-bit
+/// pixel cache.
+pub const EXTERNAL_DECODER_MEMORY_CAP: u64 = 2 * 1024 * 1024 * 1024;
+
 /// Convert with the external decoder at `decoder` (Linux), writing the PDF
 /// to `output`.
 ///
 /// A decoder that disappeared between being found and being started pauses
 /// the job like a missing one (`heif-decoder`); one that runs and writes no
-/// image could not read the file (`heif_decode_failed`).
+/// image, or needs more than [`EXTERNAL_DECODER_MEMORY_CAP`], could not read
+/// the file (`heif_decode_failed`).
 pub fn convert_with_external(
     decoder: &Path,
     input: &Path,
@@ -143,16 +176,45 @@ pub fn convert_with_external(
     // interface, the simplest one.
     let kind = ExternalDecoder::of(decoder).unwrap_or(ExternalDecoder::Libheif);
     let png = work.path().join("heif.png");
+    let staged = kind.stage_input(input, work)?;
     let mut cmd = std::process::Command::new(decoder);
-    cmd.args(kind.args(input, &png)).current_dir(work.path());
+    cmd.args(kind.args(&staged, &png)).current_dir(work.path());
     let log = work.path().join("heif-decoder.log");
     progress(0.0);
-    super::process::run_bounded(cmd, kind.label(), cancel, timeout, &log).map_err(|e| match e {
-        EngineError::DependencyMissing(f) if f.reason.is_none() => EngineError::DependencyMissing(
-            Failure::new(crate::engine::deps::Dependency::HeifDecoder.id(), f.detail),
-        ),
-        other => other,
-    })?;
+    let ran = super::process::run_capped(
+        cmd,
+        kind.label(),
+        cancel,
+        timeout,
+        &log,
+        EXTERNAL_DECODER_MEMORY_CAP,
+        super::process::CapScope::Process,
+    );
+    match ran {
+        Ok(()) => {}
+        Err(super::process::CappedError::OverMemory) => {
+            return Err(EngineError::ConversionFailed(
+                Failure::new(
+                    "heif_decode_failed",
+                    format!(
+                        "{} needed more than {} MB of memory for this HEIC/HEIF file and was stopped",
+                        kind.label(),
+                        EXTERNAL_DECODER_MEMORY_CAP / (1024 * 1024)
+                    ),
+                )
+                .param("tool", kind.label()),
+            ));
+        }
+        Err(super::process::CappedError::Engine(EngineError::DependencyMissing(f)))
+            if f.reason.is_none() =>
+        {
+            return Err(EngineError::DependencyMissing(Failure::new(
+                crate::engine::deps::Dependency::HeifDecoder.id(),
+                f.detail,
+            )));
+        }
+        Err(super::process::CappedError::Engine(other)) => return Err(other),
+    }
     let Some(decoded) = decoded_png(&png) else {
         let detail = super::process::log_tail(&log, 400);
         return Err(EngineError::ConversionFailed(
@@ -541,7 +603,7 @@ mod tests {
             assert_eq!(kind, ExternalDecoder::ImageMagick);
             assert_eq!(
                 kind.args(input, png),
-                ["/p/IMG 1.HEIC[0]", "png:/w/heif.png"]
+                ["heic:/p/IMG 1.HEIC[0]", "png:/w/heif.png"]
             );
         }
         assert_eq!(ExternalDecoder::of(Path::new("/usr/bin/sips")), None);

@@ -433,7 +433,7 @@ cp '{png}' {target}"#,
     fn fr_052_external_heif_decoders_turn_their_png_into_a_one_page_pdf() {
         for (name, target, expect_in, expect_out) in [
             ("heif-convert", r#""$2""#, "{in}", "{png}"),
-            ("magick", r#""${2#png:}""#, "{in}[0]", "png:{png}"),
+            ("magick", r#""${2#png:}""#, "heic:{staged}[0]", "png:{png}"),
         ] {
             let dir = tempfile::tempdir().unwrap();
             let log = dir.path().join("argv");
@@ -455,6 +455,8 @@ cp '{png}' {target}"#,
             assert_eq!(pages_of(&output), 1, "{name}");
             let png = work.path().join("heif.png").display().to_string();
             let input = heic.display().to_string();
+            // ImageMagick gets a copy under a fixed name, never the original.
+            let staged = work.path().join("input.heic").display().to_string();
             let argv: Vec<String> = std::fs::read_to_string(&log)
                 .unwrap()
                 .lines()
@@ -463,7 +465,9 @@ cp '{png}' {target}"#,
             assert_eq!(
                 argv,
                 [
-                    expect_in.replace("{in}", &input),
+                    expect_in
+                        .replace("{in}", &input)
+                        .replace("{staged}", &staged),
                     expect_out.replace("{png}", &png)
                 ],
                 "{name}"

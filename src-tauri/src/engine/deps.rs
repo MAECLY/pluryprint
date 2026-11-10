@@ -251,13 +251,17 @@ pub fn resolve(probe: &Probe<'_>) -> Resolution {
     Resolution::Missing
 }
 
-/// First `dir/exe` that `exists` accepts, scanning directories in order and, in
-/// each, executable names in order.
+/// First `dir/exe` that `exists` accepts, trying executable names in order
+/// and, for each, every directory in order. The names are a preference (best
+/// first), so a better program anywhere on the search path beats a worse one
+/// in an earlier folder: a `magick` in `/usr/local/bin` must not shadow
+/// libheif's `heif-convert` in `/usr/bin` (the HEIF decoder, whose
+/// ImageMagick fallback reaches far more code). Between copies of the same
+/// name the earlier folder still wins, as on a shell's `PATH`.
 fn first_hit(dirs: &[PathBuf], executables: &[&str], exists: fn(&Path) -> bool) -> Option<PathBuf> {
-    dirs.iter().find_map(|dir| {
-        executables
-            .iter()
-            .map(|exe| dir.join(exe))
+    executables.iter().find_map(|exe| {
+        dirs.iter()
+            .map(|dir| dir.join(exe))
             .find(|candidate| exists(candidate))
     })
 }
@@ -1205,6 +1209,31 @@ mod tests {
             ..empty_probe(&["msedge.exe", "chrome.exe"])
         });
         assert_eq!(resolution.path().unwrap(), dir.path().join("msedge.exe"));
+    }
+
+    /// A preferred name in a later folder beats a fallback in an earlier
+    /// one: `magick` in `/usr/local/bin` does not shadow libheif's
+    /// `heif-convert` in `/usr/bin`. Copies of one name keep `PATH` order.
+    #[test]
+    fn a_preferred_name_anywhere_beats_a_fallback_earlier_on_path() {
+        let local = tempfile::tempdir().unwrap();
+        let usr = tempfile::tempdir().unwrap();
+        std::fs::write(local.path().join("magick"), b"x").unwrap();
+        std::fs::write(usr.path().join("heif-convert"), b"x").unwrap();
+        std::fs::write(usr.path().join("magick"), b"x").unwrap();
+        let dirs = vec![local.path().to_path_buf(), usr.path().to_path_buf()];
+
+        let resolution = resolve(&Probe {
+            path_dirs: &dirs,
+            ..empty_probe(HEIF_DECODERS_LINUX)
+        });
+        assert_eq!(resolution.path().unwrap(), usr.path().join("heif-convert"));
+
+        let resolution = resolve(&Probe {
+            path_dirs: &dirs,
+            ..empty_probe(&["magick", "convert"])
+        });
+        assert_eq!(resolution.path().unwrap(), local.path().join("magick"));
     }
 
     #[test]
