@@ -861,11 +861,14 @@ fn nfr_070_linux_release_builds_are_checked_like_the_mac_ones() {
     ] {
         assert!(apt.contains(pkg), "the Linux build does not install {pkg}");
     }
-    // Files no package owns are cleared from the gdk-pixbuf loader folders
-    // before linuxdeploy copies them; loaders.cache stays.
+    // Only owned .so modules and loaders.cache stay in the gdk-pixbuf loader
+    // folders before linuxdeploy copies them (static archives such as
+    // io-wmf.a and unowned files are removed).
     for needle in [
         "/usr/lib/*/gdk-pixbuf-2.0/*/loaders",
         "*.cache) continue",
+        "*.so) dpkg -S",
+        "not a loadable module",
         "dpkg -S \"$f\"",
         "sudo rm -f -- \"$f\"",
     ] {

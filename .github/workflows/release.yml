@@ -267,11 +267,11 @@ jobs:
       # runs the CUPS command-line tools.
       #
       # linuxdeploy's GTK plugin copies the gdk-pixbuf loader folders whole
-      # into the AppImage, and the runner image leaves files there that no
-      # package owns (v0.0.5's first run met a static io-wmf.a). gdk-pixbuf
-      # never loads them, and the sources list below refuses a file it cannot
-      # trace to a package, so they are removed before the build. The
-      # generated loaders.cache is kept.
+      # into the AppImage. gdk-pixbuf loads only the .so modules there, but
+      # the runner image also holds static archives (v0.0.5 met io-wmf.a,
+      # which only a -dev package owns) and files no package owns. The
+      # sources list below refuses both, so everything but the .so modules
+      # and the generated loaders.cache is removed before the build.
       - name: System libraries (Linux)
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -285,10 +285,12 @@ jobs:
             for f in "$dir"/*; do
               [ -f "$f" ] || continue
               case "$f" in *.cache) continue ;; esac
-              if ! dpkg -S "$f" >/dev/null 2>&1; then
-                echo "removing $f: no package owns it"
-                sudo rm -f -- "$f"
-              fi
+              case "$f" in
+                *.so) dpkg -S "$f" >/dev/null 2>&1 && continue
+                      echo "removing $f: no package owns it" ;;
+                *) echo "removing $f: not a loadable module" ;;
+              esac
+              sudo rm -f -- "$f"
             done
           done
 
