@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-10
+
+Pluryprint now runs on Linux, on x64 and ARM64, as an AppImage or a `.deb`, with the same file formats as on Windows and macOS. Linux is a preview until it has been tested on real hardware.
+
+### Added
+
+- Linux x64 and ARM64: `Pluryprint_0.0.5_linux_x64.AppImage` / `.deb` and `Pluryprint_0.0.5_linux_arm64.AppImage` / `.deb`. Ubuntu 22.04 or newer, Debian 12 or newer, Fedora 38 or newer; WebKitGTK 2.42 or newer and CUPS. The `.deb` depends on `cups-client`; the AppImage needs `fusermount3` (package `fuse3`).
+- Linux printing goes through CUPS, as on macOS. **Printer settings** opens the desktop's printer panel (GNOME, system-config-printer or KDE), else the CUPS page at `localhost:631`.
+- Linux prints HTML, Markdown and text through WebKitGTK in an isolated worker, as Windows and macOS do through their web views. HEIC/HEIF photos use `heif-convert` / `heif-dec` from libheif, or ImageMagick; Word, Excel, PowerPoint and RTF use LibreOffice. When one is missing, Pluryprint says which package to install.
+- Linux file managers: **Open with Pluryprint** on supported files, and, with the `.deb`, a Pluryprint submenu in Dolphin (**Print now**, **Configure print job…**, **Add to print queue**) and the same three actions in Nemo.
+- Linux updates: the AppImage replaces itself; the `.deb` installs the new package after asking for the administrator password.
+
+### Security
+
+- HEIC/HEIF on Linux: a file is checked to be HEIF before any decoder runs, copied into a private folder within the file size limit, and decoded from that copy; ImageMagick reads only HEIC and writes only PNG under a restrictive policy.
+- Linux: the memory limit on converters and the render worker covers their whole process tree, helpers that leave the process group included, and the tree is frozen before it is killed.
+
 ### Changed
 
 - Dependencies: Tauri 2.12.3 with `tauri-plugin-dialog` 2.8.4 (file dialogs on `rfd` 0.17), `tauri-plugin-single-instance` 2.5.5 (on Windows, a `|` in a path handed to the running window is no longer split, and a second launch gives up after 10 seconds if the first window stops answering), `tauri-plugin-opener` 2.7.2 and `tauri-plugin-notification` 2.8, all still on Tauri 2.12; `@tauri-apps/api` 2.12.4, `@tauri-apps/plugin-dialog` 2.8.4 and `@tauri-apps/cli` 2.12.4 on the UI side. `zeroize` 1.9.1 hardens how a PDF password is wiped; `ureq` 3.5 decodes proxy credentials as curl does (a literal `%` in a proxy password is written `%25`). Minor and patch updates of `serde_json`, `uuid`, `encoding_rs` and zustand 5.0.16.
