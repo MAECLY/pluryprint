@@ -861,6 +861,16 @@ fn nfr_070_linux_release_builds_are_checked_like_the_mac_ones() {
     ] {
         assert!(apt.contains(pkg), "the Linux build does not install {pkg}");
     }
+    // Files no package owns are cleared from the gdk-pixbuf loader folders
+    // before linuxdeploy copies them; loaders.cache stays.
+    for needle in [
+        "/usr/lib/*/gdk-pixbuf-2.0/*/loaders",
+        "*.cache) continue",
+        "dpkg -S \"$f\"",
+        "sudo rm -f -- \"$f\"",
+    ] {
+        assert!(apt.contains(needle), "the apt step lacks {needle}");
+    }
     let checks = steps(&build)
         .into_iter()
         .find(|s| s.contains("name: Architecture and package checks (Linux)"))
