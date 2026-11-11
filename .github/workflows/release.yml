@@ -265,6 +265,13 @@ jobs:
       # plugin, patchelf and file for linuxdeploy. desktop-file-utils checks
       # the .desktop entries below. Printing needs no development package: it
       # runs the CUPS command-line tools.
+      #
+      # linuxdeploy's GTK plugin copies the gdk-pixbuf loader folders whole
+      # into the AppImage, and the runner image leaves files there that no
+      # package owns (v0.0.5's first run met a static io-wmf.a). gdk-pixbuf
+      # never loads them, and the sources list below refuses a file it cannot
+      # trace to a package, so they are removed before the build. The
+      # generated loaders.cache is kept.
       - name: System libraries (Linux)
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -273,6 +280,17 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev librsvg2-dev \
             patchelf file desktop-file-utils
+          for dir in /usr/lib/*/gdk-pixbuf-2.0/*/loaders; do
+            [ -d "$dir" ] || continue
+            for f in "$dir"/*; do
+              [ -f "$f" ] || continue
+              case "$f" in *.cache) continue ;; esac
+              if ! dpkg -S "$f" >/dev/null 2>&1; then
+                echo "removing $f: no package owns it"
+                sudo rm -f -- "$f"
+              fi
+            done
+          done
 
       # --ignore-scripts: no package's install script runs. None is needed to
       # build: esbuild and the tauri CLI ship their binaries as platform
