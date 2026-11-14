@@ -290,6 +290,27 @@ fn fr_057b_the_page_carries_the_ride_conventions() {
 }
 
 #[test]
+fn fr_057b_ice_and_tip_are_printed_only_when_the_file_has_them() {
+    // No ICE tax in the file: no ICE row, not even 0.00.
+    for name in [
+        "factura-1.1.0-autorizacion.xml",
+        "liquidacion-compra-1.1.0.xml",
+        "liquidacion-compra-1.0.0.xml",
+    ] {
+        assert!(!html(name).contains("<td>ICE</td>"), "{name}");
+    }
+    let page = html("factura-2.1.0.xml");
+    assert!(page.contains("<td>ICE</td>"), "the file has an ICE tax");
+    // A tip of 0.00 the file states is printed; a missing one is not.
+    assert!(html("factura-1.1.0-autorizacion.xml").contains("<td>Propina</td>"));
+    let without_tip = String::from_utf8(fixture("factura-2.1.0.xml"))
+        .unwrap()
+        .replace("<propina>2.00</propina>", "");
+    let page = to_html(without_tip.as_bytes(), "f.xml", Lang::Es).unwrap();
+    assert!(!page.contains("Propina"), "{page}");
+}
+
+#[test]
 fn fr_057b_footer_follows_the_app_language_labels_stay_spanish() {
     let bytes = fixture("retencion-1.0.0.xml");
     let en = to_html(&bytes, "r.xml", Lang::En).unwrap();

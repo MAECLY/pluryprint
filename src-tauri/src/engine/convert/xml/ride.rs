@@ -677,11 +677,9 @@ fn totals(r: &Receipt) -> String {
     if !r.descuento.is_empty() {
         push(&mut rows, "Total descuento", &r.descuento);
     }
-    let ice: Vec<_> = r.taxes.iter().filter(|t| t.codigo == "3").collect();
-    if ice.is_empty() && matches!(r.kind, Kind::Factura | Kind::LiquidacionCompra) {
-        push(&mut rows, "ICE", "0.00");
-    }
-    for t in &ice {
+    // ICE and the tip are printed only when the file carries them: a row
+    // of 0.00 the XML does not have would be invented data.
+    for t in r.taxes.iter().filter(|t| t.codigo == "3") {
         push(&mut rows, "ICE", &t.valor);
     }
     for t in r
@@ -698,16 +696,8 @@ fn totals(r: &Receipt) -> String {
     {
         push(&mut rows, &sri::tax_labels(t).1, &t.valor);
     }
-    if r.kind == Kind::Factura {
-        push(
-            &mut rows,
-            "Propina",
-            if r.propina.is_empty() {
-                "0.00"
-            } else {
-                &r.propina
-            },
-        );
+    if r.kind == Kind::Factura && !r.propina.is_empty() {
+        push(&mut rows, "Propina", &r.propina);
     }
     let mut out = String::from("<table class=\"totals\">");
     for (label, value) in rows {
