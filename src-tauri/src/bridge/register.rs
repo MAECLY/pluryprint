@@ -341,6 +341,11 @@ impl Target {
     /// (so re-registering never drops a development origin someone added).
     /// Returns whether anything was written: an identical manifest is left
     /// alone (registration is idempotent).
+    ///
+    /// This holds for the CLI and Reconnect only. On Windows the setup
+    /// (`windows/installer-hooks.nsh`) rewrites the shared manifest with
+    /// PluryFact's origin alone on every install and update, so an extra
+    /// origin has to be added again afterwards (ipc-and-cli.md §6).
     pub fn install(&self, browser: Browser, extra: &[String]) -> std::io::Result<bool> {
         let path = self.manifest_path(browser);
         let existing = read_manifest(&path).filter(|m| m.name == HOST_NAME);

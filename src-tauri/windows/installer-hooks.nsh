@@ -185,7 +185,12 @@
   WriteRegStr HKCU "Software\Classes\${CLASS}\shell\${PLURYPRINT_SHELLEXT_VERB}" "Icon" "$INSTDIR\pluryprint.exe,0"
 !macroend
 
-; Write the bridge's manifest and point every browser at it. A setup built
+; Write the bridge's manifest and point every browser at it. The manifest is
+; rewritten from scratch with PluryFact's origin only, so an extra development
+; origin added with `pluryprint-cli bridge install --extra-origin` does not
+; survive an install or an update (the uninstall hook, which an update runs,
+; deletes the file anyway); it is added again by hand (ipc-and-cli.md, section 6).
+; A setup built
 ; without the bridge (it is a cargo binary of the app crate, so every release
 ; has it) registers nothing rather than a manifest naming a missing program.
 ; Saves and restores $R9.
