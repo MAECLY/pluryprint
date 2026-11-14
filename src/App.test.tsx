@@ -540,6 +540,37 @@ describe('App', () => {
       expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
     });
 
+    it('FR-124: a PluryFact batch joining a job the user started is not labelled and keeps the job settings', async () => {
+      const { calls, park } = mockSelections();
+      // The user's own file, from Explorer, already in the job.
+      park([{ ...selection('configure'), source: 'windows-explorer' }]);
+      render(<App />);
+      expect((await reportRows()).length).toBeGreaterThan(0);
+
+      // Then PluryFact sends a batch (with its own print settings).
+      park([
+        {
+          ...selection('configure'),
+          ...PLURYFACT,
+          paths: ['/tmp/inbox/0000-factura.pdf'],
+        },
+      ]);
+      ringDoorbell();
+
+      expect(
+        (await screen.findAllByRole('button', { name: /0000-factura\.pdf/ }))
+          .length,
+      ).toBeGreaterThan(0);
+      // Mixed job: no "From PluryFact" on the user's own file.
+      expect(screen.queryByTestId('job-origin')).toBeNull();
+      // The job keeps its settings, and the user is told why.
+      expect(
+        await screen.findByText(/PluryFact's print settings were not applied/),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(1);
+      expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
+    });
+
     it('FR-124: a selection from a file manager carries no PluryFact label', async () => {
       const { park } = mockSelections();
       park([{ ...selection('configure'), source: 'windows-explorer' }]);

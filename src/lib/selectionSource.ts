@@ -6,9 +6,15 @@
  * `macos-services`, …). Only the browser bridge's is surfaced: a batch
  * PluryFact sent carries a "From PluryFact" badge (and PluryFact's own label
  * for it, e.g. "Recibidos · octubre 2026") on the Print Job screen and in the
- * toast that confirms it was queued, so documents that did not come from a
- * file manager are recognisable as such. Any other source is informational
- * and shows nothing.
+ * toast that confirms it was queued, and on each of its rows in the Queue,
+ * so documents that did not come from a file manager are recognisable as
+ * such. Any other source is informational and shows nothing.
+ *
+ * The Print Job screen can mix files: a PluryFact batch may land in a job
+ * the user had already started, and the user may drop more files into a
+ * PluryFact job. So the origin is tracked with the paths it brought
+ * ([`TrackedOrigin`]), and shown only while every file in the job is one of
+ * them ([`originForFiles`]).
  */
 
 import type { Selection, SelectionOverrides } from '@/lib/ipc';
@@ -27,6 +33,52 @@ export interface JobOrigin {
   source: typeof PLURYFACT_SOURCE;
   /** The integration's own label for the batch, when it sent one. */
   label: string | null;
+}
+
+/** An origin and the job files it brought. */
+export interface TrackedOrigin extends JobOrigin {
+  /** Paths of the files this origin added to the job. */
+  paths: ReadonlySet<string>;
+}
+
+/**
+ * Record that `origin` added `added` to a job whose files are now `current`.
+ *
+ * An earlier origin whose files are all gone from the job is forgotten. One
+ * still in the job, from the same integration, is extended; when the two
+ * batches carry different labels neither label is shown, only the
+ * integration's name. Nothing added leaves `prev` as it was.
+ */
+export function trackOrigin(
+  prev: TrackedOrigin | null,
+  origin: JobOrigin,
+  added: readonly string[],
+  current: ReadonlySet<string>,
+): TrackedOrigin | null {
+  if (added.length === 0) return prev;
+  const live = prev ? [...prev.paths].filter((p) => current.has(p)) : [];
+  if (!prev || live.length === 0 || prev.source !== origin.source) {
+    return { ...origin, paths: new Set(added) };
+  }
+  return {
+    source: origin.source,
+    label: prev.label === origin.label ? origin.label : null,
+    paths: new Set([...live, ...added]),
+  };
+}
+
+/**
+ * The origin to show for a job holding `paths`: the tracked one only when
+ * every file came from it, so neither the user's own files nor a later drop
+ * are labelled as PluryFact's. `null` for an empty job.
+ */
+export function originForFiles(
+  tracked: TrackedOrigin | null,
+  paths: readonly string[],
+): JobOrigin | null {
+  if (!tracked || paths.length === 0) return null;
+  if (!paths.every((p) => tracked.paths.has(p))) return null;
+  return { source: tracked.source, label: tracked.label };
 }
 
 /** The origin to show for `selection`, or `null` when there is none to show. */

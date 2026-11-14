@@ -32,8 +32,11 @@ import {
 import { logError } from '@/lib/errorLog';
 import {
   jobOriginOf,
+  originForFiles,
   overridesFromSelection,
+  trackOrigin,
   type JobOrigin,
+  type TrackedOrigin,
 } from '@/lib/selectionSource';
 import { errorMessage } from '@/lib/ipcError';
 import {
@@ -176,10 +179,11 @@ function App() {
   const [files, setFiles] = useState<UiFile[]>([]);
   const [profileChoice, setProfileChoice] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PrintJobOverrides>({});
-  // FR-124: the batch on the Print Job screen came from PluryFact (through
-  // the browser bridge), so the screen says so. Cleared once the job is
-  // printed or emptied.
-  const [jobOrigin, setJobOrigin] = useState<JobOrigin | null>(null);
+  // FR-124: files on the Print Job screen that came from PluryFact (through
+  // the browser bridge). The screen says so only while every file in the job
+  // is one of them (`shownOrigin` below). Cleared once the job is printed or
+  // emptied.
+  const [jobOrigin, setJobOrigin] = useState<TrackedOrigin | null>(null);
   // What the copies field shows while it differs from the committed value
   // (see PrintJobScreen). Lives here so Ctrl/⌘+P refuses the same invalid
   // entry the Print button does.
@@ -327,6 +331,12 @@ function App() {
   if (files.length === 0 && jobOrigin !== null) {
     setJobOrigin(null);
   }
+  // The badge the Print Job screen shows: none for a mixed job, so neither
+  // the user's own files nor a later drop are labelled as PluryFact's.
+  const shownOrigin = originForFiles(
+    jobOrigin,
+    files.map((f) => f.path),
+  );
 
   // App-level drag & drop (FR-007): the Home screen advertises "drag them
   // here", so drops must work from any screen, not only while the Print Job
@@ -632,24 +642,40 @@ function App() {
         );
       }
       setActive('job');
-      if (named) chooseProfile(named.id);
-      // FR-123: settings the integration asked for pre-fill the screen; the
-      // user still confirms. (Choosing the profile above already cleared the
-      // previous job's tweaks.)
-      const wanted = overridesFromSelection(selection.overrides);
-      if (Object.keys(wanted).length > 0) {
-        if (!named) resetJobSettings();
-        setOverrides(wanted);
-      }
       const origin = jobOriginOf(selection);
+      const wanted = overridesFromSelection(selection.overrides);
+      // A job the user had already started keeps its profile and tweaks:
+      // the settings a PluryFact batch asks for are for that batch, not for
+      // files from somewhere else. The user is told, and decides.
       const hadFiles = filesRef.current.length > 0;
+      const asksSettings =
+        origin !== null &&
+        (named !== undefined || Object.keys(wanted).length > 0);
+      if (hadFiles && asksSettings) {
+        toast.info(t('selection.settingsKept'));
+      } else {
+        if (named) chooseProfile(named.id);
+        // FR-123: settings the integration asked for pre-fill the screen;
+        // the user still confirms. (Choosing the profile above already
+        // cleared the previous job's tweaks.)
+        if (Object.keys(wanted).length > 0) {
+          if (!named) resetJobSettings();
+          setOverrides(wanted);
+        }
+      }
       const added = await addPathsToJob(
         selection.paths,
         setFiles,
         currentPaths,
       );
-      // Labelled once its files are in the job (an empty job has no origin).
-      if (origin && (added.length > 0 || hadFiles)) setJobOrigin(origin);
+      // FR-124: remember which files PluryFact brought; the badge shows only
+      // while they are all the job holds.
+      if (origin) {
+        const addedPaths = added.map((f) => f.path);
+        setJobOrigin((prev) =>
+          trackOrigin(prev, origin, addedPaths, currentPaths()),
+        );
+      }
       return;
     }
 
@@ -895,7 +921,7 @@ function App() {
                 setCopiesDraft={setCopiesDraft}
                 density={density}
                 onPrint={() => void printJob()}
-                origin={files.length > 0 ? jobOrigin : null}
+                origin={shownOrigin}
               />
             )}
             {active === 'queue' && (
