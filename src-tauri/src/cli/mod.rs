@@ -73,6 +73,110 @@ pub struct Selection {
     /// then holds only the first ones, and the UI says so.
     #[serde(default)]
     pub truncated_from: Option<u32>,
+    /// Which integration handed the selection over (`windows-explorer`,
+    /// `macos-services`, `pluryfact`, …), when it said. The UI labels a
+    /// selection from the browser bridge ("From PluryFact", FR-124); any
+    /// other value is informational only and never changes what is printed.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// A short human label the integration gave the batch (PluryFact sends
+    /// the period and mailbox, e.g. "Recibidos · octubre 2026"). Display only.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Print settings the integration asked for on top of the profile
+    /// (PluryFact's `beginJob` overrides, FR-123). With `configure` they only
+    /// pre-fill the Print Job screen; with `queue`/`print-default` they are
+    /// applied to the batch. `None` (or every field `None`) keeps the profile.
+    #[serde(default)]
+    pub overrides: Option<SelectionOverrides>,
+}
+
+/// Longest [`Selection::label`] / handoff `label` accepted, in characters.
+pub const MAX_SELECTION_LABEL_CHARS: usize = 120;
+
+/// Longest printer id an integration may name in [`SelectionOverrides`].
+pub const MAX_OVERRIDE_PRINTER_CHARS: usize = 256;
+
+/// Per-batch print settings an integration asked for, layered on top of the
+/// chosen profile exactly like the Print Job screen's overrides (FR-040).
+///
+/// The vocabulary is the one `pluryprint print`'s flags and the profile
+/// editor already use (`docs/04-architecture/ipc-and-cli.md` §3.3), in its
+/// wire form, so nothing here is a new setting: it is only a new way to
+/// pre-fill existing ones. Unknown fields are refused rather than ignored: a
+/// print setting that silently does nothing is how the wrong pages reach the
+/// wrong printer.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionOverrides {
+    /// Printer id (as `printers list` reports it) instead of the profile's.
+    #[serde(default)]
+    pub printer: Option<String>,
+    /// Number of copies, 1-999.
+    #[serde(default)]
+    pub copies: Option<u16>,
+    /// Double-sided mode.
+    #[serde(default)]
+    pub duplex: Option<crate::profiles::ProfileDuplex>,
+    /// Colour or grayscale.
+    #[serde(default)]
+    pub color: Option<crate::queue::job::ColorMode>,
+    /// Paper size, as `--paper` accepts it.
+    #[serde(default)]
+    pub paper: Option<crate::queue::job::PaperSize>,
+    /// Page orientation.
+    #[serde(default)]
+    pub orientation: Option<crate::queue::job::Orientation>,
+    /// Collate multiple copies.
+    #[serde(default)]
+    pub collate: Option<bool>,
+}
+
+impl SelectionOverrides {
+    /// Whether no field is set (the profile applies unchanged).
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Check the values a type cannot: the copies range `print --copies`
+    /// enforces, and a printer id that is a plausible spooler name (not blank,
+    /// no control characters, bounded). The paper name was already checked by
+    /// [`crate::queue::job::PaperSize`]'s parser while deserializing.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(copies) = self.copies {
+            if !(1..=999).contains(&copies) {
+                return Err(format!("copies must be between 1 and 999, got {copies}"));
+            }
+        }
+        if let Some(printer) = &self.printer {
+            if printer.trim().is_empty()
+                || printer.chars().count() > MAX_OVERRIDE_PRINTER_CHARS
+                || printer.chars().any(char::is_control)
+            {
+                return Err("printer must be a printer id".to_string());
+            }
+        }
+        if let Some(paper) = &self.paper {
+            if paper.as_str().chars().count() > 64 {
+                return Err("paper size name is too long".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Check a display label an integration sent: at most
+/// [`MAX_SELECTION_LABEL_CHARS`] characters and no control characters.
+pub fn validate_label(label: &str) -> Result<(), String> {
+    if label.chars().count() > MAX_SELECTION_LABEL_CHARS {
+        return Err(format!(
+            "label is longer than {MAX_SELECTION_LABEL_CHARS} characters"
+        ));
+    }
+    if label.chars().any(char::is_control) {
+        return Err("label must not contain control characters".to_string());
+    }
+    Ok(())
 }
 
 /// What `main` should do next.
@@ -356,6 +460,9 @@ pub fn open_with_selection<S: AsRef<str>>(args: &[S]) -> Option<Selection> {
         profile_id: None,
         // Argv is never capped, so an open-with launch is never truncated.
         truncated_from: None,
+        source: None,
+        label: None,
+        overrides: None,
     })
 }
 
@@ -600,6 +707,9 @@ pub fn argv_selection(
         // Argv is not capped on Linux the way it is on Windows, so the whole
         // selection always arrives.
         truncated_from: None,
+        source: None,
+        label: None,
+        overrides: None,
     })
 }
 
@@ -614,11 +724,17 @@ pub fn selection_from_payload(
     action: ContextAction,
     profile: Option<String>,
 ) -> Selection {
+    // An empty override set is no override set: the UI then has nothing to
+    // pre-fill and the batch prints with the profile exactly as saved.
+    let overrides = payload.overrides.filter(|o| !o.is_empty());
     Selection {
         paths: payload.paths,
         action: payload.action.unwrap_or(action),
         profile_id: payload.profile_id.or(profile),
         truncated_from: payload.truncated_from,
+        source: Some(payload.source).filter(|s| !s.trim().is_empty()),
+        label: payload.label.filter(|l| !l.trim().is_empty()),
+        overrides,
     }
 }
 
