@@ -394,7 +394,7 @@ pub struct PrintRequest {
     pub hold: bool,
     /// Where the batch came from, when an integration labelled it (FR-124):
     /// every job of the batch carries it, and the Queue screen shows "From
-    /// PluryFact" on its rows. Optional and additive on the wire; absent for
+    /// Pluryfact" on its rows. Optional and additive on the wire; absent for
     /// everything the user added by hand.
     #[serde(default)]
     pub origin: Option<JobOrigin>,

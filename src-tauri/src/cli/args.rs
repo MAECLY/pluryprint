@@ -179,7 +179,7 @@ pub enum Command {
         #[command(subcommand)]
         cmd: UpdateCmd,
     },
-    /// Register the browser bridge PluryFact prints through (Chrome, Edge,
+    /// Register the browser bridge Pluryfact prints through (Chrome, Edge,
     /// Brave, Chromium).
     Bridge {
         /// Which bridge action to run.
@@ -389,9 +389,9 @@ pub enum BridgeCmd {
         )]
         browser: CliBrowser,
         /// Also allow this extension origin (`chrome-extension://<id>/`), for
-        /// a development build of PluryFact. Repeatable. Kept when the bridge
+        /// a development build of Pluryfact. Repeatable. Kept when the bridge
         /// is registered again, except on Windows, where installing or
-        /// updating Pluryprint resets the manifest to PluryFact's origin:
+        /// updating Pluryprint resets the manifest to Pluryfact's origin:
         /// add it again afterwards.
         #[arg(long = "extra-origin", value_name = "ORIGIN")]
         extra_origin: Vec<String>,

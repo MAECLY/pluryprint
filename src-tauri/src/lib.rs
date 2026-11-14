@@ -84,7 +84,7 @@ pub fn run_with(selection: Option<cli::Selection>, handoff: Option<std::path::Pa
         &cli::handoff::handoff_dir(),
         cli::handoff::ORPHAN_HANDOFF_AGE,
     );
-    // FR-126/FR-127, off the startup path: delete the documents PluryFact
+    // FR-126/FR-127, off the startup path: delete the documents Pluryfact
     // sent more than a week ago, and (macOS, where there is no installer)
     // make sure every browser this user has can find the bridge of *this*
     // copy of the app.

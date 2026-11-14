@@ -135,7 +135,7 @@ fn put_doc<H: Host>(
 
 const PDF: &[u8] = b"%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n";
 const XML: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><autorizacion><estado>AUTORIZADO</estado><comprobante><![CDATA[<factura id=\"comprobante\" version=\"1.1.0\"><infoTributaria><ruc>0999999999001</ruc></infoTributaria></factura>]]></comprobante></autorizacion>";
-const TXT: &[u8] = b"Reporte PluryFact\r\nRecibidos: 2\r\n";
+const TXT: &[u8] = b"Reporte Pluryfact\r\nRecibidos: 2\r\n";
 
 #[test]
 fn fr_120_hello_advertises_the_protocol_and_limits() {

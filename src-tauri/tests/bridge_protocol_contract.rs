@@ -1,6 +1,6 @@
 //! FR-120 — the bridge protocol's contract, pinned on the canonical fixtures
 //! in `tests/fixtures/bridge-protocol/` (copied byte for byte into
-//! PluryFact's repository, which checks its own types against them).
+//! Pluryfact's repository, which checks its own types against them).
 //!
 //! - every reply fixture reads into the host's typed reply and writes back
 //!   to exactly the same JSON (no field missing, renamed or extra);

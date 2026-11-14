@@ -1,7 +1,7 @@
-//! The browser bridge: a Chrome Native Messaging host for PluryFact
+//! The browser bridge: a Chrome Native Messaging host for Pluryfact
 //! (FR-120..FR-127, ADR-0016).
 //!
-//! PluryFact is a browser extension that downloads electronic invoices from
+//! Pluryfact is a browser extension that downloads electronic invoices from
 //! Ecuador's tax authority (SRI). It keeps the documents in memory and, when
 //! the user asks, sends them here to be printed. The browser starts
 //! `pluryprint-bridge` (`src/bin/pluryprint-bridge.rs`) with the caller's
@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 /// Lowercase letters, digits, `_` and `.` only, as Chrome requires.
 pub const HOST_NAME: &str = "com.maecly.pluryprint";
 
-/// PluryFact's origin on the Chrome Web Store. The only origin a production
+/// Pluryfact's origin on the Chrome Web Store. The only origin a production
 /// manifest lists; others are added with `pluryprint-cli bridge install
 /// --extra-origin` for development builds of the extension.
 pub const PLURYFACT_ORIGIN: &str = "chrome-extension://ibgodfpcihlddbbfaoooehfgbmahipbj/";

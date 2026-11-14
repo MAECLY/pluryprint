@@ -1,5 +1,5 @@
 //! `pluryprint-bridge` — the Chrome Native Messaging host that receives
-//! documents from the PluryFact extension (FR-120, ADR-0016).
+//! documents from the Pluryfact extension (FR-120, ADR-0016).
 //!
 //! The browser starts it with the calling extension's origin as the first
 //! argument (and, on Windows, `--parent-window=<hwnd>` as the second) and

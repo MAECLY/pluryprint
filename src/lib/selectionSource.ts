@@ -4,15 +4,15 @@
  *
  * Every integration tags its handoff with a `source` (`windows-explorer`,
  * `macos-services`, …). Only the browser bridge's is surfaced: a batch
- * PluryFact sent carries a "From PluryFact" badge (and PluryFact's own label
+ * Pluryfact sent carries a "From Pluryfact" badge (and Pluryfact's own label
  * for it, e.g. "Recibidos · octubre 2026") on the Print Job screen and in the
  * toast that confirms it was queued, and on each of its rows in the Queue,
  * so documents that did not come from a file manager are recognisable as
  * such. Any other source is informational and shows nothing.
  *
- * The Print Job screen can mix files: a PluryFact batch may land in a job
+ * The Print Job screen can mix files: a Pluryfact batch may land in a job
  * the user had already started, and the user may drop more files into a
- * PluryFact job. So the origin is tracked with the paths it brought
+ * Pluryfact job. So the origin is tracked with the paths it brought
  * ([`TrackedOrigin`]), and shown only while every file in the job is one of
  * them ([`originForFiles`]).
  */
@@ -70,7 +70,7 @@ export function trackOrigin(
 /**
  * The origin to show for a job holding `paths`: the tracked one only when
  * every file came from it, so neither the user's own files nor a later drop
- * are labelled as PluryFact's. `null` for an empty job.
+ * are labelled as Pluryfact's. `null` for an empty job.
  */
 export function originForFiles(
   tracked: TrackedOrigin | null,

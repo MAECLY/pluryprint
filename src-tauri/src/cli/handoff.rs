@@ -80,7 +80,7 @@ pub struct Handoff {
     /// is dropped silently).
     #[serde(default)]
     pub truncated_from: Option<u32>,
-    /// A display label for the batch (the browser bridge sends PluryFact's,
+    /// A display label for the batch (the browser bridge sends Pluryfact's,
     /// FR-124). Optional and additive: schema version 1 readers that predate
     /// it ignore nothing they relied on, and writers that do not know it
     /// simply leave it out. At most

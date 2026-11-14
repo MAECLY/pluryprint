@@ -1,7 +1,7 @@
 //! FR-124/FR-125 cross-repo E2E, second half: what the app does with the
-//! handoff a real PluryFact run left behind.
+//! handoff a real Pluryfact run left behind.
 //!
-//! PluryFact's `bun run e2e:pluryprint` drives the extension in Chromium
+//! Pluryfact's `bun run e2e:pluryprint` drives the extension in Chromium
 //! against the real `pluryprint-bridge` (with `PLURYPRINT_BRIDGE_NO_LAUNCH=1`,
 //! so the app is never started). The bridge stops after writing the inbox and
 //! the handoff file. This test picks up from there, with no window:
@@ -11,7 +11,7 @@
 //!    and parses, and runs it through the app's own gate
 //!    (`cli::selection_from_at`: inside the handoff folder, schema version,
 //!    size caps, label and overrides, and freshness — 60 s, so run it right
-//!    after the browser part, as PluryFact's script does).
+//!    after the browser part, as Pluryfact's script does).
 //! 2. Checks the selection the Print Job screen would open: source
 //!    `pluryfact`, the label, the action, every document inside this job's
 //!    inbox folder, in `index` order, with a supported extension.
@@ -36,7 +36,7 @@
 //! ```
 //!
 //! Documented in docs/08-development/testing-strategy.md ("Cross-repo E2E with
-//! PluryFact").
+//! Pluryfact").
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -55,7 +55,7 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// The PluryFact handoff file to check in `<data>/handoff/`: the one for
+/// The Pluryfact handoff file to check in `<data>/handoff/`: the one for
 /// `PLURYPRINT_E2E_JOB` when set, else the only one there.
 fn the_handoff(dir: &Path) -> PathBuf {
     if let Ok(job) = std::env::var("PLURYPRINT_E2E_JOB") {
@@ -80,14 +80,14 @@ fn the_handoff(dir: &Path) -> PathBuf {
     assert_eq!(
         files.len(),
         1,
-        "expected exactly one PluryFact handoff in {}, found {files:?}",
+        "expected exactly one Pluryfact handoff in {}, found {files:?}",
         dir.display()
     );
     files.into_iter().next().unwrap()
 }
 
 #[test]
-#[ignore = "cross-repo E2E: needs PLURYPRINT_E2E_DATA_DIR from PluryFact's e2e:pluryprint"]
+#[ignore = "cross-repo E2E: needs PLURYPRINT_E2E_DATA_DIR from Pluryfact's e2e:pluryprint"]
 fn fr_125_the_app_accepts_and_converts_a_real_pluryfact_handoff() {
     let Some(data) = env_path("PLURYPRINT_E2E_DATA_DIR") else {
         eprintln!("PLURYPRINT_E2E_DATA_DIR is not set: skipping the cross-repo handoff check");
@@ -135,7 +135,7 @@ fn fr_125_the_app_accepts_and_converts_a_real_pluryfact_handoff() {
     let label = selection
         .label
         .as_deref()
-        .expect("PluryFact labels the batch");
+        .expect("Pluryfact labels the batch");
     assert!(!label.is_empty() && label.chars().count() <= 120, "{label}");
     assert!(
         !label.contains("0999999999001"),
@@ -231,7 +231,7 @@ fn fr_125_the_app_accepts_and_converts_a_real_pluryfact_handoff() {
         let outcome = match &converted {
             None => {
                 // The engine checked the header and hands the original to
-                // the spooler untouched (PluryFact's fixtures are tiny
+                // the spooler untouched (Pluryfact's fixtures are tiny
                 // stand-ins, so their pages are not counted here).
                 assert_eq!(ext, "pdf", "only a PDF prints as is");
                 assert!(bytes.starts_with(b"%PDF-"));

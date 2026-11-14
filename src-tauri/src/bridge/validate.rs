@@ -137,7 +137,7 @@ pub fn decoded_len_bound(encoded: usize) -> u64 {
 /// `head` is at least the first [`HEAD_BYTES`] bytes (all of them for a
 /// shorter document); `whole` is the full document, read back only for the
 /// kinds that need it (XML and text). The PDF check is the header only:
-/// PluryPrint prints PDFs as they are and has its own checks downstream.
+/// Pluryprint prints PDFs as they are and has its own checks downstream.
 pub fn check_content(
     kind: FileKind,
     head: &[u8],

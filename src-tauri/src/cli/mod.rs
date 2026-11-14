@@ -76,16 +76,16 @@ pub struct Selection {
     pub truncated_from: Option<u32>,
     /// Which integration handed the selection over (`windows-explorer`,
     /// `macos-services`, `pluryfact`, …), when it said. The UI labels a
-    /// selection from the browser bridge ("From PluryFact", FR-124); any
+    /// selection from the browser bridge ("From Pluryfact", FR-124); any
     /// other value is informational only and never changes what is printed.
     #[serde(default)]
     pub source: Option<String>,
-    /// A short human label the integration gave the batch (PluryFact sends
+    /// A short human label the integration gave the batch (Pluryfact sends
     /// the period and mailbox, e.g. "Recibidos · octubre 2026"). Display only.
     #[serde(default)]
     pub label: Option<String>,
     /// Print settings the integration asked for on top of the profile
-    /// (PluryFact's `beginJob` overrides, FR-123). With `configure` they only
+    /// (Pluryfact's `beginJob` overrides, FR-123). With `configure` they only
     /// pre-fill the Print Job screen; with `queue`/`print-default` they are
     /// applied to the batch. `None` (or every field `None`) keeps the profile.
     #[serde(default)]

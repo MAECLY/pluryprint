@@ -2,7 +2,7 @@
 //!
 //! The Windows installer and, on macOS, the app itself at every start already
 //! register the bridge, so this is for everything else: a Linux install, a
-//! repair, a development build of PluryFact whose extension id has to be
+//! repair, a development build of Pluryfact whose extension id has to be
 //! allowed (`--extra-origin`), or a script that wants to know the state
 //! (`bridge status --json`). The exit codes are the existing ones: 0, 1 for a
 //! failure to write, 2 for a bad origin.

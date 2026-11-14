@@ -141,7 +141,7 @@ uuid = { version = "1", features = ["v7"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 
 # --- Browser bridge (FR-120..FR-127, ADR-0016) ---
-# `pluryprint-bridge`, the Chrome Native Messaging host, receives PluryFact's
+# `pluryprint-bridge`, the Chrome Native Messaging host, receives Pluryfact's
 # documents as base64 chunks, checks each against the SHA-256 the extension
 # sent, and refuses an XML file the XML converter could not read (it reuses
 # the converter's decoding and parsing; `roxmltree` is declared above). Both

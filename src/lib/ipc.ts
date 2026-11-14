@@ -509,7 +509,7 @@ export interface UiQueueJobView extends UiQueueJob {
   finishedAtIso?: string;
   /**
    * FR-124: the integration the job's batch came from, when the queue shows
-   * one ("From PluryFact" and PluryFact's label for the batch).
+   * one ("From Pluryfact" and Pluryfact's label for the batch).
    */
   origin?: { source: 'pluryfact'; label: string | null };
 }
@@ -760,7 +760,7 @@ export async function takePendingSelections(): Promise<Selection[]> {
 }
 
 /**
- * FR-127: whether the browser bridge PluryFact prints through is registered
+ * FR-127: whether the browser bridge Pluryfact prints through is registered
  * with each browser (Settings > Browser integration).
  */
 export async function bridgeStatus(): Promise<BridgeOverview> {

@@ -1,5 +1,5 @@
 //! The Settings screen's "Browser integration" section (FR-127): whether the
-//! bridge PluryFact prints through is registered with each browser, and a
+//! bridge Pluryfact prints through is registered with each browser, and a
 //! "Reconnect" that registers it again.
 //!
 //! Both commands are thin wrappers over [`crate::bridge::register`]; nothing

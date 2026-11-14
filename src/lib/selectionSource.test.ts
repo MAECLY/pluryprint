@@ -9,7 +9,7 @@ import {
 } from './selectionSource';
 
 describe('selectionSource', () => {
-  it('FR-124: only a PluryFact selection carries an origin to show', () => {
+  it('FR-124: only a Pluryfact selection carries an origin to show', () => {
     expect(
       jobOriginOf({ source: 'pluryfact', label: 'Recibidos · octubre 2026' }),
     ).toEqual({ source: PLURYFACT_SOURCE, label: 'Recibidos · octubre 2026' });
@@ -27,7 +27,7 @@ describe('selectionSource', () => {
     expect(jobOriginOf({})).toBeNull();
   });
 
-  it('FR-124: the badge shows only while every file in the job came from PluryFact', () => {
+  it('FR-124: the badge shows only while every file in the job came from Pluryfact', () => {
     const oct = {
       source: PLURYFACT_SOURCE,
       label: 'Recibidos · octubre 2026',
@@ -45,7 +45,7 @@ describe('selectionSource', () => {
     expect(trackOrigin(tracked, oct, [], new Set(['/i/a.pdf']))).toBe(tracked);
   });
 
-  it('FR-124: a second PluryFact batch extends the origin; different labels show only the name', () => {
+  it('FR-124: a second Pluryfact batch extends the origin; different labels show only the name', () => {
     const oct = {
       source: PLURYFACT_SOURCE,
       label: 'Recibidos · octubre 2026',

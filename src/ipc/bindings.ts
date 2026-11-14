@@ -2021,7 +2021,7 @@ hold?: boolean;
 /**
  * Where the batch came from, when an integration labelled it (FR-124):
  * every job of the batch carries it, and the Queue screen shows "From
- * PluryFact" on its rows. Optional and additive on the wire; absent for
+ * Pluryfact" on its rows. Optional and additive on the wire; absent for
  * everything the user added by hand.
  */
 origin?: JobOrigin | null }
@@ -2451,18 +2451,18 @@ truncated_from?: number | null;
 /**
  * Which integration handed the selection over (`windows-explorer`,
  * `macos-services`, `pluryfact`, …), when it said. The UI labels a
- * selection from the browser bridge ("From PluryFact", FR-124); any
+ * selection from the browser bridge ("From Pluryfact", FR-124); any
  * other value is informational only and never changes what is printed.
  */
 source?: string | null; 
 /**
- * A short human label the integration gave the batch (PluryFact sends
+ * A short human label the integration gave the batch (Pluryfact sends
  * the period and mailbox, e.g. "Recibidos · octubre 2026"). Display only.
  */
 label?: string | null; 
 /**
  * Print settings the integration asked for on top of the profile
- * (PluryFact's `beginJob` overrides, FR-123). With `configure` they only
+ * (Pluryfact's `beginJob` overrides, FR-123). With `configure` they only
  * pre-fill the Print Job screen; with `queue`/`print-default` they are
  * applied to the batch. `None` (or every field `None`) keeps the profile.
  */

@@ -1,4 +1,4 @@
-//! Protocol v1 between PluryFact and the bridge: the message types and the
+//! Protocol v1 between Pluryfact and the bridge: the message types and the
 //! request parser.
 //!
 //! Every message is `{ "v": 1, "id": "<string>", "type": "<type>", … }`. A
@@ -7,7 +7,7 @@
 //!
 //! The canonical examples of every exchange live in
 //! `src-tauri/tests/fixtures/bridge-protocol/` and are copied byte for byte
-//! into PluryFact's repository; `tests/bridge_protocol_contract.rs` checks
+//! into Pluryfact's repository; `tests/bridge_protocol_contract.rs` checks
 //! that these types read and write them exactly. Field names are camelCase on
 //! the wire. Unknown top-level fields are tolerated (a later minor revision
 //! may add optional ones), but unknown *override* fields are refused: a print
@@ -182,7 +182,7 @@ pub struct HelloRequest {
 #[serde(rename_all = "kebab-case")]
 pub enum JobAction {
     /// Open the Print Job screen with the documents loaded; nothing prints
-    /// until the user confirms. The default PluryFact uses.
+    /// until the user confirms. The default Pluryfact uses.
     Configure,
     /// Add to the queue, held, for review in the Queue screen.
     Queue,
@@ -295,7 +295,7 @@ pub enum FileKind {
     /// An electronic voucher: XML the XML converter reads (well formed, no
     /// DTD, in an encoding it decodes).
     Xml,
-    /// PluryFact's TXT report: text the text converter reads (UTF-8,
+    /// Pluryfact's TXT report: text the text converter reads (UTF-8,
     /// UTF-16 with a byte-order mark, or Windows-1252).
     Txt,
 }

@@ -36,11 +36,11 @@ const noteStyle = {
 } as const;
 
 /**
- * Settings > Browser integration (FR-127): whether PluryFact, the SRI
+ * Settings > Browser integration (FR-127): whether Pluryfact, the SRI
  * invoice downloader for Chrome, Edge and Brave, can reach Pluryprint
  * through the browser bridge, per browser, and a Reconnect that registers
  * the bridge again. Nothing here opens a port or talks to the network: the
- * browser starts the bridge itself, and only for PluryFact.
+ * browser starts the bridge itself, and only for Pluryfact.
  */
 export function BrowserIntegrationSection() {
   const t = useT('settings');

@@ -179,7 +179,7 @@ function App() {
   const [files, setFiles] = useState<UiFile[]>([]);
   const [profileChoice, setProfileChoice] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PrintJobOverrides>({});
-  // FR-124: files on the Print Job screen that came from PluryFact (through
+  // FR-124: files on the Print Job screen that came from Pluryfact (through
   // the browser bridge). The screen says so only while every file in the job
   // is one of them (`shownOrigin` below). Cleared once the job is printed or
   // emptied.
@@ -332,7 +332,7 @@ function App() {
     setJobOrigin(null);
   }
   // The badge the Print Job screen shows: none for a mixed job, so neither
-  // the user's own files nor a later drop are labelled as PluryFact's.
+  // the user's own files nor a later drop are labelled as Pluryfact's.
   const shownOrigin = originForFiles(
     jobOrigin,
     files.map((f) => f.path),
@@ -482,7 +482,7 @@ function App() {
       profileChoice,
     );
     const paths = list.map((f) => f.path);
-    // FR-124: a batch made only of PluryFact's files is tagged as such in
+    // FR-124: a batch made only of Pluryfact's files is tagged as such in
     // the Queue.
     const req = buildPrintRequest(paths, profileObj, overrides, {
       origin: originForFiles(jobOrigin, paths),
@@ -554,7 +554,7 @@ function App() {
     try {
       const batch = await printFiles(req);
       const count = batch.job_ids.length;
-      // FR-124: a batch PluryFact sent says so, with PluryFact's own label.
+      // FR-124: a batch Pluryfact sent says so, with Pluryfact's own label.
       const description = origin
         ? [t('selection.fromPluryfact'), origin.label, profileObj.name]
             .filter(Boolean)
@@ -646,7 +646,7 @@ function App() {
       const origin = jobOriginOf(selection);
       const wanted = overridesFromSelection(selection.overrides);
       // A job the user had already started keeps its profile and tweaks:
-      // the settings a PluryFact batch asks for are for that batch, not for
+      // the settings a Pluryfact batch asks for are for that batch, not for
       // files from somewhere else. The user is told, and decides.
       const hadFiles = filesRef.current.length > 0;
       const asksSettings =
@@ -669,7 +669,7 @@ function App() {
         setFiles,
         currentPaths,
       );
-      // FR-124: remember which files PluryFact brought; the badge shows only
+      // FR-124: remember which files Pluryfact brought; the badge shows only
       // while they are all the job holds.
       if (origin) {
         const addedPaths = added.map((f) => f.path);

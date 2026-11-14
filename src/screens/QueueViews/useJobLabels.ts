@@ -16,8 +16,8 @@ import {
  *   "Default printer" when the job has none yet.
  * - `error(j)` — the job's error in the current UI language (FR-092),
  *   re-translated on a language switch and naming printers by display name.
- * - `origin(j)` — "From PluryFact" and PluryFact's label for the batch, for
- *   a job PluryFact sent (FR-124); `undefined` for any other.
+ * - `origin(j)` — "From Pluryfact" and Pluryfact's label for the batch, for
+ *   a job Pluryfact sent (FR-124); `undefined` for any other.
  */
 export function useJobLabels(jobs: readonly UiQueueJobView[]) {
   const t = useT('queue');

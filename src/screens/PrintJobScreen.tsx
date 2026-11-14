@@ -163,7 +163,7 @@ interface PrintJobScreenProps {
   onPrint?: () => void;
   /**
    * FR-124: the batch came from an integration the screen names ("From
-   * PluryFact"), with that integration's label for it.
+   * Pluryfact"), with that integration's label for it.
    */
   origin?: JobOrigin | null;
 }

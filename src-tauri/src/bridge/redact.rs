@@ -1,6 +1,6 @@
 //! Masking for the bridge's log records (NFR-082).
 //!
-//! The documents PluryFact sends are tax records: their names and labels can
+//! The documents Pluryfact sends are tax records: their names and labels can
 //! carry a taxpayer number (RUC, 13 digits), an ID number (cédula, 10) or a
 //! 49-digit access key (clave de acceso). The bridge logs counts, sizes and
 //! codes, not names; whatever text does reach a record goes through
