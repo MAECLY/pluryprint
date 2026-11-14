@@ -23,7 +23,9 @@ use std::sync::{Arc, RwLock};
 use anyhow::Context;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::queue::job::{now_rfc3339, Job, JobBatch, PrintRequest, QueueSnapshot, SCHEMA_VERSION};
+use crate::queue::job::{
+    now_rfc3339, Job, JobBatch, JobOrigin, PrintRequest, QueueSnapshot, SCHEMA_VERSION,
+};
 use crate::util::error::{IpcError, IpcErrorCode};
 
 /// PDFs larger than this are not parsed for a page count at submit/inspect time
@@ -139,6 +141,7 @@ impl QueueHandle {
             );
             job.input_bytes = meta.len();
             job.pages = probe_pages(path, &ext, meta.len());
+            job.origin = req.origin.as_ref().and_then(JobOrigin::bounded);
             if req.hold {
                 // Paused with no cached PDF: resuming sends it back to
                 // `Queued`, exactly like any job paused before conversion.
@@ -431,6 +434,7 @@ mod tests {
             settings,
             profile_name: None,
             hold: false,
+            origin: None,
         }
     }
 
@@ -551,6 +555,7 @@ mod tests {
                 settings: JobSettings::default(),
                 profile_name: Some("Quick".into()),
                 hold: false,
+                origin: None,
             })
             .unwrap();
 
@@ -565,6 +570,43 @@ mod tests {
                     batch.job_ids
                 );
             }
+            _ => panic!("expected a Submit command"),
+        }
+    }
+
+    /// FR-124: a batch an integration labelled carries its origin on every
+    /// job (bounded), so the Queue screen can say where it came from; a batch
+    /// without one stays unlabelled.
+    #[test]
+    fn fr_124_every_job_of_a_labelled_batch_carries_its_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let f1 = write_file(&dir, "a.pdf", b"%PDF-1.4\n%stub");
+        let f2 = write_file(&dir, "b.xml", b"<factura/>");
+        let (h, mut rx) = handle_with_open_channel();
+        h.submit(PrintRequest {
+            origin: Some(JobOrigin {
+                source: "pluryfact".into(),
+                label: Some(format!("Recibidos · octubre 2026{}", "x".repeat(500))),
+            }),
+            ..req(vec![f1.clone(), f2], JobSettings::default())
+        })
+        .unwrap();
+        match rx.try_recv().unwrap() {
+            dispatcher::Cmd::Submit { jobs } => {
+                assert_eq!(jobs.len(), 2);
+                for j in &jobs {
+                    let o = j.origin.as_ref().expect("origin on every job");
+                    assert_eq!(o.source, "pluryfact");
+                    let label = o.label.as_deref().unwrap();
+                    assert!(label.starts_with("Recibidos · octubre 2026"));
+                    assert_eq!(label.chars().count(), crate::cli::MAX_SELECTION_LABEL_CHARS);
+                }
+            }
+            _ => panic!("expected a Submit command"),
+        }
+        h.submit(req(vec![f1], JobSettings::default())).unwrap();
+        match rx.try_recv().unwrap() {
+            dispatcher::Cmd::Submit { jobs } => assert!(jobs[0].origin.is_none()),
             _ => panic!("expected a Submit command"),
         }
     }

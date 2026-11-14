@@ -251,6 +251,44 @@ describe('installIpcStub', () => {
     ]);
   });
 
+  it('FR-124: a Pluryfact selection carries its source, label and overrides to the app', async () => {
+    const got: unknown[] = [];
+    await events.selectionForwarded.listen((e) => got.push(e.payload));
+    const sel = {
+      paths: [
+        '/Users/e2e/Library/Application Support/com.Maecly.Pluryprint/inbox/j/0000-RIDE.pdf',
+      ],
+      action: 'configure' as const,
+      profile_id: null,
+      source: 'pluryfact',
+      label: 'Recibidos · octubre 2026',
+      overrides: { copies: 2, color: 'monochrome' as const },
+    };
+    h.forwardSelection(sel);
+    expect(got).toEqual([sel]);
+  });
+
+  it('FR-127: the bridge status and Reconnect are served', async () => {
+    const before = await commands.bridgeStatus();
+    expect(before.status).toBe('ok');
+    if (before.status !== 'ok') return;
+    expect(before.data.browsers.map((b) => b.registered)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    const after = await commands.bridgeReconnect();
+    if (after.status !== 'ok') throw new Error('reconnect failed');
+    // Every browser found is registered; the absent one stays absent.
+    expect(after.data.browsers.map((b) => b.registered)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+  });
+
   it('records every command the app invoked', async () => {
     await commands.appInfo();
     await commands.queueStatus();

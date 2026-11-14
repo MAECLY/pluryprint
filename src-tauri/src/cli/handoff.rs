@@ -80,6 +80,18 @@ pub struct Handoff {
     /// is dropped silently).
     #[serde(default)]
     pub truncated_from: Option<u32>,
+    /// A display label for the batch (the browser bridge sends Pluryfact's,
+    /// FR-124). Optional and additive: schema version 1 readers that predate
+    /// it ignore nothing they relied on, and writers that do not know it
+    /// simply leave it out. At most
+    /// [`super::MAX_SELECTION_LABEL_CHARS`] characters, no control characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Print settings layered on the profile (the browser bridge's `beginJob`
+    /// overrides, FR-123). Optional and additive like `label`; validated by
+    /// [`parse`] like every other field, since the file is untrusted input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<super::SelectionOverrides>,
 }
 
 /// Directory the shell extensions write handoff files to. Under the per-user
@@ -115,6 +127,14 @@ pub fn parse(raw: &str) -> Result<Handoff, CliError> {
             "handoff file lists {} paths, more than the {MAX_HANDOFF_PATHS} limit",
             handoff.paths.len()
         )));
+    }
+    if let Some(label) = &handoff.label {
+        super::validate_label(label).map_err(|e| CliError::usage(format!("handoff file: {e}")))?;
+    }
+    if let Some(overrides) = &handoff.overrides {
+        overrides
+            .validate()
+            .map_err(|e| CliError::usage(format!("handoff file: {e}")))?;
     }
     Ok(handoff)
 }
@@ -266,6 +286,77 @@ mod tests {
         assert_eq!(h.paths.len(), 2);
         // The exact reason the format is JSON: separators inside file names.
         assert_eq!(h.paths[1], r#"C:\name, with "quotes".png"#);
+    }
+
+    /// FR-123/FR-124: the browser bridge's additive fields (a label and the
+    /// per-batch overrides) are read, and a payload that predates them still
+    /// parses with both absent.
+    #[test]
+    fn fr_123_label_and_overrides_are_optional_and_parsed() {
+        let h = parse(&payload(r#""/tmp/a.pdf""#)).unwrap();
+        assert_eq!((h.label, h.overrides), (None, None));
+
+        let raw = r#"{"schema_version":1,"source":"pluryfact","action":"queue",
+            "invoked_at":"2026-07-20T21:11:03Z","paths":["/tmp/a.pdf"],
+            "label":"Recibidos · octubre 2026",
+            "overrides":{"printer":"HP_LaserJet","copies":2,"duplex":"long-edge",
+                         "color":"monochrome","paper":"a4","orientation":"portrait",
+                         "collate":false}}"#;
+        let h = parse(raw).unwrap();
+        assert_eq!(h.label.as_deref(), Some("Recibidos · octubre 2026"));
+        let o = h.overrides.unwrap();
+        assert_eq!(o.printer.as_deref(), Some("HP_LaserJet"));
+        assert_eq!(o.copies, Some(2));
+        assert_eq!(o.duplex, Some(crate::profiles::ProfileDuplex::LongEdge));
+        assert_eq!(o.color, Some(crate::queue::job::ColorMode::Monochrome));
+        assert_eq!(o.paper, Some(crate::queue::job::PaperSize::A4));
+        assert_eq!(
+            o.orientation,
+            Some(crate::queue::job::Orientation::Portrait)
+        );
+        assert_eq!(o.collate, Some(false));
+    }
+
+    /// FR-123: the file is untrusted, so the new fields are checked like the
+    /// old ones: copies out of range, an unknown override, a control
+    /// character or an over-long label refuse the whole payload.
+    #[test]
+    fn fr_123_bad_overrides_or_label_refuse_the_payload() {
+        let with = |extra: &str| {
+            format!(
+                r#"{{"schema_version":1,"source":"pluryfact","invoked_at":"2026-07-20T21:11:03Z",
+                    "paths":["/tmp/a.pdf"],{extra}}}"#
+            )
+        };
+        for extra in [
+            r#""overrides":{"copies":0}"#,
+            r#""overrides":{"copies":1000}"#,
+            r#""overrides":{"scale":"fit"}"#,
+            r#""overrides":{"duplex":"both"}"#,
+            r#""overrides":{"printer":"  "}"#,
+            r#""overrides":{"printer":"ab"}"#,
+            r#""label":"line
+break""#,
+        ] {
+            assert_eq!(
+                parse(&with(extra)).unwrap_err().exit,
+                ExitCode::Usage,
+                "{extra}"
+            );
+        }
+        let long = format!(
+            r#""label":"{}""#,
+            "x".repeat(super::super::MAX_SELECTION_LABEL_CHARS + 1)
+        );
+        assert_eq!(parse(&with(&long)).unwrap_err().exit, ExitCode::Usage);
+        let just = format!(
+            r#""label":"{}""#,
+            "ñ".repeat(super::super::MAX_SELECTION_LABEL_CHARS)
+        );
+        assert!(
+            parse(&with(&just)).is_ok(),
+            "the limit counts characters, not bytes"
+        );
     }
 
     #[test]

@@ -40,7 +40,9 @@
     "profilesUnreadableNotPrinted": "No se han podido leer tus perfiles ({{reason}}), así que no se ha impreso nada. Los archivos están en la pantalla Trabajo de impresión."
   },
   "selection": {
-    "truncated": "Solo han llegado a Pluryprint los primeros {{sent}} de los {{total}} elementos seleccionados. Selecciona el resto por separado para imprimirlos."
+    "truncated": "Solo han llegado a Pluryprint los primeros {{sent}} de los {{total}} elementos seleccionados. Selecciona el resto por separado para imprimirlos.",
+    "fromPluryfact": "Desde Pluryfact",
+    "settingsKept": "El trabajo ya tenía archivos, así que conserva su perfil y su configuración: no se aplicó la configuración de impresión de Pluryfact."
   },
   "shellMenu": {
     "print_one": "Imprimir 1 archivo",
@@ -96,7 +98,8 @@
         "printer_query_failed": "Windows notificó un error al leer las impresoras.",
         "discovery_failed": "Falló la búsqueda de impresoras en la red.",
         "printer_settings_unavailable": "No se pudo abrir ninguna aplicación de ajustes de impresoras. Puedes gestionarlas en http://localhost:631 desde el navegador.",
-        "update_state_save_failed": "No se pudo guardar tu elección sobre la actualización."
+        "update_state_save_failed": "No se pudo guardar tu elección sobre la actualización.",
+        "bridge_missing": "El puente con el navegador no está instalado junto a la app. Reinstala Pluryprint."
       },
       "InvalidRequest": {
         "url_not_allowed": "Ese enlace no está en la lista de sitios permitidos.",
@@ -143,7 +146,8 @@
         "path_not_absolute": "«{{path}}» no es una ruta completa.",
         "printer_uri_invalid": "La dirección de la impresora no es válida.",
         "printer_option_invalid": "El tamaño de papel o la bandeja configurados para esta impresora no son válidos.",
-        "password_empty": "Escribe la contraseña del PDF."
+        "password_empty": "Escribe la contraseña del PDF.",
+        "bridge_translocated": "Pluryprint se está ejecutando desde una ubicación temporal. Muévelo a la carpeta Aplicaciones, ábrelo desde ahí y vuelve a intentarlo."
       },
       "DependencyMissing": {
         "ippfind_missing": "La detección en red necesita las herramientas cliente de CUPS (ippfind), que no están instaladas.",

@@ -107,13 +107,18 @@ Excluded from coverage:
 
 ### Location
 
-`src-tauri/tests/`. Each `.rs` file is a separate test binary, which means each gets its own clean environment. Twenty-three binaries exist today:
+`src-tauri/tests/`. Each `.rs` file is a separate test binary, which means each gets its own clean environment. Twenty-eight binaries exist today:
 
 ```
 src-tauri/tests/
 ├── bundle_identity.rs       # ADR-0009 bundle identity; the NSIS hooks compile with makensis
+├── bridge_binary.rs         # FR-120/125/126: the real pluryprint-bridge over framed pipes, temp data dir, no launch
+├── bridge_handoff_e2e.rs    # FR-124/125: the app's half of the cross-repo E2E with Pluryfact (ignored, opt-in)
+├── bridge_bundle_contract.rs # FR-127: the bridge ships next to the app; the NSIS manifest and HKCU keys match bridge::register
+├── bridge_protocol_contract.rs # FR-120: protocol v1 fixtures (shared with Pluryfact) round-trip and replay
 ├── cli_console_binary.rs    # FR-009: pluryprint-cli.exe returns the documented exit codes
 ├── cli_contract.rs          # The headless surface: subcommands, flags, exit codes (FR-008/009/112)
+├── config_files_0_0_1.rs    # FR-100/026: config.toml and profiles.toml as 0.0.1 wrote them still load
 ├── engine_deps.rs           # FR-058: resolution order, remediation, install options
 ├── fetch_scripts.rs         # The SumatraPDF fetch scripts agree on version, hashes, licences
 ├── folder_expansion.rs      # Walking a dropped directory: limits, skip reasons (FR-004/005/059)
@@ -188,6 +193,7 @@ These tests are `#[ignore]`d because they reach outside the process:
 | `platform::windows::tests::discover_printers_smoke`, `platform::windows_dnssd::tests::browse_smoke` | Wait for the DNS-SD browse window on a real Windows network | on the Windows VM, `cargo test -- --ignored smoke` |
 | `engine_deps::fr_058_print_this_hosts_report` | Diagnostic: prints the host's dependency report | `cargo test --test engine_deps -- --ignored --nocapture` |
 | `tests/real_printer.rs` (6 tests) | Submits held jobs to a real CUPS queue and reads their IPP attributes back (see *Virtual printer* above); a no-op unless `MAECLY_REAL_PRINTER=1` | `MAECLY_REAL_PRINTER=1 cargo test --test real_printer -- --ignored --test-threads=1` |
+| `tests/bridge_handoff_e2e.rs` | Reads the inbox and handoff a real Pluryfact run left behind (see *Cross-repo E2E with Pluryfact* below); a no-op unless `PLURYPRINT_E2E_DATA_DIR` is set | run by Pluryfact's `bun run e2e:pluryprint`, or `PLURYPRINT_E2E_DATA_DIR=<dir> cargo test --test bridge_handoff_e2e -- --ignored --nocapture` within 60 s of the handoff |
 | `tests/real_printer_windows.rs` (2 tests), `tests/print_quality_windows.rs` (10 tests) | Spool to **paused** Windows queues and read the jobs back; a no-op unless `MAECLY_REAL_PRINTER=1` | see [e2e/README.md](../../e2e/README.md#real-spooler-suites-opt-in-never-print); `scripts/vm/print-quality-e2e.ps1` sets up the queues |
 
 `ci.yml` does not run them: they need the network, real queues or a real printer, and must never fail a pull request. The CUPS ones are the exception after a merge: `linux.yml` has a hold queue, and runs `cargo test --lib -- --ignored cups` and `cargo test --test real_printer -- --ignored --test-threads=1` with `MAECLY_REAL_PRINTER=1`. Run the rest by hand with the commands above; `cargo test -- --ignored` runs *only* the ignored ones (the rest already ran in CI), **not** `--include-ignored`.
@@ -281,6 +287,30 @@ Measured by `pnpm test:coverage` (`vitest run --coverage`) with the `@vitest/cov
 `pnpm dev:e2e` (`vite --mode e2e`; `PLURY_E2E_STUB=1 pnpm dev` is equivalent) serves the real frontend at `http://localhost:1421` with a **fake Tauri host** injected ahead of the app. The `pluryE2eStub` plugin in `vite.config.ts` (`e2e/browser/vite-plugin.ts`) is `apply: 'serve'` and inert without the flag, so neither `pnpm dev` nor any production build ever contains it. `e2e/browser/ipc-stub.ts` installs `window.__TAURI_INTERNALS__` (invoke, callbacks, the event plugin's listen/unlisten/emit, the dialog plugin, `convertFileSrc`, webview metadata), so `isTauri()` is true and the screens run their real code paths. Every command lands on `e2e/browser/fake-backend.ts`: in-memory printers, profiles (CRUD, default guard), settings (with the server's engine limits), folders and a queue seeded from `src/test/fixtures.ts`. Submitted jobs advance on a timer (queued → converting → converted → printing → done, a file named `*fail*` fails), emitting `queue-updated` and `job-progress-event`. A command it does not model rejects with `Internal`, never resolves `undefined`.
 
 Drive it with any browser automation (Chrome DevTools MCP, Playwright) through `window.__PLURY_E2E__`: `backend` (state, `tick()`, `openPaths` for the next file picker), `forwardSelection(sel)`, `dropFiles(paths)`, `emit(event, payload)`, `calls()`. URL flags: `?e2e-seed=1` (fixture queue with every job state), `?e2e-tick=0` (manual ticks), `?e2e-onboarded=1` (skip onboarding). It proves GUI ↔ IPC-contract behaviour, not the backend; the harness's own contract tests live in `e2e/browser/ipc-stub.test.ts` and run with `pnpm test`.
+
+### Cross-repo E2E with Pluryfact (macOS, Linux)
+
+The browser bridge (FR-120…127, ADR-0016) is tested end to end from the Pluryfact repository, against this repository's real binaries: Pluryfact's `bun run e2e:pluryprint` (`scripts/e2e-pluryprint.ts` there) drives the extension in Playwright's Chromium, and `src-tauri/tests/bridge_handoff_e2e.rs` here checks what the app would do with the result. Nothing is printed and no window opens: the bridge runs with `PLURYPRINT_BRIDGE_NO_LAUNCH=1`, which writes the inbox and the handoff and stops there.
+
+```sh
+cd src-tauri && cargo build --bin pluryprint-bridge --bin pluryprint-cli
+cd ../../pluryfact
+# Manifest written by the script, bridge data in a temporary folder:
+PLURYPRINT_BRIDGE_BIN=../pluryprint/src-tauri/target/debug/pluryprint-bridge \
+  PLURYPRINT_BRIDGE_NO_LAUNCH=1 bun run e2e:pluryprint
+# Real registration: `pluryprint-cli bridge install` under a temporary HOME:
+PLURYPRINT_REGISTRO=cli PLURYPRINT_BRIDGE_BIN=../pluryprint/src-tauri/target/debug/pluryprint-bridge \
+  PLURYPRINT_BRIDGE_NO_LAUNCH=1 bun run e2e:pluryprint
+```
+
+What one run covers:
+
+1. **Registration** (`PLURYPRINT_REGISTRO=cli`): the CLI and the bridge are copied next to each other into a temporary folder, `pluryprint-cli bridge install --browser chrome --extra-origin chrome-extension://<test id>/ --json` runs with `HOME=<temp>/home`, and `bridge status --json` must report Chrome registered, pointing at that bridge, binary present. Chromium's profile is that HOME's Chrome folder, so the browser reads the manifest exactly where the CLI wrote it, and it hands that HOME to the bridge, which accepts the test origin only because the installed manifest lists it. The user's real manifests and data folder are compared before and after and must be unchanged. Without the variable the script writes the manifest itself and uses `PLURYPRINT_BRIDGE_DATA_DIR`.
+2. **Protocol**: "not installed" before registration, `hello`, `listProfiles`, then two "Print a ZIP…" jobs of a fictitious download (RUC `0999999999001`): RIDE PDFs with the XML of the receipt that has no RIDE plus the TXT report, and "XML only" (four SRI XML, one of them a withholding receipt, plus the report).
+3. **Inbox**: per job, every file in `inbox/<jobId>/` is byte for byte its entry in the ZIP the page was given, in print order, and the handoff says `source: "pluryfact"`, `action: "configure"`, a label without the RUC and the inbox paths in order.
+4. **The app's side** (`bridge_handoff_e2e`, run by the script right after each job because a handoff is only honoured for 60 s): the argv `launch::gui_args` builds classifies as a context-menu launch and passes `cli::selection_from_at`; under the temporary HOME the app's own handoff folder is the bridge's (`PLURYPRINT_E2E_SAME_HOME=1`); `ipc::jobs::inspect_files` reports every file printable; and `convert_to_pdf`, with the real render worker, passes the PDFs through and turns each XML into its RIDE-like page and the report into a text page. `PLURYPRINT_E2E_OUT` keeps those PDFs.
+
+Not covered: the app actually opening the Print Job screen from the handoff (`PLURYPRINT_BRIDGE_NO_LAUNCH=0` with an installed app), spooling, Windows (registry registration and the NSIS hooks; checked by `bridge_bundle_contract.rs` and `installer_hooks.rs` only), and Edge/Brave. Last run: 2026-11-14 on macOS, both modes green.
 
 ### Coverage scope
 

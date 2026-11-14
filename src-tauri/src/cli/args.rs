@@ -22,7 +22,7 @@ use crate::queue::job::{ColorMode, Duplex, Orientation, PaperSize, Scaling};
 /// Subcommand names that switch the binary into headless mode when they appear
 /// as the first non-flag argument (§3.1). Kept as data so the argv classifier
 /// and the parser can never disagree.
-pub const SUBCOMMANDS: &[&str] = &["print", "printers", "profiles", "queue", "update"];
+pub const SUBCOMMANDS: &[&str] = &["print", "printers", "profiles", "queue", "update", "bridge"];
 
 /// `pluryprint` — the whole command line.
 #[derive(Debug, Parser, PartialEq, Eq)]
@@ -178,6 +178,13 @@ pub enum Command {
         /// Which update action to run.
         #[command(subcommand)]
         cmd: UpdateCmd,
+    },
+    /// Register the browser bridge Pluryfact prints through (Chrome, Edge,
+    /// Brave, Chromium).
+    Bridge {
+        /// Which bridge action to run.
+        #[command(subcommand)]
+        cmd: BridgeCmd,
     },
 }
 
@@ -365,6 +372,72 @@ pub enum UpdateCmd {
         #[arg(value_name = "CHANNEL", ignore_case = true)]
         channel: Option<CliChannel>,
     },
+}
+
+/// `pluryprint bridge …` actions (FR-127).
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+pub enum BridgeCmd {
+    /// Write the native messaging manifest so the browser can start the
+    /// bridge (on Windows also the registry key that names it).
+    Install {
+        /// Which browser to register with.
+        #[arg(
+            long,
+            value_name = "BROWSER",
+            ignore_case = true,
+            default_value = "all"
+        )]
+        browser: CliBrowser,
+        /// Also allow this extension origin (`chrome-extension://<id>/`), for
+        /// a development build of Pluryfact. Repeatable. Kept when the bridge
+        /// is registered again, except on Windows, where installing or
+        /// updating Pluryprint resets the manifest to Pluryfact's origin:
+        /// add it again afterwards.
+        #[arg(long = "extra-origin", value_name = "ORIGIN")]
+        extra_origin: Vec<String>,
+    },
+    /// Remove the manifest (and, on Windows, the registry key).
+    Uninstall {
+        /// Which browser to unregister from.
+        #[arg(
+            long,
+            value_name = "BROWSER",
+            ignore_case = true,
+            default_value = "all"
+        )]
+        browser: CliBrowser,
+    },
+    /// Show, per browser, whether the bridge is registered and where.
+    Status,
+}
+
+/// `--browser` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CliBrowser {
+    /// Google Chrome.
+    Chrome,
+    /// Microsoft Edge.
+    Edge,
+    /// Brave.
+    Brave,
+    /// Chromium.
+    Chromium,
+    /// Every browser above.
+    All,
+}
+
+impl CliBrowser {
+    /// The browsers this value names.
+    pub fn browsers(self) -> Vec<crate::bridge::register::Browser> {
+        use crate::bridge::register::Browser;
+        match self {
+            CliBrowser::Chrome => vec![Browser::Chrome],
+            CliBrowser::Edge => vec![Browser::Edge],
+            CliBrowser::Brave => vec![Browser::Brave],
+            CliBrowser::Chromium => vec![Browser::Chromium],
+            CliBrowser::All => Browser::ALL.to_vec(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

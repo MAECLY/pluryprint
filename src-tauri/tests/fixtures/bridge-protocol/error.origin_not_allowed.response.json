@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "23",
+  "type": "hello",
+  "ok": false,
+  "error": {
+    "code": "origin_not_allowed",
+    "message": "this extension is not allowed to use Pluryprint"
+  }
+}

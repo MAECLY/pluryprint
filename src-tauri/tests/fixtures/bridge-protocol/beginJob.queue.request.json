@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "id": "9",
+  "type": "beginJob",
+  "source": "pluryfact",
+  "label": "Emitidos · 2026",
+  "action": "queue",
+  "profileId": null,
+  "printerId": "HP_LaserJet_Pro_M404",
+  "expectedFiles": 1
+}

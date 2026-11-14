@@ -236,6 +236,7 @@ function Row({
   const targets = printers.printers.filter((p) => p.id !== j.printer);
   const error = labels.error(j);
   const meta = [
+    labels.origin(j) ?? null,
     t('job.meta', { profile: j.profile, printer: labels.printer(j) }),
     j.noteKey ? t(`note.${j.noteKey}`) : null,
     error ?? null,

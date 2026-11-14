@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "id": "25",
+  "type": "beginJob",
+  "source": "pluryfact",
+  "label": "Recibidos · 2026",
+  "action": "configure",
+  "profileId": null,
+  "printerId": null,
+  "expectedFiles": 6000
+}

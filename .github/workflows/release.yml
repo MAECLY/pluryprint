@@ -399,6 +399,11 @@ jobs:
           foreach ($f in 'sumatrapdf/SumatraPDF.exe', 'sumatrapdf/LICENSE.txt', 'sumatrapdf/SOURCE-OFFER.txt', 'shellext/x64/shell_ext_win.dll', 'shellext/arm64/shell_ext_win.dll') {
             if (-not (Test-Path "src-tauri/target/$env:TARGET/release/resources/$f")) { throw "the bundle has no resources/$f" }
           }
+          # The console CLI and the browser bridge (FR-127) are cargo binaries
+          # of the app crate, which the NSIS bundle installs next to it.
+          foreach ($f in 'pluryprint-cli.exe', 'pluryprint-bridge.exe') {
+            if (-not (Test-Path "src-tauri/target/$env:TARGET/release/$f")) { throw "the build has no $f" }
+          }
 
       # Each Mac build is the architecture its name says, the CLI included,
       # and the Intel build starts under Rosetta on the Apple silicon runner.
@@ -415,6 +420,10 @@ jobs:
             got=$(lipo -archs "$b")
             echo "$b: $got"
             [ "$got" = "$want" ] || { echo "::error::$b is $got, expected $want"; exit 1; }
+          done
+          # The CLI and the browser bridge (FR-127) sit next to the app.
+          for f in pluryprint pluryprint-cli pluryprint-bridge; do
+            test -x "$app/Contents/MacOS/$f" || { echo "::error::the macOS bundle has no Contents/MacOS/$f"; exit 1; }
           done
           # SumatraPDF is a Windows program; it must never end up in a Mac app.
           if [ -e "$app/Contents/Resources/resources/sumatrapdf/SumatraPDF.exe" ]; then
@@ -466,7 +475,7 @@ jobs:
               echo "$b: $got"
               [ "$got" = "$MACHINE" ] || { echo "::error::$b is $got, expected $MACHINE"; exit 1; }
             done
-            for f in usr/bin/pluryprint usr/bin/pluryprint-cli; do
+            for f in usr/bin/pluryprint usr/bin/pluryprint-cli usr/bin/pluryprint-bridge; do
               test -x "$root/$f" || { echo "::error::$root has no $f"; exit 1; }
             done
             # The licence texts and notices ship with the binary

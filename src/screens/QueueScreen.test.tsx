@@ -165,6 +165,41 @@ describe('QueueScreen', () => {
     resetPrinterNames();
   });
 
+  it('FR-124: a job Pluryfact sent says so on its row, in every view', async () => {
+    resetPrinterNames();
+    mockIPC((cmd) => {
+      if (cmd === 'queue_status')
+        return snapshotOf([
+          mkJob({
+            id: 'pf',
+            state: 'queued',
+            file_name: '0000-factura.xml',
+            profile_name: 'Quick',
+            origin: { source: 'pluryfact', label: 'Recibidos · octubre 2026' },
+          }),
+          mkJob({
+            id: 'own',
+            state: 'queued',
+            file_name: 'mine.pdf',
+            profile_name: 'Quick',
+          }),
+        ]);
+      if (cmd === 'list_printers') return fixturePrinters;
+      return null;
+    });
+    await useQueueStore.getState().init();
+    for (const view of ['list', 'board', 'timeline'] as const) {
+      const { unmount } = render(
+        <QueueScreen view={view} setView={() => {}} />,
+      );
+      expect(
+        await screen.findAllByText(/From Pluryfact · Recibidos · octubre 2026/),
+      ).toHaveLength(1);
+      unmount();
+    }
+    resetPrinterNames();
+  });
+
   it('FR-033: toggles the whole queue: pause invokes pause_queue', async () => {
     const calls = await renderReady();
 

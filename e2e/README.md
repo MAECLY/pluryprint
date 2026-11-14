@@ -187,6 +187,10 @@ shapes, `IpcError` rejections), not the Rust implementation:
 - `install_dependency` with the same consent contract as the app: without
   `consent: true` it is refused, with it the "page opens" and the dependency
   stays missing (nothing is installed from a browser).
+- the browser bridge's state for Settings > Browser integration
+  (`bridge_status`: Chrome registered, Edge and Brave found but not
+  registered, Chromium absent) and `bridge_reconnect`, which registers every
+  browser found (FR-127).
 
 A command it does not model rejects with `Internal: not stubbed …`.
 
@@ -209,6 +213,38 @@ __PLURY_E2E__.calls(); // every command the app invoked
 | `?e2e-onboarded=1` | Skip the onboarding overlay                           |
 | `?e2e-seed=1`      | Start from the fixture queue (one job in every state) |
 | `?e2e-tick=0`      | Stop the timer; advance with `backend.tick()`         |
+
+### A batch from Pluryfact (FR-123/FR-124)
+
+What the browser bridge hands the app is an ordinary selection with
+`source: 'pluryfact'`, Pluryfact's label and the print settings it asked
+for. Park it and ring the doorbell, as the backend would:
+
+```js
+const h = __PLURY_E2E__;
+h.backend.pendingSelections.push({
+  paths: [
+    '/Users/e2e/Library/Application Support/com.Maecly.Pluryprint/inbox/019a/0000-RIDE_001-001-000000123.pdf',
+  ],
+  action: 'configure',
+  profile_id: 'builtin-duplex-bw',
+  source: 'pluryfact',
+  label: 'Recibidos · octubre 2026',
+  overrides: {
+    copies: 2,
+    color: 'monochrome',
+    duplex: 'long-edge',
+    paper: 'a4',
+  },
+});
+h.forwardSelection({ paths: [], action: 'configure', profile_id: null });
+```
+
+The Print Job screen opens with the file, a "From Pluryfact" badge and the
+label next to the summary, Duplex BW selected, and two copies, black and
+white, long edge and A4 pre-filled; nothing is printed. Settings > Browser
+integration lists the four browsers, and Reconnect turns Edge and Brave to
+Connected. Checked by hand with Playwright on 2026-11-14.
 
 What it does **not** prove: anything below the IPC boundary. Printing,
 spooling and conversion are covered by the Rust suites, including the two

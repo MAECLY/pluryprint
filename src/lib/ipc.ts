@@ -17,6 +17,7 @@ import {
   commands,
   type AppInfo,
   type AppSettings,
+  type BridgeOverview,
   type DiscoveredPrinter as IpcDiscoveredPrinter,
   type FileInfo,
   type FolderExpansion,
@@ -67,7 +68,13 @@ export type {
 // `UiProfile` (see `toUiProfile`).
 // The context-menu handoff shapes (`cli::Selection`), re-exported so a screen
 // acting on a shell-extension selection imports them from the same place.
-export type { ContextAction, Selection } from '@/ipc/bindings';
+export type {
+  ContextAction,
+  Selection,
+  SelectionOverrides,
+} from '@/ipc/bindings';
+// The browser bridge's registration state (Settings > Browser integration).
+export type { BridgeOverview, Browser, BrowserStatus } from '@/ipc/bindings';
 export type {
   AppInfo,
   AppSettings,
@@ -500,6 +507,11 @@ export interface UiQueueJobView extends UiQueueJob {
    * restored from `queue.json`). `finishedAt` is only a local clock.
    */
   finishedAtIso?: string;
+  /**
+   * FR-124: the integration the job's batch came from, when the queue shows
+   * one ("From Pluryfact" and Pluryfact's label for the batch).
+   */
+  origin?: { source: 'pluryfact'; label: string | null };
 }
 
 /**
@@ -540,6 +552,9 @@ export function toUiQueueJob(job: Job): UiQueueJobView {
   if (printer) ui.printer = printer;
   if (!handedOver && job.progress != null && percent === null) {
     ui.indeterminate = true;
+  }
+  if (job.origin?.source === 'pluryfact') {
+    ui.origin = { source: 'pluryfact', label: job.origin.label ?? null };
   }
   const duration = elapsedMs(job.started_at, job.finished_at);
   if (duration !== null) ui.durationMs = duration;
@@ -742,6 +757,21 @@ export async function setSkippedUpdateVersion(
 export async function takePendingSelections(): Promise<Selection[]> {
   if (!isTauri()) throw noHost();
   return unwrap(commands.takePendingSelections());
+}
+
+/**
+ * FR-127: whether the browser bridge Pluryfact prints through is registered
+ * with each browser (Settings > Browser integration).
+ */
+export async function bridgeStatus(): Promise<BridgeOverview> {
+  if (!isTauri()) throw noHost();
+  return unwrap(commands.bridgeStatus());
+}
+
+/** FR-127: register the browser bridge again ("Reconnect"). */
+export async function bridgeReconnect(): Promise<BridgeOverview> {
+  if (!isTauri()) throw noHost();
+  return unwrap(commands.bridgeReconnect());
 }
 
 /**

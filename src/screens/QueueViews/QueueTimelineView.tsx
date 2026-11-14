@@ -113,6 +113,7 @@ export function QueueTimelineView({
                 marginTop: 4,
               }}
             >
+              {labels.origin(j) && `${labels.origin(j)} · `}
               {t('job.meta', {
                 profile: j.profile,
                 printer: labels.printer(j),
