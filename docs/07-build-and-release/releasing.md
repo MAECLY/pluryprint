@@ -338,7 +338,7 @@ gh release edit vX.Y.Z --repo MAECLY/pluryprint --draft=false
 Publishing runs `release-channels.yml`, which points the beta channel at the
 release (section 3) after checking that its `latest.json` has all eight keys, and `landing.yml`, which calls the Vercel Deploy Hook
 that redeploys https://pluryprint.maecly.com from
-[`MAECLY/pluryprint-landing`](https://github.com/MAECLY/pluryprint-landing)
+`MAECLY/pluryprint-landing` (a private repository)
 with the new version, date, download links, file sizes, `SHA256SUMS` and
 release-notes links in both languages, `llms.txt` and `agents.txt`.
 **Nothing on the landing is edited by hand for a release**: Vercel's build
