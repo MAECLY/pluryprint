@@ -135,6 +135,18 @@ uuid = { version = "1", features = ["v7"] }
 # RFC3339 job timestamps serialized into queue.json.
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 
+# --- Browser bridge (FR-120..FR-127, ADR-0016) ---
+# `pluryprint-bridge`, the Chrome Native Messaging host, receives PluryFact's
+# documents as base64 chunks, checks each against the SHA-256 the extension
+# sent, and refuses an XML file that is not well formed. All three crates are
+# already in the tree: base64 0.22 through usvg/printpdf, sha2 0.11 through
+# lopdf, roxmltree 0.20 through usvg (the same line, so one copy each).
+# roxmltree has no DTD support at all unless asked (`allow_dtd` stays false),
+# so no entity, internal or external, is ever expanded. MIT OR Apache-2.0.
+base64 = "0.22"
+sha2 = "0.11"
+roxmltree = "0.20"
+
 # --- Tauri plugins ---
 tauri-plugin-dialog = "2"
 # Open URLs / reveal folders in the OS default handler (logs folder, issue
@@ -162,9 +174,6 @@ tauri-plugin-updater = "~2.14"
 # compiled for tests; the release build never sees it.
 [dev-dependencies]
 tokio = { version = "1.41", features = ["test-util"] }
-# Decodes the updater public key in tauri.conf.json in a config test. Already
-# in the graph through tauri-plugin-updater; tests only.
-base64 = "0.22"
 
 # --- macOS Finder integration (NSServices provider, FR-001) ---
 # Objective-C runtime access for the "Print with Pluryprint" service declared
