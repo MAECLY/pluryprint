@@ -65,9 +65,9 @@ pub const MAX_XML_DEPTH: usize = 256;
 /// renderer (paper `auto`): A4, the RIDE's own size.
 pub const DEFAULT_CSS_SIZE: &str = "210mm 297mm";
 
-/// Language of the words Pluryprint adds to the page (the generic view's
-/// header, the RIDE's footer). The RIDE's own labels are Spanish whatever
-/// the app language: they are the document's, as the SRI defines them.
+/// Language of the words Pluryprint adds to a generic XML page (its
+/// header). An SRI receipt's page is Spanish whatever the app language,
+/// footer included: it is an Ecuadorian tax document ([`ride`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
     /// Spanish.
@@ -355,7 +355,8 @@ pub fn depth_of(doc: &roxmltree::Document<'_>) -> usize {
 }
 
 /// The HTML page for the XML file `bytes`, titled `title`: a RIDE-like page
-/// for an SRI receipt, else the readable tree. Pure.
+/// for an SRI receipt (always Spanish), else the readable tree, whose header
+/// is in `lang`. Pure.
 pub fn to_html(bytes: &[u8], title: &str, lang: Lang) -> Result<String, XmlError> {
     if bytes.len() as u64 > MAX_XML_BYTES {
         return Err(XmlError::TooLarge);
@@ -363,7 +364,7 @@ pub fn to_html(bytes: &[u8], title: &str, lang: Lang) -> Result<String, XmlError
     let text = decode(bytes)?;
     let doc = parse(&text)?;
     if let Some(receipt) = sri::read(&doc) {
-        return Ok(ride::to_html(&receipt, title, lang));
+        return Ok(ride::to_html(&receipt, title));
     }
     Ok(generic::to_html(&doc, title, lang))
 }
