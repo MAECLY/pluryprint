@@ -20,6 +20,7 @@ const COLORS: Record<string, [string, string]> = {
   md: ['#E8E2F4', '#5B21B6'],
   markdown: ['#E8E2F4', '#5B21B6'],
   html: ['#FAEFD0', '#A16207'],
+  xml: ['#E5EFD2', '#3F6212'],
   odt: ['#D9EEF1', '#0E7490'],
 };
 

@@ -31,6 +31,7 @@ These decisions are not up for re-debate during the MVP cycle. They are recorded
 | License | **AGPL-3.0-only**, contributions under a CLA (was GPLv3 until 2026-10-09) | [ADR-0010](./adr/0010-relicense-to-agpl-3.0.md) (supersedes [ADR-0002](./adr/0002-license-gplv3.md)) |
 | Print engine strategy | **Hybrid: SumatraPDF / CUPS as final hop, format-specific converters upstream** | [ADR-0003](./adr/0003-hybrid-print-engine-strategy.md) |
 | HTML, Markdown and text | **The system web view (WebView2 / WebKit / WebKitGTK) in a worker process** | [ADR-0012](./adr/0012-system-web-view-renderer.md) |
+| XML | **In-process, no DTD; an SRI electronic receipt prints as a RIDE-like page, any other XML as a tree, then the system web view** | [ADR-0017](./adr/0017-print-sri-xml-as-ride.md) |
 | Auto-update | **Tauri Updater plugin (built-in)**, one manifest per channel on GitHub Releases | [ADR-0004](./adr/0004-auto-updater-tauri-builtin.md), [ADR-0011](./adr/0011-release-channel.md) |
 | Release signing | **No OS certificates; updates signed with minisign** | [ADR-0011](./adr/0011-release-channel.md) |
 | Windows shell extension | **IExplorerCommand COM DLL (Rust), registered per user; sparse package when a certificate exists** | [ADR-0013](./adr/0013-explorer-command-per-user-verb.md) (supersedes [ADR-0005](./adr/0005-shell-extension-sparse-msix.md)) |

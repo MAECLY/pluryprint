@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="catalogo.xsl"?>
+<!-- Catálogo ficticio para probar la vista genérica de Pluryprint -->
+<cat:catalogo xmlns:cat="urn:ejemplo:catalogo" xmlns:xlink="http://www.w3.org/1999/xlink" version="3" actualizado="2026-11-14">
+  <cat:producto id="p-1" disponible="true">
+    <cat:nombre>Taladro percutor</cat:nombre>
+    <cat:precio moneda="USD">95.00</cat:precio>
+    <cat:enlace xlink:href="https://example.invalid/taladro"/>
+  </cat:producto>
+  <cat:producto id="p-2" disponible="false">
+    <cat:nombre>Juego de brocas &amp; accesorios</cat:nombre>
+    <cat:descripcion>Un texto largo que no cabe en una sola línea junto a su elemento, así que se imprime debajo, envuelto y con la sangría de su nivel en el árbol.</cat:descripcion>
+    <cat:notas><![CDATA[<b>no es HTML</b> & se imprime tal cual]]></cat:notas>
+  </cat:producto>
+</cat:catalogo>

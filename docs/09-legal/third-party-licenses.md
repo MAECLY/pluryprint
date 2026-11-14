@@ -46,6 +46,7 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `pdf-writer` | 0.12 | MIT / Apache-2.0 | The page around svg2pdf's drawing (FR-052a); the line svg2pdf is built on, already in the tree | Yes |
 | `pulldown-cmark` | 0.13 (`html` only) | MIT | Markdown → HTML without Pandoc (FR-056) | Yes |
 | `encoding_rs` | 0.8 | MIT / Apache-2.0 (+ BSD-3-Clause data) | Decoding text files that are not UTF-8 (FR-057) | Yes |
+| `roxmltree` | 0.20 | MIT / Apache-2.0 | Reading XML files without DTDs or entities: SRI electronic receipts as RIDE-like pages and any other XML as a tree (FR-057a, FR-057b) | Yes |
 | `zeroize` | 1 | MIT / Apache-2.0 | Wiping a PDF password from memory (FR-059, NFR-082) | Yes |
 | `flate2` | 1 | MIT / Apache-2.0 | Inflating an SVGZ with a size cap (FR-052a); already in the tree through `usvg`, `lopdf` and `png` | Yes |
 | `libc` *(macOS/Linux targets only)* | 0.2 | MIT / Apache-2.0 | The SVG worker's memory cap: `setrlimit(RLIMIT_DATA)` and the parent's memory watchdog (`proc_pid_rusage` on macOS; on Linux the watchdog reads `/proc`); already in the tree through `tokio` and others | Yes |

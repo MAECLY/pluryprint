@@ -21,6 +21,7 @@
 | 0013 | [The Explorer command ships as a per-user registry verb](./0013-explorer-command-per-user-verb.md) | Accepted | 2026-10-10 |
 | 0014 | [The SVG worker process is the resource boundary](./0014-svg-worker-resource-boundary.md) | Accepted | 2026-10-10 |
 | 0015 | [Linux x86_64 and ARM64 builds, shipped as AppImage and .deb](./0015-linux-support.md) | Accepted | 2026-11-09 |
+| 0017 | [Print SRI XML as a RIDE-like representation](./0017-print-sri-xml-as-ride.md) | Accepted | 2026-11-14 |
 
 ## Format
 
