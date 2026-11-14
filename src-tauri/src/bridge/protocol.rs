@@ -51,7 +51,7 @@ pub enum ErrorCode {
     UnknownType,
     /// The message is not valid JSON, misses a field, or a value is invalid
     /// (including an XML document the XML converter could not read, or text
-    /// that is not UTF-8/ISO-8859-1).
+    /// the text converter could not).
     BadRequest,
     /// The caller's origin is not one the host is registered for.
     OriginNotAllowed,
@@ -295,7 +295,8 @@ pub enum FileKind {
     /// An electronic voucher: XML the XML converter reads (well formed, no
     /// DTD, in an encoding it decodes).
     Xml,
-    /// PluryFact's TXT report: UTF-8 or ISO-8859-1 text.
+    /// PluryFact's TXT report: text the text converter reads (UTF-8,
+    /// UTF-16 with a byte-order mark, or Windows-1252).
     Txt,
 }
 

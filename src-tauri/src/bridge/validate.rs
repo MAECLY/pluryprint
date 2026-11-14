@@ -11,7 +11,7 @@ use base64::Engine as _;
 use sha2::Digest as _;
 
 use super::protocol::{ErrorCode, FileKind, ProtocolError};
-use crate::engine::convert::xml;
+use crate::engine::convert::{text, xml};
 
 /// Longest stored name (stem plus extension), in characters, before the
 /// `NNNN-` order prefix.
@@ -203,25 +203,33 @@ fn xml_error(e: xml::XmlError) -> ProtocolError {
     }
 }
 
-/// A text report must be UTF-8 or ISO-8859-1 text: no NUL byte and no
-/// control character other than tab, line feed, form feed and carriage
-/// return (and, for ISO-8859-1, none of the C1 range 0x80–0x9F, which that
-/// encoding leaves undefined).
+/// A text report must be text the text converter reads
+/// ([`text::decode`]): a UTF-8 or UTF-16 byte-order mark, else strict
+/// UTF-8, else Windows-1252 (the superset of ISO-8859-1 that Western
+/// Windows writes, `€` and curly quotes in 0x80–0x9F included). It must not
+/// look binary to the converter ([`text::looks_binary`]), and once decoded
+/// it holds no control character other than tab, line feed, form feed and
+/// carriage return — which also refuses the five bytes Windows-1252 leaves
+/// undefined (0x81, 0x8D, 0x8F, 0x90, 0x9D), decoded as C1 controls.
 pub fn check_text(bytes: &[u8]) -> Result<(), ProtocolError> {
-    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let allowed_control = |c: char| matches!(c, '\t' | '\n' | '\r' | '\x0c');
-    let ok = match std::str::from_utf8(bytes) {
-        Ok(text) => !text.chars().any(|c| c.is_control() && !allowed_control(c)),
-        Err(_) => !bytes.iter().any(|&b| {
-            let c = b as char;
-            (b < 0x20 && !allowed_control(c)) || b == 0x7f || (0x80..=0x9f).contains(&b)
-        }),
-    };
+    let utf16 = matches!(
+        encoding_rs::Encoding::for_bom(bytes),
+        Some((e, _)) if e == encoding_rs::UTF_16LE || e == encoding_rs::UTF_16BE
+    );
+    // Stricter than the converter's binary sniff (the first 8 KiB): a NUL
+    // byte anywhere outside UTF-16 is refused, where the converter would
+    // silently drop it.
+    let ok = !text::looks_binary(bytes)
+        && (utf16 || !bytes.contains(&0))
+        && !text::decode(bytes)
+            .chars()
+            .any(|c| c.is_control() && !allowed_control(c));
     if ok {
         Ok(())
     } else {
         Err(ProtocolError::bad_request(
-            "the text document is not UTF-8 or ISO-8859-1 text",
+            "the text document is not UTF-8, UTF-16 or Windows-1252 text",
         ))
     }
 }
@@ -466,18 +474,37 @@ mod tests {
     }
 
     #[test]
-    fn fr_122_text_is_utf8_or_latin1() {
+    fn fr_122_text_is_what_the_text_converter_reads() {
         assert!(check_text("Reporte\tde octubre\r\nñ €\n\x0c".as_bytes()).is_ok());
         assert!(
             check_text(b"Raz\xf3n social: \xd1and\xfa").is_ok(),
             "ISO-8859-1"
         );
+        // Windows-1252: euro sign, curly quotes and en dash live in 0x80–0x9F.
+        assert!(
+            check_text(b"Total \x80 12,00 \x93IVA\x94 \x96 octubre").is_ok(),
+            "Windows-1252"
+        );
         assert!(check_text(b"\xEF\xBB\xBFwith BOM").is_ok());
+        let mut utf16le = vec![0xFF, 0xFE];
+        for u in "Razón social\r\n€".encode_utf16() {
+            utf16le.extend_from_slice(&u.to_le_bytes());
+        }
+        assert!(check_text(&utf16le).is_ok(), "UTF-16 LE with BOM");
+        let mut utf16be = vec![0xFE, 0xFF];
+        for u in "Razón social".encode_utf16() {
+            utf16be.extend_from_slice(&u.to_be_bytes());
+        }
+        assert!(check_text(&utf16be).is_ok(), "UTF-16 BE with BOM");
+        let late_nul = [&[b'a'; 9000][..], b"\x00"].concat();
         for bad in [
             &b"a\x00b"[..],
             b"\x1b[31mred",
+            // 0x81 is undefined in Windows-1252 (decoded as a C1 control).
             b"bin\x81ary\xff",
             "a\u{7}b".as_bytes(),
+            // A NUL past the converter's 8 KiB sniff is still refused.
+            &late_nul,
         ] {
             assert_eq!(check_text(bad).unwrap_err().code, ErrorCode::BadRequest);
         }
