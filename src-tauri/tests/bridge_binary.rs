@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 
 use pluryprint_lib::bridge::{validate::sha256_hex, PLURYFACT_ORIGIN};
 use pluryprint_lib::cli::handoff;
+use pluryprint_lib::engine::{self, convert::xml};
 
 fn frame(msg: &Value) -> Vec<u8> {
     let body = serde_json::to_vec(msg).unwrap();
@@ -93,7 +94,8 @@ fn pdf(n: usize) -> Vec<u8> {
 fn fr_120_fr_125_hello_begin_put_commit_produces_a_handoff_the_app_accepts() {
     let tmp = tempfile::tempdir().unwrap();
     let doc0 = pdf(300_000);
-    let doc1 = b"<?xml version=\"1.0\"?><factura><ruc>0999999999001</ruc></factura>".to_vec();
+    // A voucher in Latin-1, as some issuers' systems write it (fictitious RUC).
+    let doc1 = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><factura><ruc>0999999999001</ruc><razonSocial>Ferreter\xeda Mu\xf1oz</razonSocial></factura>".to_vec();
 
     let mut input = Vec::new();
     input.extend(frame(&json!({"v":1,"id":"h","type":"hello","client":"pluryfact","clientVersion":"0.2.0","protocols":[1]})));
@@ -186,6 +188,23 @@ fn fr_120_fr_125_hello_begin_put_commit_produces_a_handoff_the_app_accepts() {
             "{p}"
         );
     }
+    // Every handed-off document is one the app prints: its extension is a
+    // supported one (the Print Job screen and the queue drop the rest), and
+    // the voucher XML goes through the XML converter, Latin-1 decoded.
+    for p in &h.paths {
+        assert!(
+            engine::is_supported(&engine::extension_of(Path::new(p))),
+            "{p}"
+        );
+    }
+    let page = xml::to_html(
+        &std::fs::read(&h.paths[1]).unwrap(),
+        "factura",
+        xml::Lang::Es,
+    )
+    .expect("the converter reads what the bridge accepted");
+    assert!(page.contains("0999999999001"), "{page}");
+    assert!(page.contains("Ferretería Muñoz"), "{page}");
     assert_ne!(job, first_job, "every job gets a fresh id");
     // Only the committed job is in the inbox.
     assert_eq!(

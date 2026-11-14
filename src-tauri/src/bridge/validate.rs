@@ -11,6 +11,7 @@ use base64::Engine as _;
 use sha2::Digest as _;
 
 use super::protocol::{ErrorCode, FileKind, ProtocolError};
+use crate::engine::convert::xml;
 
 /// Longest stored name (stem plus extension), in characters, before the
 /// `NNNN-` order prefix.
@@ -19,18 +20,11 @@ pub const MAX_NAME_CHARS: usize = 120;
 /// Bytes of the start of a document kept for the content check.
 pub const HEAD_BYTES: usize = 1024;
 
-/// Largest XML document checked for well-formedness (20 MiB). Bigger XML is
-/// refused: no electronic voucher comes near it, and the parser builds a tree.
-pub const MAX_XML_BYTES: usize = 20 * 1024 * 1024;
-
-/// Most XML nodes accepted, a bound on the tree the check builds.
-pub const MAX_XML_NODES: u32 = 1_000_000;
-
-/// Deepest XML element nesting accepted. The parser descends recursively, so
-/// the nesting is measured by [`nesting_exceeds`] *before* parsing: a
-/// document of thousands of nested elements would otherwise overflow the
-/// stack. An SRI voucher nests about six levels.
-pub const MAX_XML_DEPTH: usize = 128;
+/// Largest XML document accepted: the XML converter's own cap (20 MiB).
+/// The bridge reads XML exactly as the converter will
+/// ([`crate::engine::convert::xml`]), so a document it accepts is one the
+/// app can print, and the converter's node and nesting limits apply too.
+pub const MAX_XML_BYTES: u64 = xml::MAX_XML_BYTES;
 
 /// Names Windows reserves for devices, whatever the extension.
 const WINDOWS_RESERVED: [&str; 22] = [
@@ -168,110 +162,44 @@ pub fn check_pdf(head: &[u8]) -> Result<(), ProtocolError> {
     }
 }
 
-/// An XML document must be UTF-8 (a BOM is allowed), at most
-/// [`MAX_XML_BYTES`], well formed, without a DTD (so no entity of any kind
-/// is declared, let alone expanded), at most [`MAX_XML_NODES`] nodes and
-/// [`MAX_XML_DEPTH`] levels deep.
+/// An XML document must be one the XML converter reads: at most
+/// [`MAX_XML_BYTES`], decoded by [`xml::decode`] (a UTF-8 or UTF-16
+/// byte-order mark; else Windows-1252 when the declaration says ISO-8859-1,
+/// Latin-1 or Windows-1252; else strict UTF-8) and parsed by [`xml::parse`]:
+/// well formed, without a DTD (so no entity of any kind is declared, let
+/// alone expanded), within the converter's node and nesting limits (nesting
+/// measured before parsing, so a deep document cannot exhaust the stack).
 pub fn check_xml(bytes: &[u8]) -> Result<(), ProtocolError> {
-    if bytes.len() > MAX_XML_BYTES {
-        return Err(ProtocolError::new(
-            ErrorCode::TooLarge,
-            format!("XML documents are limited to {MAX_XML_BYTES} bytes"),
-        ));
+    if bytes.len() as u64 > MAX_XML_BYTES {
+        return Err(xml_error(xml::XmlError::TooLarge));
     }
-    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| ProtocolError::bad_request("the XML document is not UTF-8"))?;
-    if nesting_exceeds(text.as_bytes(), MAX_XML_DEPTH) {
-        return Err(ProtocolError::bad_request(format!(
-            "the XML document nests deeper than {MAX_XML_DEPTH} levels"
-        )));
-    }
-    let options = roxmltree::ParsingOptions {
-        allow_dtd: false,
-        nodes_limit: MAX_XML_NODES,
-    };
-    roxmltree::Document::parse_with_options(text, options).map_err(|e| {
-        ProtocolError::bad_request(format!(
-            "the XML document is not well formed: {}",
-            xml_reason(&e)
-        ))
-    })?;
+    let text = xml::decode(bytes).map_err(xml_error)?;
+    xml::parse(&text).map_err(xml_error)?;
     Ok(())
 }
 
-/// Whether the element nesting of `xml` goes deeper than `max`, measured
-/// without parsing (and so without recursion): start tags that are not
-/// self-closing open a level, end tags close one; comments, CDATA sections,
-/// processing instructions and declarations are skipped whole, and a `>`
-/// inside a quoted attribute value does not end a tag. Malformed input is
-/// left for the parser to refuse; this only has to be sure the parser never
-/// descends further than `max`.
-pub fn nesting_exceeds(xml: &[u8], max: usize) -> bool {
-    fn find(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
-        hay.get(from..)?
-            .windows(needle.len())
-            .position(|w| w == needle)
-            .map(|p| from + p)
-    }
-    let mut depth = 0usize;
-    let mut i = 0usize;
-    while let Some(lt) = xml[i..].iter().position(|&b| b == b'<').map(|p| i + p) {
-        let rest = &xml[lt..];
-        let end = if rest.starts_with(b"<!--") {
-            find(xml, lt + 4, b"-->").map(|e| e + 3)
-        } else if rest.starts_with(b"<![CDATA[") {
-            find(xml, lt + 9, b"]]>").map(|e| e + 3)
-        } else if rest.starts_with(b"<?") {
-            find(xml, lt + 2, b"?>").map(|e| e + 2)
-        } else if rest.starts_with(b"<!") {
-            find(xml, lt + 2, b">").map(|e| e + 1)
-        } else if rest.starts_with(b"</") {
-            depth = depth.saturating_sub(1);
-            find(xml, lt + 2, b">").map(|e| e + 1)
-        } else {
-            // A start tag: find its `>` outside quotes.
-            let mut quote = None;
-            let mut j = lt + 1;
-            let mut close = None;
-            while j < xml.len() {
-                let b = xml[j];
-                match quote {
-                    Some(q) if b == q => quote = None,
-                    Some(_) => {}
-                    None if b == b'"' || b == b'\'' => quote = Some(b),
-                    None if b == b'>' => {
-                        close = Some(j);
-                        break;
-                    }
-                    None => {}
-                }
-                j += 1;
-            }
-            if let Some(c) = close {
-                if xml[c - 1] != b'/' {
-                    depth += 1;
-                    if depth > max {
-                        return true;
-                    }
-                }
-            }
-            close.map(|c| c + 1)
-        };
-        match end {
-            Some(e) => i = e,
-            None => return false,
-        }
-    }
-    false
-}
-
-/// The parser's reason without the document text it may quote.
-fn xml_reason(e: &roxmltree::Error) -> String {
+/// The protocol error for an XML document the converter would refuse,
+/// without the document text a parser message may quote.
+fn xml_error(e: xml::XmlError) -> ProtocolError {
     match e {
-        roxmltree::Error::DtdDetected => "a DTD is not allowed".to_string(),
-        roxmltree::Error::NodesLimitReached => "too many nodes".to_string(),
-        other => other.to_string().chars().take(160).collect(),
+        xml::XmlError::TooLarge => ProtocolError::new(
+            ErrorCode::TooLarge,
+            format!(
+                "XML documents are limited to {MAX_XML_BYTES} bytes and {} nodes",
+                xml::MAX_XML_NODES
+            ),
+        ),
+        xml::XmlError::Dtd => {
+            ProtocolError::bad_request("the XML document is not well formed: a DTD is not allowed")
+        }
+        xml::XmlError::TooDeep => ProtocolError::bad_request(format!(
+            "the XML document nests deeper than {} levels",
+            xml::MAX_XML_DEPTH
+        )),
+        xml::XmlError::Invalid(why) => ProtocolError::bad_request(format!(
+            "the XML document is not well formed: {}",
+            why.chars().take(160).collect::<String>()
+        )),
     }
 }
 
@@ -505,28 +433,36 @@ mod tests {
         );
         let ok = format!(
             "{}{}",
-            "<a>".repeat(MAX_XML_DEPTH),
-            "</a>".repeat(MAX_XML_DEPTH)
+            "<a>".repeat(xml::MAX_XML_DEPTH),
+            "</a>".repeat(xml::MAX_XML_DEPTH)
         );
         assert!(check_xml(ok.as_bytes()).is_ok());
-        let big = vec![b' '; MAX_XML_BYTES + 1];
+        let big = vec![b' '; MAX_XML_BYTES as usize + 1];
         assert_eq!(check_xml(&big).unwrap_err().code, ErrorCode::TooLarge);
+        let many = format!("<r>{}</r>", "<a/>".repeat(xml::MAX_XML_NODES as usize));
+        assert_eq!(
+            check_xml(many.as_bytes()).unwrap_err().code,
+            ErrorCode::TooLarge
+        );
     }
 
+    /// The bridge reads XML in every encoding the converter does: a UTF-16
+    /// byte-order mark, and a declared Latin-1 that governs even bytes that
+    /// would also read as UTF-8.
     #[test]
-    fn fr_122_nesting_is_measured_without_parsing() {
-        let n = |s: &str, max| nesting_exceeds(s.as_bytes(), max);
-        assert!(!n("<a><b/><c></c></a>", 2));
-        assert!(n("<a><b><c/></b></a>", 1));
-        // Self-closing tags, comments, CDATA, PIs and quoted `>` do not count.
-        assert!(!n("<a><b/><b/><b/></a>", 1));
-        assert!(!n("<a><!-- <b><c><d> --></a>", 1));
-        assert!(!n("<a><![CDATA[<b><c><d>]]></a>", 1));
-        assert!(!n("<?xml version='1.0'?><a><?pi <b><c>?></a>", 1));
-        assert!(!n(r#"<a t="x>y" u='<z>'/>"#, 0));
-        assert!(n(r#"<a t="x/>"><b>"#, 1), "a quoted /> does not self-close");
-        // The SRI shape: the whole voucher inside CDATA is one level.
-        assert!(!n("<autorizacion><comprobante><![CDATA[<factura><a><b><c/></b></a></factura>]]></comprobante></autorizacion>", 2));
+    fn fr_122_xml_encodings_follow_the_converter() {
+        let latin1: &[u8] =
+            b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><factura><razonSocial>Ra\xfa\xf1o</razonSocial></factura>";
+        assert!(check_xml(latin1).is_ok());
+        let mut utf16le = vec![0xFF, 0xFE];
+        for u in "<factura><a>ñ</a></factura>".encode_utf16() {
+            utf16le.extend_from_slice(&u.to_le_bytes());
+        }
+        assert!(check_xml(&utf16le).is_ok());
+        // Undeclared and not UTF-8: refused by both.
+        let bad: &[u8] = b"<factura>Ra\xfa\xf1o</factura>";
+        assert!(xml::decode(bad).is_err());
+        assert_eq!(check_xml(bad).unwrap_err().code, ErrorCode::BadRequest);
     }
 
     #[test]
@@ -544,6 +480,18 @@ mod tests {
             "a\u{7}b".as_bytes(),
         ] {
             assert_eq!(check_text(bad).unwrap_err().code, ErrorCode::BadRequest);
+        }
+    }
+
+    /// Every kind the bridge accepts is a kind the app prints: a handoff
+    /// never carries a file the Print Job screen or the queue would drop.
+    #[test]
+    fn fr_122_every_kind_the_bridge_accepts_is_printable() {
+        for kind in FileKind::ALL {
+            assert!(
+                crate::engine::is_supported(kind.extension()),
+                "{kind:?} is not in SUPPORTED_EXTS"
+            );
         }
     }
 }

@@ -50,8 +50,8 @@ pub enum ErrorCode {
     /// `type` names no operation this host knows.
     UnknownType,
     /// The message is not valid JSON, misses a field, or a value is invalid
-    /// (including an XML document that is not well formed, or text that is
-    /// not UTF-8/ISO-8859-1).
+    /// (including an XML document the XML converter could not read, or text
+    /// that is not UTF-8/ISO-8859-1).
     BadRequest,
     /// The caller's origin is not one the host is registered for.
     OriginNotAllowed,
@@ -292,13 +292,17 @@ pub struct BeginJobRequest {
 pub enum FileKind {
     /// A RIDE (or any PDF): must start with `%PDF-`.
     Pdf,
-    /// An electronic voucher: must be well-formed XML, no DTD.
+    /// An electronic voucher: XML the XML converter reads (well formed, no
+    /// DTD, in an encoding it decodes).
     Xml,
     /// PluryFact's TXT report: UTF-8 or ISO-8859-1 text.
     Txt,
 }
 
 impl FileKind {
+    /// Every kind, in protocol order.
+    pub const ALL: [FileKind; 3] = [FileKind::Pdf, FileKind::Xml, FileKind::Txt];
+
     /// The extension the stored file is given, whatever the sent name said.
     pub fn extension(self) -> &'static str {
         match self {
