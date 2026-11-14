@@ -538,6 +538,7 @@ mod tests {
         assert!(is_supported(".md"));
         assert!(is_supported("SVG"));
         assert!(is_supported(".svgz"));
+        assert!(is_supported("XML"));
         assert!(!is_supported("gif")); // D9: GIF is refused on purpose
         assert!(!is_supported("exe"));
         assert!(!is_supported(""));
@@ -550,7 +551,7 @@ mod tests {
             &[
                 "pdf", "jpg", "jpeg", "png", "tif", "tiff", "bmp", "webp", "heic", "heif", "svg",
                 "svgz", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf",
-                "txt", "html", "htm", "md", "markdown",
+                "txt", "html", "htm", "md", "markdown", "xml",
             ]
         );
     }
