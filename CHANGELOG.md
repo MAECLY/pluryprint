@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-14
+
+Pluryprint prints XML, including Ecuador's SRI electronic receipts as RIDE-like pages, and ships `pluryprint-bridge`, the side Pluryprint needs for the Pluryfact browser extension to send it the receipts it downloads. The Pluryfact side arrives with Pluryfact 0.2, after the Chrome Web Store reviews it.
+
 ### Added
 
-- **Pluryfact integration (in development).** `pluryprint-bridge`, a Chrome Native Messaging host installed next to the app, receives the documents the Pluryfact extension downloaded from the SRI (RIDE PDFs, voucher XML, the TXT report), checks each one (size, SHA-256, type; XML without a DTD) and hands them to the app as a context-menu selection: the Print Job screen opens with a **From Pluryfact** badge and Pluryfact's settings filled in, or the batch is queued or printed when Pluryfact asks for that; its jobs say **From Pluryfact** in the Queue too. A batch that joins a job you had already started leaves that job's profile and settings alone. No port is opened and no new network traffic is made ([ADR-0016](docs/adr/0016-pluryfact-browser-bridge.md)).
+- **Pluryfact integration.** `pluryprint-bridge`, a Chrome Native Messaging host installed next to the app, receives the documents the Pluryfact extension downloaded from the SRI (RIDE PDFs, voucher XML, the TXT report), checks each one (size, SHA-256, type; XML without a DTD) and hands them to the app as a context-menu selection: the Print Job screen opens with a **From Pluryfact** badge and Pluryfact's settings filled in, or the batch is queued or printed when Pluryfact asks for that; its jobs say **From Pluryfact** in the Queue too. A batch that joins a job you had already started leaves that job's profile and settings alone. No port is opened and no new network traffic is made ([ADR-0016](docs/adr/0016-pluryfact-browser-bridge.md)).
 - Registration for Chrome, Edge, Brave and Chromium: the Windows installer writes the per-user keys (and the uninstaller removes them); on macOS the app registers every browser it finds each time it starts. `pluryprint-cli bridge install | uninstall | status` does it by hand, with `--extra-origin` for a development build of Pluryfact.
 - **Settings → Browser integration** shows, per browser, whether Pluryfact can reach Pluryprint, and **Reconnect**.
 - Documents Pluryfact sent are kept in the data folder's `inbox/` and deleted a week later, at startup.
