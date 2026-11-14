@@ -23,6 +23,8 @@ We start by being explicit about what we are defending against and what is out o
 | Privilege-escalation exploit in a converter (e.g., LibreOffice CVE) | Converters spawned as the current user, killed at timeout, never as SYSTEM |
 | A document that leaks the user's IP or NTLM credentials when printed (remote picture, `\\host\share` link, tracking pixel) | Render and SVG workers refuse every request outside the document's folder; LibreOffice's profile blocks linked resources and points HTTP at a dead proxy (§3.4) |
 | A hostile file that crashes a parser | SVG and HTML/Markdown/text are parsed and rendered in worker processes; a crash ends the worker, not the app |
+| A web page or another extension trying to print through the PluryFact bridge | No port is open. Only the browser starts `pluryprint-bridge`, and only for an origin listed in a manifest the user's own install wrote (PluryFact's Web Store id); the bridge re-checks the origin. The default action opens the Print Job screen for confirmation (§3.5) |
+| A hostile document or name sent through the bridge | Bytes only, never paths; names reduced to a base name in a per-job folder; size, count, SHA-256 and kind checked (PDF header; XML without DTD, so no entity expansion; text); the documents then take the same converter paths as any file (§3.5) |
 
 ### 1.2 Out of scope
 
@@ -157,6 +159,19 @@ The converters are a far larger attack surface than `lp`, because they parse doc
 
 **Still a gap:** environment minimization. Converters inherit the app's environment.
 
+### 3.5 Browser bridge (PluryFact)
+
+`pluryprint-bridge` ([ADR-0016](../adr/0016-pluryfact-browser-bridge.md), [ipc-and-cli.md §6](./ipc-and-cli.md#6-browser-bridge-native-messaging)) is a Chrome Native Messaging host. It adds **no network surface**: it binds nothing, connects nowhere, and its only channel is the stdin/stdout pipe of the browser that started it. It runs as the user, unelevated, for as long as PluryFact keeps the port open.
+
+- **Who can start it.** The browser starts a host only for an extension origin listed in the host's manifest. Pluryprint's manifests list PluryFact's Chrome Web Store origin and nothing else, unless the user adds a development origin with `bridge install --extra-origin`. The bridge checks `argv[1]` against the origins of its own manifests and refuses every request from any other (`origin_not_allowed`). A local process of the same user can run the binary directly, as it can already run `pluryprint print`; that is not a new capability, and it can only write into that user's inbox.
+- **What it accepts.** Documents as bytes, never paths, so the bridge cannot be turned into "print any file on this disk". Every document is size-capped (50 MiB, 1 GiB per job, 5 000 per job), hashed and compared with the SHA-256 the extension announced, and checked for its kind before the app sees it: a PDF header; XML that is well-formed UTF-8 with **no DTD** (the `roxmltree` parser expands no entity of any kind) and whose nesting is measured before it is parsed; text without control characters. Names become safe base names in a per-job folder; a table and a property-style test show that no name escapes it.
+- **Where documents go.** `<data dir>/inbox/<jobId>/`, per user, as private as the rest of that folder. A job never committed is deleted when the port closes; a committed one is printed from there and deleted by the app's startup sweep after 7 days. The sweep removes a symbolic link planted in the inbox as a link and never follows it.
+- **What reaches the app.** A schema-1 handoff in `<data dir>/handoff/`, validated by the app like every other (containment, freshness, caps, and the optional `label` and `overrides` fields: copies 1-999, known enum values, bounded printer id, no control characters). The default action is `configure`: the user sees the documents, a "From PluryFact" badge and the settings before anything prints.
+- **Logs.** The bridge logs codes, counts and sizes; a label that reaches a record has every run of 10 or more digits masked (a RUC, a cédula, an access key: `**********001`), and document names are not logged.
+- **Registration** writes only per-user locations: HKCU keys and a file in the install folder on Windows (installer), the user's browser folders on macOS (the app at startup, never from a translocated path) and Linux (`bridge install`).
+
+**Not verified yet:** whether Gatekeeper's quarantine (macOS) or SmartScreen (Windows) blocks the browser from starting the bridge of an unsigned copy the user never opened, and whether managed Windows machines with `NativeMessagingUserLevelHosts` disabled ignore the HKCU registration (they should, by design).
+
 ## 4. Permissions
 
 ### 4.1 No admin required
@@ -247,6 +262,7 @@ That is everything. The app:
 - Does not download or install updates unless the user asks (**Install now**, `update install`); the download then goes to the artifact the same manifest names, on GitHub, and is verified before it is installed.
 - Does not install converters on its own: winget, Homebrew, the Microsoft Store or the browser make their own requests only after the user confirmed the dependency dialog (on Linux, only the browser).
 - Lets no printed document reach the network or a file share (§3.4).
+- Opens no port and makes no request for the PluryFact browser bridge: the browser starts the bridge and talks to it over a pipe (§3.5).
 - Does not load fonts, scripts or styles from CDNs — the CSP forbids it and the one webfont is bundled.
 - Does not check for updates of converters.
 - Does not communicate with printer manufacturers' clouds.

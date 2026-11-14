@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **PluryFact integration (in development).** `pluryprint-bridge`, a Chrome Native Messaging host installed next to the app, receives the documents the PluryFact extension downloaded from the SRI (RIDE PDFs, voucher XML, the TXT report), checks each one (size, SHA-256, type; XML without a DTD) and hands them to the app as a context-menu selection: the Print Job screen opens with a **From PluryFact** badge and PluryFact's settings filled in, or the batch is queued or printed when PluryFact asks for that. No port is opened and no new network traffic is made ([ADR-0016](docs/adr/0016-pluryfact-browser-bridge.md)).
+- Registration for Chrome, Edge, Brave and Chromium: the Windows installer writes the per-user keys (and the uninstaller removes them); on macOS the app registers every browser it finds each time it starts. `pluryprint-cli bridge install | uninstall | status` does it by hand, with `--extra-origin` for a development build of PluryFact.
+- **Settings → Browser integration** shows, per browser, whether PluryFact can reach Pluryprint, and **Reconnect**.
+- Documents PluryFact sent are kept in the data folder's `inbox/` and deleted a week later, at startup.
+
+### Changed
+
+- A context-menu handoff file may carry an optional display `label` and per-batch print `overrides`; schema version 1 is unchanged, and both fields are validated like the rest of the file.
+- The release workflow fails a Windows, macOS or Linux build that lacks `pluryprint-bridge`.
+
 ## [0.0.5] - 2026-11-10
 
 Pluryprint now runs on Linux, on x64 and ARM64, as an AppImage or a `.deb`, with the same file formats as on Windows and macOS. Linux is a preview until it has been tested on real hardware.

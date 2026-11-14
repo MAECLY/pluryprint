@@ -112,6 +112,9 @@ Excluded from coverage:
 ```
 src-tauri/tests/
 ├── bundle_identity.rs       # ADR-0009 bundle identity; the NSIS hooks compile with makensis
+├── bridge_binary.rs         # FR-120/125/126: the real pluryprint-bridge over framed pipes, temp data dir, no launch
+├── bridge_bundle_contract.rs # FR-127: the bridge ships next to the app; the NSIS manifest and HKCU keys match bridge::register
+├── bridge_protocol_contract.rs # FR-120: protocol v1 fixtures (shared with PluryFact) round-trip and replay
 ├── cli_console_binary.rs    # FR-009: pluryprint-cli.exe returns the documented exit codes
 ├── cli_contract.rs          # The headless surface: subcommands, flags, exit codes (FR-008/009/112)
 ├── engine_deps.rs           # FR-058: resolution order, remediation, install options
