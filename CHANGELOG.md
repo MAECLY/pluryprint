@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- XML files print. An Ecuadorian SRI electronic receipt (factura, liquidación de compra, nota de crédito, nota de débito, guía de remisión, comprobante de retención; schema versions 1.0.0 to 2.1.0) prints as a RIDE-like page: issuer and document box, authorisation, access key with its Code 128 barcode, buyer, lines, taxes, payments and additional information, entirely in Spanish whatever the app language, footer included, which says Pluryprint generated it from the XML. The file the SRI portal and web service hand out (`<autorizacion>`), the web service's whole response and a bare receipt all work; a receipt without authorisation data, or one the SRI did not authorise, says so. Any other XML prints as a readable tree. Works from the window, the context menus, Open with and `pluryprint print`.
+- `.xml` is offered by the Windows Explorer command, the Linux desktop entry, the KDE service menu and the Nemo actions.
+
+### Security
+
+- XML files are read without DTDs: a `<!DOCTYPE>` is refused (`xml_dtd_refused`) and no entity is expanded or fetched, so billion-laughs and external-entity (XXE) files cannot do anything. Files are capped at 20 MiB, 200,000 nodes and 256 levels of nesting (`xml_too_large`, `xml_too_deep`).
+
 ## [0.0.5] - 2026-11-10
 
 Pluryprint now runs on Linux, on x64 and ARM64, as an AppImage or a `.deb`, with the same file formats as on Windows and macOS. Linux is a preview until it has been tested on real hardware.

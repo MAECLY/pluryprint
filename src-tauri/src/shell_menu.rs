@@ -365,9 +365,9 @@ mod linux_files {
 
     /// Each printable extension and the shared-mime-info types a file manager
     /// reports for it, aliases included (image/heic is image/heif's alias,
-    /// text/x-markdown text/markdown's) so an older or newer MIME database
-    /// still matches. Every type here exists in Ubuntu 22.04's
-    /// shared-mime-info 2.1.
+    /// text/x-markdown text/markdown's, text/xml application/xml's) so an
+    /// older or newer MIME database still matches. Every type here exists in
+    /// Ubuntu 22.04's shared-mime-info 2.1.
     const EXT_MIME: &[(&str, &[&str])] = &[
         ("pdf", &["application/pdf"]),
         ("jpg", &["image/jpeg"]),
@@ -405,6 +405,7 @@ mod linux_files {
         ("htm", &["text/html"]),
         ("md", &["text/markdown", "text/x-markdown"]),
         ("markdown", &["text/markdown", "text/x-markdown"]),
+        ("xml", &["application/xml", "text/xml"]),
     ];
 
     /// One `[group]` of a key file and its `key=value` lines, in file order.

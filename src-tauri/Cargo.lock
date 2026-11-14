@@ -3347,6 +3347,7 @@ dependencies = [
  "percent-encoding",
  "printpdf",
  "pulldown-cmark",
+ "roxmltree",
  "semver",
  "serde",
  "serde_json",

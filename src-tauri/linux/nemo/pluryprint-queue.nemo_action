@@ -26,5 +26,5 @@ Exec=pluryprint --invoke=context-menu --action=queue -- %F
 Quote=double
 Icon-Name=view-list-details
 Selection=notnone
-Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;
+Extensions=dir;.pdf;.jpg;.jpeg;.png;.tif;.tiff;.bmp;.webp;.heic;.heif;.svg;.svgz;.docx;.doc;.xlsx;.xls;.pptx;.ppt;.odt;.ods;.odp;.rtf;.txt;.html;.htm;.md;.markdown;.xml;
 Dependencies=pluryprint;

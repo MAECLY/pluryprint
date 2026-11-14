@@ -127,6 +127,11 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 # FR-057: TXT without LibreOffice; decode a BOM-less file that is not valid
 # UTF-8 as Windows-1252. Already in the tree through tauri. MIT OR Apache-2.0.
 encoding_rs = "0.8"
+# FR-057a/FR-057b: XML files (generic tree view, SRI electronic receipts as a
+# RIDE-like page). No DTD, no entities beyond the five predefined ones, no
+# network: `allow_dtd` stays false and a DOCTYPE is refused before parsing.
+# Already in the tree through usvg. MIT OR Apache-2.0.
+roxmltree = "0.20"
 # FR-059: a PDF password supplied by the user lives only in memory and is
 # wiped when dropped (NFR-082). Already in the tree. MIT OR Apache-2.0.
 zeroize = "1"
