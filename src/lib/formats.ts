@@ -9,7 +9,8 @@
  * Grouped by converter (see `docs/03-requirements/supported-formats.md`):
  * PDF passthrough; raster images, HEIC/HEIF and SVG/SVGZ; Office, OpenDocument
  * and RTF through LibreOffice; TXT, HTML and Markdown through the system web
- * view. GIF is refused on purpose (decision D9). A format whose converter is
+ * view; XML (an SRI electronic receipt as a RIDE-like page, any other XML as a
+ * readable tree) through the same web view. GIF is refused on purpose (decision D9). A format whose converter is
  * missing is still accepted — its job pauses with an install hint (FR-058).
  */
 export const PRINTABLE_EXTENSIONS = [
@@ -40,6 +41,7 @@ export const PRINTABLE_EXTENSIONS = [
   'htm',
   'md',
   'markdown',
+  'xml',
 ] as const;
 
 export type PrintableExtension = (typeof PRINTABLE_EXTENSIONS)[number];

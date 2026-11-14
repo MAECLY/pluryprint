@@ -116,6 +116,7 @@ describe('HomeScreen', () => {
       RTF: ['rtf'],
       HTML: ['html', 'htm'],
       Markdown: ['md', 'markdown'],
+      XML: ['xml'],
     };
     for (const label of Object.keys(families)) {
       expect(zone).toHaveTextContent(label);
