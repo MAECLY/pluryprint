@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "21",
+  "type": "jobStatus",
+  "ok": false,
+  "error": {
+    "code": "unknown_type",
+    "message": "unknown message type 'jobStatus'"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "25",
+  "type": "beginJob",
+  "ok": false,
+  "error": {
+    "code": "too_many_files",
+    "message": "a job holds at most 5000 documents"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "7",
+  "type": "putFile",
+  "jobId": "019a7f3e-8c41-7d2a-9b6e-3f0c5a1d2e4b",
+  "index": 2,
+  "name": "reporte.txt",
+  "kind": "txt",
+  "size": 93,
+  "sha256": "dd11393c2ad7df2cce6cf2c9dd1c027c7396fcc75dec66f0b0e274113c95b967",
+  "chunk": 0,
+  "chunks": 1,
+  "data": "UGx1cnlGYWN0IC0gcmVwb3J0ZSBkZSBkZXNjYXJnYQ0KQmFuZGVqYTogUmVjaWJpZG9zDQpQZXJpb2RvOiBvY3R1YnJlIDIwMjYNCkNvbXByb2JhbnRlczogMg0K"
+}

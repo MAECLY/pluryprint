@@ -1,0 +1,10 @@
+{
+  "v": 2,
+  "id": "20",
+  "type": "hello",
+  "client": "pluryfact",
+  "clientVersion": "9.0.0",
+  "protocols": [
+    2
+  ]
+}

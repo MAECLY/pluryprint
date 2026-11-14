@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "id": "3",
+  "type": "listProfiles",
+  "ok": true,
+  "profiles": [
+    {
+      "id": "builtin-quick",
+      "name": "Rápido",
+      "isDefault": true
+    },
+    {
+      "id": "builtin-duplex-bw",
+      "name": "Dúplex B/N",
+      "isDefault": false
+    },
+    {
+      "id": "builtin-photo-color",
+      "name": "Foto color",
+      "isDefault": false
+    },
+    {
+      "id": "019a2c11-4f3e-7a10-b2c4-5d6e7f809a1b",
+      "name": "Facturas A4 dúplex",
+      "isDefault": false
+    }
+  ]
+}

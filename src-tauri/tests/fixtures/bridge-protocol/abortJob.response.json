@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "id": "11",
+  "type": "abortJob",
+  "ok": true,
+  "state": "aborted"
+}

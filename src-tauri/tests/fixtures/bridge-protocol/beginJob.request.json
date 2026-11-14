@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "id": "4",
+  "type": "beginJob",
+  "source": "pluryfact",
+  "label": "Recibidos · octubre 2026",
+  "action": "configure",
+  "profileId": "builtin-duplex-bw",
+  "printerId": null,
+  "overrides": {
+    "copies": 1,
+    "duplex": "long-edge",
+    "color": "mono",
+    "paper": "a4",
+    "orientation": "auto",
+    "collate": true
+  },
+  "expectedFiles": 3
+}
