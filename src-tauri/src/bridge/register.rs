@@ -411,6 +411,18 @@ pub fn is_translocated(bridge: &Path) -> bool {
     bridge.to_string_lossy().contains("/AppTranslocation/")
 }
 
+/// Whether `bridge` sits inside a macOS app bundle (`….app/Contents/MacOS/`).
+pub fn is_app_bundle(bridge: &Path) -> bool {
+    bridge
+        .parent()
+        .is_some_and(|d| d.ends_with("Contents/MacOS"))
+        && bridge
+            .ancestors()
+            .nth(3)
+            .and_then(|a| a.extension())
+            .is_some_and(|e| e == "app")
+}
+
 /// Whether the app should register at startup on this platform: macOS only
 /// (Windows has the installer; Linux has no promised registration).
 pub fn registers_at_startup(platform: Platform) -> bool {
@@ -441,6 +453,13 @@ pub fn register_at_startup(target: &Target) -> StartupOutcome {
     }
     if is_translocated(&target.bridge) {
         out.not_attempted = Some("translocated");
+        return out;
+    }
+    // Only an installed app bundle registers itself: a development build
+    // (`tauri dev`, `target/debug`) must not point the developer's browsers
+    // at a build folder. `bridge install` still does it on request.
+    if !is_app_bundle(&target.bridge) {
+        out.not_attempted = Some("not_bundled");
         return out;
     }
     if !target.bridge.is_file() {
@@ -595,7 +614,7 @@ mod tests {
 
     fn target(platform: Platform, root: &Path) -> Target {
         let bridge = root
-            .join("app/Contents/MacOS")
+            .join("Pluryprint.app/Contents/MacOS")
             .join(super::super::launch::BRIDGE_EXE);
         Target {
             platform,
@@ -801,8 +820,13 @@ mod tests {
             ..t.clone()
         };
         assert_eq!(register_at_startup(&linux).not_attempted, Some("platform"));
+        let dev = Target {
+            bridge: tmp.path().join("target/debug/pluryprint-bridge"),
+            ..t.clone()
+        };
+        assert_eq!(register_at_startup(&dev).not_attempted, Some("not_bundled"));
         let missing = Target {
-            bridge: tmp.path().join("nope/pluryprint-bridge"),
+            bridge: tmp.path().join("Gone.app/Contents/MacOS/pluryprint-bridge"),
             ..t
         };
         assert_eq!(
@@ -824,6 +848,19 @@ mod tests {
         assert_eq!(allowed[0], PLURYFACT_ORIGIN);
         assert!(allowed.contains(&extra));
         assert!(!allowed.iter().any(|o| o.contains('*')), "{allowed:?}");
+    }
+
+    #[test]
+    fn fr_127_only_an_app_bundle_counts_as_installed() {
+        assert!(is_app_bundle(Path::new(
+            "/Applications/Pluryprint.app/Contents/MacOS/pluryprint-bridge"
+        )));
+        assert!(!is_app_bundle(Path::new(
+            "/repo/src-tauri/target/debug/pluryprint-bridge"
+        )));
+        assert!(!is_app_bundle(Path::new(
+            "/x/Contents/MacOS/pluryprint-bridge"
+        )));
     }
 
     #[test]
