@@ -486,9 +486,13 @@ pub fn register_at_startup(target: &Target) -> StartupOutcome {
 
 /// The origins the running bridge accepts: PluryFact's, plus every origin
 /// listed by a manifest of this host found where the browsers look (the
-/// extra development origins `bridge install --extra-origin` added), plus a
-/// test manifest in `data_dir` (only ever present when a test put it there).
-pub fn allowed_origins(data_dir: &Path) -> Vec<String> {
+/// extra development origins `bridge install --extra-origin` added), plus,
+/// in a test run only, a test manifest in `test_dir` (the folder of
+/// [`super::DATA_DIR_ENV`]). Production passes `None`: the app's data
+/// directory is never read for origins, so `bridge install --extra-origin`
+/// stays the only way to add one, and `bridge status`/`uninstall` see them
+/// all.
+pub fn allowed_origins(test_dir: Option<&Path>) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     if let Some(target) = Target::current() {
         for browser in Browser::ALL {
@@ -497,7 +501,9 @@ pub fn allowed_origins(data_dir: &Path) -> Vec<String> {
             }
         }
     }
-    found.extend(installed_origins_in(data_dir));
+    if let Some(dir) = test_dir {
+        found.extend(installed_origins_in(dir));
+    }
     let found: Vec<String> = found
         .into_iter()
         .filter(|o| is_extension_origin(o))
@@ -844,10 +850,13 @@ mod tests {
             vec![extra.clone(), "chrome-extension://*/".into()],
         );
         std::fs::write(tmp.path().join(manifest_file_name()), m.to_bytes()).unwrap();
-        let allowed = allowed_origins(tmp.path());
+        let allowed = allowed_origins(Some(tmp.path()));
         assert_eq!(allowed[0], PLURYFACT_ORIGIN);
         assert!(allowed.contains(&extra));
         assert!(!allowed.iter().any(|o| o.contains('*')), "{allowed:?}");
+        // Production reads no manifest from the data dir: a file planted
+        // there cannot add an origin.
+        assert!(!allowed_origins(None).contains(&extra));
     }
 
     #[test]

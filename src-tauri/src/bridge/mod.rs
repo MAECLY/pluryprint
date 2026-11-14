@@ -82,10 +82,13 @@ pub fn data_dir() -> PathBuf {
 
 /// [`data_dir`] as a pure function of the override variable.
 pub fn data_dir_from(over: Option<OsString>) -> PathBuf {
-    match over.map(PathBuf::from) {
-        Some(p) if p.is_absolute() => p,
-        _ => crate::util::paths::data_dir(),
-    }
+    test_data_dir_from(over).unwrap_or_else(crate::util::paths::data_dir)
+}
+
+/// The test-only data directory [`DATA_DIR_ENV`] names, when it names an
+/// absolute folder; `None` in production. Pure.
+pub fn test_data_dir_from(over: Option<OsString>) -> Option<PathBuf> {
+    over.map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
 /// Where received documents are written: `<data_dir>/inbox`.
@@ -171,7 +174,11 @@ pub fn run_stdio(argv: Vec<OsString>) -> i32 {
         event = "bridge_started",
         version = env!("CARGO_PKG_VERSION")
     );
-    let allowed = register::allowed_origins(&data);
+    // Only a test run (data dir overridden) reads a test manifest from the
+    // data dir; in production the origins come from the browsers' manifests
+    // alone, so no file in the data dir can widen them.
+    let test_dir = test_data_dir_from(std::env::var_os(DATA_DIR_ENV));
+    let allowed = register::allowed_origins(test_dir.as_deref());
     let host = session::RealHost::new(data, !launch_disabled());
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -179,4 +186,25 @@ pub fn run_stdio(argv: Vec<OsString>) -> i32 {
     tracing::info!(event = "bridge_stopped", exit_code = code);
     crate::logging::flush();
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only an absolute override is a test data dir; without one (production)
+    /// there is none, so the origin check reads no manifest from the data
+    /// dir ([`register::allowed_origins`]).
+    #[test]
+    fn fr_127_the_test_data_dir_exists_only_when_overridden() {
+        assert_eq!(test_data_dir_from(None), None);
+        assert_eq!(test_data_dir_from(Some("relative/dir".into())), None);
+        let abs = std::env::temp_dir();
+        assert_eq!(
+            test_data_dir_from(Some(abs.clone().into())),
+            Some(abs.clone())
+        );
+        assert_eq!(data_dir_from(Some(abs.clone().into())), abs);
+        assert_eq!(data_dir_from(None), crate::util::paths::data_dir());
+    }
 }

@@ -652,7 +652,7 @@ The manifest is `com.maecly.pluryprint.json`: `name`, `description`, `path` (abs
 
 `bridge install` with `--browser all` (the default) writes for the browsers found; a named browser is always written. Re-registering keeps any extra origin a manifest already allows; `bridge uninstall` then `install` resets to PluryFact's origin only. `bridge status --json` prints one object per browser: `browser`, `detected`, `manifest_path`, `registered`, `points_here`, `binary_exists`, `allowed_origins`. The subcommand uses the existing exit codes (0; 1 when a manifest cannot be written or the bridge is not next to the CLI; 2 for an origin that is not `chrome-extension://<32 letters a-p>/`).
 
-**Tests only:** `PLURYPRINT_BRIDGE_DATA_DIR=<absolute folder>` replaces the data folder (inbox, handoff, and a test manifest read for allowed origins) and turns logging off; `PLURYPRINT_BRIDGE_NO_LAUNCH=1` writes the handoff and answers `handed-off` without starting the app. Neither is meant for users.
+**Tests only:** `PLURYPRINT_BRIDGE_DATA_DIR=<absolute folder>` replaces the data folder (inbox, handoff, and a test manifest read for allowed origins) and turns logging off. Without it the bridge never reads a manifest from the app's data folder: the allowed origins come only from the browsers' manifests, so `bridge install --extra-origin` is the only way to add one and `bridge status`/`uninstall` see them all; `PLURYPRINT_BRIDGE_NO_LAUNCH=1` writes the handoff and answers `handed-off` without starting the app. Neither is meant for users.
 
 ## 7. Related documents
 
