@@ -32,6 +32,7 @@
 //! output formatting and exit codes.
 
 pub mod args;
+pub mod bridge;
 pub mod console;
 pub mod exit;
 pub mod files;
@@ -511,6 +512,7 @@ fn execute(cli: Cli) -> i32 {
         Some(Command::Update { cmd }) => {
             update::run(&paths, emitter, cmd).map(|_| ExitCode::Success)
         }
+        Some(Command::Bridge { cmd }) => bridge::run(emitter, cmd).map(|_| ExitCode::Success),
         // `--cli` (or a bare `--invoke`) with nothing to do: show the help and
         // report invalid usage, the same as any other incomplete command line.
         None => {
@@ -555,6 +557,7 @@ fn command_name(cmd: &Command) -> &'static str {
         Command::Profiles { .. } => "profiles",
         Command::Queue { .. } => "queue",
         Command::Update { .. } => "update",
+        Command::Bridge { .. } => "bridge",
     }
 }
 
