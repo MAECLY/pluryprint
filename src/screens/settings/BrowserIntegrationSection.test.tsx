@@ -87,7 +87,7 @@ function row(browser: string): HTMLElement {
 afterEach(() => clearMocks());
 
 describe('BrowserIntegrationSection', () => {
-  it('FR-127: each browser row says whether PluryFact can reach Pluryprint', async () => {
+  it('FR-127: each browser row says whether Pluryfact can reach Pluryprint', async () => {
     mock(overview());
     renderSection();
 

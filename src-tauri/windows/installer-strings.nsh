@@ -67,11 +67,11 @@ LangString PLURY_SHELLEXT_MISSING ${PLURY_LANG_ES} "Este instalador no trae la D
 LangString PLURY_SHELLEXT_REGISTERING ${PLURY_LANG_EN} "Registering the $R8 Explorer context menu"
 LangString PLURY_SHELLEXT_REGISTERING ${PLURY_LANG_ES} "Registrando el men${U+00FA} contextual del Explorador ($R8)"
 
-LangString PLURY_BRIDGE_REGISTERING ${PLURY_LANG_EN} "Registering the browser bridge for PluryFact (Chrome, Edge, Brave, Chromium)"
-LangString PLURY_BRIDGE_REGISTERING ${PLURY_LANG_ES} "Registrando el puente con el navegador para PluryFact (Chrome, Edge, Brave, Chromium)"
+LangString PLURY_BRIDGE_REGISTERING ${PLURY_LANG_EN} "Registering the browser bridge for Pluryfact (Chrome, Edge, Brave, Chromium)"
+LangString PLURY_BRIDGE_REGISTERING ${PLURY_LANG_ES} "Registrando el puente con el navegador para Pluryfact (Chrome, Edge, Brave, Chromium)"
 
-LangString PLURY_BRIDGE_MISSING ${PLURY_LANG_EN} "This installer carries no browser bridge; PluryFact cannot print through Pluryprint"
-LangString PLURY_BRIDGE_MISSING ${PLURY_LANG_ES} "Este instalador no trae el puente con el navegador; PluryFact no podr${U+00E1} imprimir con Pluryprint"
+LangString PLURY_BRIDGE_MISSING ${PLURY_LANG_EN} "This installer carries no browser bridge; Pluryfact cannot print through Pluryprint"
+LangString PLURY_BRIDGE_MISSING ${PLURY_LANG_ES} "Este instalador no trae el puente con el navegador; Pluryfact no podr${U+00E1} imprimir con Pluryprint"
 
 LangString PLURY_BRIDGE_WRITE_FAILED ${PLURY_LANG_EN} "Could not write the browser bridge's manifest; run pluryprint-cli bridge install to try again"
 LangString PLURY_BRIDGE_WRITE_FAILED ${PLURY_LANG_ES} "No se pudo escribir el manifiesto del puente con el navegador; ejecuta pluryprint-cli bridge install para reintentarlo"

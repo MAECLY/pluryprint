@@ -512,7 +512,7 @@ describe('App', () => {
       expect(await screen.findByText('Contracts duplex')).toBeInTheDocument();
     });
 
-    /** What the browser bridge hands over for a PluryFact batch. */
+    /** What the browser bridge hands over for a Pluryfact batch. */
     const PLURYFACT = {
       source: 'pluryfact',
       label: 'Recibidos · octubre 2026',
@@ -525,7 +525,7 @@ describe('App', () => {
       },
     } as const;
 
-    it('FR-124: a PluryFact selection is labelled on the Print Job screen and pre-fills its settings', async () => {
+    it('FR-124: a Pluryfact selection is labelled on the Print Job screen and pre-fills its settings', async () => {
       const { calls, park } = mockSelections();
       park([{ ...selection('configure'), ...PLURYFACT }]);
 
@@ -533,21 +533,21 @@ describe('App', () => {
 
       expect((await reportRows()).length).toBeGreaterThan(0);
       const origin = await screen.findByTestId('job-origin');
-      expect(origin).toHaveTextContent('From PluryFact');
+      expect(origin).toHaveTextContent('From Pluryfact');
       expect(origin).toHaveTextContent('Recibidos · octubre 2026');
-      // FR-123: the settings PluryFact asked for are in the panel, unprinted.
+      // FR-123: the settings Pluryfact asked for are in the panel, unprinted.
       expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(2);
       expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
     });
 
-    it('FR-124: a PluryFact batch joining a job the user started is not labelled and keeps the job settings', async () => {
+    it('FR-124: a Pluryfact batch joining a job the user started is not labelled and keeps the job settings', async () => {
       const { calls, park } = mockSelections();
       // The user's own file, from Explorer, already in the job.
       park([{ ...selection('configure'), source: 'windows-explorer' }]);
       render(<App />);
       expect((await reportRows()).length).toBeGreaterThan(0);
 
-      // Then PluryFact sends a batch (with its own print settings).
+      // Then Pluryfact sends a batch (with its own print settings).
       park([
         {
           ...selection('configure'),
@@ -561,17 +561,17 @@ describe('App', () => {
         (await screen.findAllByRole('button', { name: /0000-factura\.pdf/ }))
           .length,
       ).toBeGreaterThan(0);
-      // Mixed job: no "From PluryFact" on the user's own file.
+      // Mixed job: no "From Pluryfact" on the user's own file.
       expect(screen.queryByTestId('job-origin')).toBeNull();
       // The job keeps its settings, and the user is told why.
       expect(
-        await screen.findByText(/PluryFact's print settings were not applied/),
+        await screen.findByText(/Pluryfact's print settings were not applied/),
       ).toBeInTheDocument();
       expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(1);
       expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
     });
 
-    it('FR-124: a selection from a file manager carries no PluryFact label', async () => {
+    it('FR-124: a selection from a file manager carries no Pluryfact label', async () => {
       const { park } = mockSelections();
       park([{ ...selection('configure'), source: 'windows-explorer' }]);
 
@@ -579,10 +579,10 @@ describe('App', () => {
 
       expect((await reportRows()).length).toBeGreaterThan(0);
       expect(screen.queryByTestId('job-origin')).toBeNull();
-      expect(screen.queryByText('From PluryFact')).toBeNull();
+      expect(screen.queryByText('From Pluryfact')).toBeNull();
     });
 
-    it('FR-123: a PluryFact queue selection is submitted with its overrides on top of the profile', async () => {
+    it('FR-123: a Pluryfact queue selection is submitted with its overrides on top of the profile', async () => {
       const { calls, park } = mockSelections();
       park([{ ...selection('queue'), ...PLURYFACT }]);
 
@@ -614,7 +614,7 @@ describe('App', () => {
       expect(req.settings.collate).toBe(false);
       // The confirmation names where the batch came from.
       expect(
-        await screen.findByText(/From PluryFact · Recibidos · octubre 2026/),
+        await screen.findByText(/From Pluryfact · Recibidos · octubre 2026/),
       ).toBeInTheDocument();
     });
 

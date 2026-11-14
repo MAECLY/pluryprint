@@ -251,7 +251,7 @@ describe('installIpcStub', () => {
     ]);
   });
 
-  it('FR-124: a PluryFact selection carries its source, label and overrides to the app', async () => {
+  it('FR-124: a Pluryfact selection carries its source, label and overrides to the app', async () => {
     const got: unknown[] = [];
     await events.selectionForwarded.listen((e) => got.push(e.payload));
     const sel = {

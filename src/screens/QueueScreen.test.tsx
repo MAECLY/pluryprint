@@ -165,7 +165,7 @@ describe('QueueScreen', () => {
     resetPrinterNames();
   });
 
-  it('FR-124: a job PluryFact sent says so on its row, in every view', async () => {
+  it('FR-124: a job Pluryfact sent says so on its row, in every view', async () => {
     resetPrinterNames();
     mockIPC((cmd) => {
       if (cmd === 'queue_status')
@@ -193,7 +193,7 @@ describe('QueueScreen', () => {
         <QueueScreen view={view} setView={() => {}} />,
       );
       expect(
-        await screen.findAllByText(/From PluryFact · Recibidos · octubre 2026/),
+        await screen.findAllByText(/From Pluryfact · Recibidos · octubre 2026/),
       ).toHaveLength(1);
       unmount();
     }

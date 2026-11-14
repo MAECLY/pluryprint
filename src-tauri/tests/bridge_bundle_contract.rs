@@ -94,7 +94,7 @@ fn nsis_manifest(nsh: &str) -> String {
 
 /// The manifest the installer writes is, field for field, the one
 /// `bridge::register` writes on Windows: the host name, the bridge's file
-/// name relative to the manifest, `stdio`, and PluryFact's origin only.
+/// name relative to the manifest, `stdio`, and Pluryfact's origin only.
 #[test]
 fn fr_127_the_installer_writes_the_manifest_the_bridge_expects() {
     let nsh = read("src-tauri/windows/installer-hooks.nsh");

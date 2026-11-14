@@ -182,7 +182,7 @@ impl Manifest {
     pub fn new(path: String, origins: Vec<String>) -> Self {
         Self {
             name: HOST_NAME.to_string(),
-            description: "Pluryprint bridge for PluryFact (prints the documents PluryFact sends)"
+            description: "Pluryprint bridge for Pluryfact (prints the documents Pluryfact sends)"
                 .to_string(),
             path,
             kind: "stdio".to_string(),
@@ -208,7 +208,7 @@ pub fn is_extension_origin(origin: &str) -> bool {
         .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b)))
 }
 
-/// The origins a manifest allows: PluryFact's first, then `extra` (already
+/// The origins a manifest allows: Pluryfact's first, then `extra` (already
 /// validated), without duplicates.
 pub fn origins_with(extra: &[String]) -> Vec<String> {
     let mut out = vec![PLURYFACT_ORIGIN.to_string()];
@@ -336,7 +336,7 @@ impl Target {
         }
     }
 
-    /// Write (or rewrite) the manifest for `browser`, allowing PluryFact plus
+    /// Write (or rewrite) the manifest for `browser`, allowing Pluryfact plus
     /// `extra` plus any extra origin the existing manifest already allowed
     /// (so re-registering never drops a development origin someone added).
     /// Returns whether anything was written: an identical manifest is left
@@ -344,7 +344,7 @@ impl Target {
     ///
     /// This holds for the CLI and Reconnect only. On Windows the setup
     /// (`windows/installer-hooks.nsh`) rewrites the shared manifest with
-    /// PluryFact's origin alone on every install and update, so an extra
+    /// Pluryfact's origin alone on every install and update, so an extra
     /// origin has to be added again afterwards (ipc-and-cli.md §6).
     pub fn install(&self, browser: Browser, extra: &[String]) -> std::io::Result<bool> {
         let path = self.manifest_path(browser);
@@ -489,7 +489,7 @@ pub fn register_at_startup(target: &Target) -> StartupOutcome {
     out
 }
 
-/// The origins the running bridge accepts: PluryFact's, plus every origin
+/// The origins the running bridge accepts: Pluryfact's, plus every origin
 /// listed by a manifest of this host found where the browsers look (the
 /// extra development origins `bridge install --extra-origin` added), plus,
 /// in a test run only, a test manifest in `test_dir` (the folder of

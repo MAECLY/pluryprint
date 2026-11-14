@@ -29,16 +29,16 @@
 !define PLURYPRINT_DATA_ORG "Maecly"
 !define PLURYPRINT_DATA_APP "Pluryprint"
 
-; ---- Browser bridge for PluryFact (FR-127, ADR-0016) -------------------------
+; ---- Browser bridge for Pluryfact (FR-127, ADR-0016) -------------------------
 ;
-; pluryprint-bridge.exe is the Chrome Native Messaging host the PluryFact
+; pluryprint-bridge.exe is the Chrome Native Messaging host the Pluryfact
 ; extension prints through. A browser finds it through a JSON manifest named
 ; after the host; on Windows the manifest's location is the default value of
 ; a per-user key, one per browser vendor (Brave reads Chrome's). The manifest
 ; goes next to the bridge, and its "path" is relative to it, which Chrome
 ; allows on Windows only. Its content must stay what
 ; src-tauri/src/bridge/register.rs writes (Manifest::new), which
-; tests/installer_hooks.rs checks; the origin is PluryFact's Chrome Web Store
+; tests/installer_hooks.rs checks; the origin is Pluryfact's Chrome Web Store
 ; id. HKCU only, like everything else here.
 !define PLURYPRINT_BRIDGE_HOST "com.maecly.pluryprint"
 !define PLURYPRINT_BRIDGE_EXE "pluryprint-bridge.exe"
@@ -186,7 +186,7 @@
 !macroend
 
 ; Write the bridge's manifest and point every browser at it. The manifest is
-; rewritten from scratch with PluryFact's origin only, so an extra development
+; rewritten from scratch with Pluryfact's origin only, so an extra development
 ; origin added with `pluryprint-cli bridge install --extra-origin` does not
 ; survive an install or an update (the uninstall hook, which an update runs,
 ; deletes the file anyway); it is added again by hand (ipc-and-cli.md, section 6).
@@ -205,7 +205,7 @@
     ${Else}
       FileWrite $R9 '{$\r$\n'
       FileWrite $R9 '  "name": "${PLURYPRINT_BRIDGE_HOST}",$\r$\n'
-      FileWrite $R9 '  "description": "Pluryprint bridge for PluryFact (prints the documents PluryFact sends)",$\r$\n'
+      FileWrite $R9 '  "description": "Pluryprint bridge for Pluryfact (prints the documents Pluryfact sends)",$\r$\n'
       FileWrite $R9 '  "path": "${PLURYPRINT_BRIDGE_EXE}",$\r$\n'
       FileWrite $R9 '  "type": "stdio",$\r$\n'
       FileWrite $R9 '  "allowed_origins": [$\r$\n'

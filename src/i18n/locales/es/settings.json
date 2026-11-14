@@ -119,7 +119,7 @@
     }
   },
   "browserIntegration": {
-    "intro": "PluryFact, la extensión del navegador que descarga tus comprobantes electrónicos del SRI, puede enviárselos a Pluryprint para imprimirlos. El navegador abre el puente de Pluryprint solo para PluryFact; nada escucha en la red.",
+    "intro": "Pluryfact, la extensión del navegador que descarga tus comprobantes electrónicos del SRI, puede enviárselos a Pluryprint para imprimirlos. El navegador abre el puente de Pluryprint solo para Pluryfact; nada escucha en la red.",
     "loading": "Comprobando los navegadores…",
     "unavailable": "El estado de la integración con navegadores solo está disponible en la app de escritorio.",
     "translocated": "Pluryprint se está ejecutando desde una ubicación temporal (la imagen de disco o Descargas). Muévelo a la carpeta Aplicaciones y ábrelo desde ahí para que tus navegadores lo encuentren.",

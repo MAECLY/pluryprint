@@ -41,8 +41,8 @@
   },
   "selection": {
     "truncated": "Only the first {{sent}} of the {{total}} selected items reached Pluryprint. Select the rest separately to print them.",
-    "fromPluryfact": "From PluryFact",
-    "settingsKept": "The job already had files, so it keeps its profile and settings: PluryFact's print settings were not applied."
+    "fromPluryfact": "From Pluryfact",
+    "settingsKept": "The job already had files, so it keeps its profile and settings: Pluryfact's print settings were not applied."
   },
   "shellMenu": {
     "print_one": "Print 1 file",

@@ -41,8 +41,8 @@
   },
   "selection": {
     "truncated": "Solo han llegado a Pluryprint los primeros {{sent}} de los {{total}} elementos seleccionados. Selecciona el resto por separado para imprimirlos.",
-    "fromPluryfact": "Desde PluryFact",
-    "settingsKept": "El trabajo ya tenía archivos, así que conserva su perfil y su configuración: no se aplicó la configuración de impresión de PluryFact."
+    "fromPluryfact": "Desde Pluryfact",
+    "settingsKept": "El trabajo ya tenía archivos, así que conserva su perfil y su configuración: no se aplicó la configuración de impresión de Pluryfact."
   },
   "shellMenu": {
     "print_one": "Imprimir 1 archivo",
