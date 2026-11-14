@@ -113,9 +113,9 @@ Excluded from coverage:
 src-tauri/tests/
 ├── bundle_identity.rs       # ADR-0009 bundle identity; the NSIS hooks compile with makensis
 ├── bridge_binary.rs         # FR-120/125/126: the real pluryprint-bridge over framed pipes, temp data dir, no launch
-├── bridge_handoff_e2e.rs    # FR-124/125: the app's half of the cross-repo E2E with PluryFact (ignored, opt-in)
+├── bridge_handoff_e2e.rs    # FR-124/125: the app's half of the cross-repo E2E with Pluryfact (ignored, opt-in)
 ├── bridge_bundle_contract.rs # FR-127: the bridge ships next to the app; the NSIS manifest and HKCU keys match bridge::register
-├── bridge_protocol_contract.rs # FR-120: protocol v1 fixtures (shared with PluryFact) round-trip and replay
+├── bridge_protocol_contract.rs # FR-120: protocol v1 fixtures (shared with Pluryfact) round-trip and replay
 ├── cli_console_binary.rs    # FR-009: pluryprint-cli.exe returns the documented exit codes
 ├── cli_contract.rs          # The headless surface: subcommands, flags, exit codes (FR-008/009/112)
 ├── config_files_0_0_1.rs    # FR-100/026: config.toml and profiles.toml as 0.0.1 wrote them still load
@@ -193,7 +193,7 @@ These tests are `#[ignore]`d because they reach outside the process:
 | `platform::windows::tests::discover_printers_smoke`, `platform::windows_dnssd::tests::browse_smoke` | Wait for the DNS-SD browse window on a real Windows network | on the Windows VM, `cargo test -- --ignored smoke` |
 | `engine_deps::fr_058_print_this_hosts_report` | Diagnostic: prints the host's dependency report | `cargo test --test engine_deps -- --ignored --nocapture` |
 | `tests/real_printer.rs` (6 tests) | Submits held jobs to a real CUPS queue and reads their IPP attributes back (see *Virtual printer* above); a no-op unless `MAECLY_REAL_PRINTER=1` | `MAECLY_REAL_PRINTER=1 cargo test --test real_printer -- --ignored --test-threads=1` |
-| `tests/bridge_handoff_e2e.rs` | Reads the inbox and handoff a real PluryFact run left behind (see *Cross-repo E2E with PluryFact* below); a no-op unless `PLURYPRINT_E2E_DATA_DIR` is set | run by PluryFact's `bun run e2e:pluryprint`, or `PLURYPRINT_E2E_DATA_DIR=<dir> cargo test --test bridge_handoff_e2e -- --ignored --nocapture` within 60 s of the handoff |
+| `tests/bridge_handoff_e2e.rs` | Reads the inbox and handoff a real Pluryfact run left behind (see *Cross-repo E2E with Pluryfact* below); a no-op unless `PLURYPRINT_E2E_DATA_DIR` is set | run by Pluryfact's `bun run e2e:pluryprint`, or `PLURYPRINT_E2E_DATA_DIR=<dir> cargo test --test bridge_handoff_e2e -- --ignored --nocapture` within 60 s of the handoff |
 | `tests/real_printer_windows.rs` (2 tests), `tests/print_quality_windows.rs` (10 tests) | Spool to **paused** Windows queues and read the jobs back; a no-op unless `MAECLY_REAL_PRINTER=1` | see [e2e/README.md](../../e2e/README.md#real-spooler-suites-opt-in-never-print); `scripts/vm/print-quality-e2e.ps1` sets up the queues |
 
 `ci.yml` does not run them: they need the network, real queues or a real printer, and must never fail a pull request. The CUPS ones are the exception after a merge: `linux.yml` has a hold queue, and runs `cargo test --lib -- --ignored cups` and `cargo test --test real_printer -- --ignored --test-threads=1` with `MAECLY_REAL_PRINTER=1`. Run the rest by hand with the commands above; `cargo test -- --ignored` runs *only* the ignored ones (the rest already ran in CI), **not** `--include-ignored`.
@@ -288,9 +288,9 @@ Measured by `pnpm test:coverage` (`vitest run --coverage`) with the `@vitest/cov
 
 Drive it with any browser automation (Chrome DevTools MCP, Playwright) through `window.__PLURY_E2E__`: `backend` (state, `tick()`, `openPaths` for the next file picker), `forwardSelection(sel)`, `dropFiles(paths)`, `emit(event, payload)`, `calls()`. URL flags: `?e2e-seed=1` (fixture queue with every job state), `?e2e-tick=0` (manual ticks), `?e2e-onboarded=1` (skip onboarding). It proves GUI ↔ IPC-contract behaviour, not the backend; the harness's own contract tests live in `e2e/browser/ipc-stub.test.ts` and run with `pnpm test`.
 
-### Cross-repo E2E with PluryFact (macOS, Linux)
+### Cross-repo E2E with Pluryfact (macOS, Linux)
 
-The browser bridge (FR-120…127, ADR-0016) is tested end to end from the PluryFact repository, against this repository's real binaries: PluryFact's `bun run e2e:pluryprint` (`scripts/e2e-pluryprint.ts` there) drives the extension in Playwright's Chromium, and `src-tauri/tests/bridge_handoff_e2e.rs` here checks what the app would do with the result. Nothing is printed and no window opens: the bridge runs with `PLURYPRINT_BRIDGE_NO_LAUNCH=1`, which writes the inbox and the handoff and stops there.
+The browser bridge (FR-120…127, ADR-0016) is tested end to end from the Pluryfact repository, against this repository's real binaries: Pluryfact's `bun run e2e:pluryprint` (`scripts/e2e-pluryprint.ts` there) drives the extension in Playwright's Chromium, and `src-tauri/tests/bridge_handoff_e2e.rs` here checks what the app would do with the result. Nothing is printed and no window opens: the bridge runs with `PLURYPRINT_BRIDGE_NO_LAUNCH=1`, which writes the inbox and the handoff and stops there.
 
 ```sh
 cd src-tauri && cargo build --bin pluryprint-bridge --bin pluryprint-cli

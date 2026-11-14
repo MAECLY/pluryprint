@@ -214,10 +214,10 @@ __PLURY_E2E__.calls(); // every command the app invoked
 | `?e2e-seed=1`      | Start from the fixture queue (one job in every state) |
 | `?e2e-tick=0`      | Stop the timer; advance with `backend.tick()`         |
 
-### A batch from PluryFact (FR-123/FR-124)
+### A batch from Pluryfact (FR-123/FR-124)
 
 What the browser bridge hands the app is an ordinary selection with
-`source: 'pluryfact'`, PluryFact's label and the print settings it asked
+`source: 'pluryfact'`, Pluryfact's label and the print settings it asked
 for. Park it and ring the doorbell, as the backend would:
 
 ```js
@@ -240,7 +240,7 @@ h.backend.pendingSelections.push({
 h.forwardSelection({ paths: [], action: 'configure', profile_id: null });
 ```
 
-The Print Job screen opens with the file, a "From PluryFact" badge and the
+The Print Job screen opens with the file, a "From Pluryfact" badge and the
 label next to the summary, Duplex BW selected, and two copies, black and
 white, long edge and A4 pre-filled; nothing is printed. Settings > Browser
 integration lists the four browsers, and Reconnect turns Edge and Brave to

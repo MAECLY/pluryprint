@@ -308,19 +308,19 @@ option, the JSON output and the exit codes are in
 
 ## Integrations
 
-### PluryFact (in development)
+### Pluryfact (in development)
 
-[PluryFact](https://pluryfact.maecly.com/) is a browser extension that
+[Pluryfact](https://pluryfact.maecly.com/) is a browser extension that
 downloads your electronic invoices from Ecuador's SRI. Once both apps are
-connected, PluryFact can send what it downloaded (the RIDEs in PDF, the
+connected, Pluryfact can send what it downloaded (the RIDEs in PDF, the
 vouchers' XML and its TXT report) straight to Pluryprint, which opens them on
-the Print Job screen marked **From PluryFact**, with the settings you chose
-in PluryFact filled in. Nothing prints until you confirm, unless you chose
-"print right away" in PluryFact.
+the Print Job screen marked **From Pluryfact**, with the settings you chose
+in Pluryfact filled in. Nothing prints until you confirm, unless you chose
+"print right away" in Pluryfact.
 
-How it works: PluryFact talks to a small helper that ships with Pluryprint,
+How it works: Pluryfact talks to a small helper that ships with Pluryprint,
 `pluryprint-bridge`, through the browser's Native Messaging. The browser
-starts the helper only for PluryFact. No port is opened and nothing goes over
+starts the helper only for Pluryfact. No port is opened and nothing goes over
 the network: the documents travel from the browser to Pluryprint on your
 machine, are checked (size, checksum, type) and kept in Pluryprint's data
 folder for a week. Chrome, Edge, Brave and Chromium on Windows and macOS. The
@@ -329,7 +329,7 @@ time it opens. **Settings → Browser integration** shows the state per browser
 and can reconnect them; `pluryprint-cli bridge status` does the same from a
 script.
 
-This arrives with Pluryprint 0.0.6 and PluryFact 0.2. Design and protocol:
+This arrives with Pluryprint 0.0.6 and Pluryfact 0.2. Design and protocol:
 [ADR-0016](./docs/adr/0016-pluryfact-browser-bridge.md) and
 [ipc-and-cli.md §6](./docs/04-architecture/ipc-and-cli.md#6-browser-bridge-native-messaging).
 

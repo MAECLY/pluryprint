@@ -1,6 +1,6 @@
 # Bridge protocol v1 — canonical fixtures
 
-One JSON file per message of the protocol between PluryFact and
+One JSON file per message of the protocol between Pluryfact and
 `pluryprint-bridge` (`src-tauri/src/bridge/protocol.rs`,
 `docs/04-architecture/ipc-and-cli.md` §6, ADR-0016):
 
@@ -11,7 +11,7 @@ One JSON file per message of the protocol between PluryFact and
 - `error.<code>.response.json` — one reply per error code, and
   `error.<code>.request.json` where a single request produces it.
 
-These files are the **source of truth** for both repositories. PluryFact
+These files are the **source of truth** for both repositories. Pluryfact
 keeps a byte-for-byte copy in `test/fixtures/pluryprint-protocol/`; change
 them here first, then copy them over. `src-tauri/tests/bridge_protocol_contract.rs`
 checks that the Rust types read and write every file exactly and replays the

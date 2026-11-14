@@ -82,7 +82,7 @@ The table below is the **complete** registered surface — 49 commands, in `coll
 | `install_update`            | `installUpdate(allowMajor, confirmedVersion) => UpdateInstallResult` | `ipc::update::install_update`     | FR-082/083/084/087: download from `latest.json`, verify the minisign signature, install per-user. `allowMajor` must be `true` for a major jump, and `confirmedVersion` is the release the user confirmed: a major jump to any other version (the manifest now names a newer one) fails with `major_update_changed`. `{ installed: null }` when nothing newer exists. Fails with `UpdateSignatureInvalid` for a bad signature. On Windows the app exits into the installer |
 | `restart_app`               | `restartApp() => null`                                         | `ipc::update::restart_app`              | Relaunches the app after an install that needs it (macOS) |
 | `take_pending_selections`   | `takePendingSelections() => Selection[]`                       | `cli::pending::take_pending_selections` | Drains the selections a shell-extension launch (or a forwarded second launch) parked for the window |
-| `bridge_status`             | `bridgeStatus() => BridgeOverview`                             | `ipc::bridge::bridge_status`            | FR-127: per browser (Chrome, Edge, Brave, Chromium), whether the PluryFact bridge's manifest exists, points at this copy's bridge and names an existing binary; plus `platform`, `installed`, `translocated` |
+| `bridge_status`             | `bridgeStatus() => BridgeOverview`                             | `ipc::bridge::bridge_status`            | FR-127: per browser (Chrome, Edge, Brave, Chromium), whether the Pluryfact bridge's manifest exists, points at this copy's bridge and names an existing binary; plus `platform`, `installed`, `translocated` |
 | `bridge_reconnect`          | `bridgeReconnect() => BridgeOverview`                          | `ipc::bridge::bridge_reconnect`         | FR-127: registers the bridge again with every browser found (keeping extra origins a manifest already allows); refuses a translocated copy (`bridge_translocated`) or a build without the bridge (`bridge_missing`) |
 
 > **Contract decisions worth calling out** (the shipped surface diverges from earlier drafts of this doc):
@@ -610,13 +610,13 @@ The CLI prints the `Display` form to stderr as `error: …`, or — with `--json
 
 > **Status: in development** (ships with 0.0.6). Decision and alternatives: [ADR-0016](../adr/0016-pluryfact-browser-bridge.md). Requirements: FR-120..FR-127.
 
-PluryFact, the SRI invoice downloader for Chrome, Edge and Brave, sends documents to Pluryprint through **`pluryprint-bridge`**, a Chrome Native Messaging host installed next to the app (`src/bin/pluryprint-bridge.rs`, `src/bridge/`). It is a third entry point beside the GUI and the CLI, and it reaches the app through the existing context-menu path (§3.1), so nothing new is exposed by the app itself.
+Pluryfact, the SRI invoice downloader for Chrome, Edge and Brave, sends documents to Pluryprint through **`pluryprint-bridge`**, a Chrome Native Messaging host installed next to the app (`src/bin/pluryprint-bridge.rs`, `src/bridge/`). It is a third entry point beside the GUI and the CLI, and it reaches the app through the existing context-menu path (§3.1), so nothing new is exposed by the app itself.
 
 ### 6.1 Process and framing
 
 The browser starts the bridge with the caller's origin as `argv[1]` (Windows adds `--parent-window=<hwnd>`, which is ignored) and talks to it over stdin/stdout: each message is a 32-bit length in **native byte order** followed by that many bytes of UTF-8 JSON (`bridge::framing`). Limits are the browser's: at most **64 MiB** per message to the host (a longer frame is drained and answered `too_large`), at most **1 MB** per reply (the host never builds a larger one; `listPrinters` drops its paper lists first). stdout carries frames and nothing else; the bridge logs to the app's log file (and nowhere in tests). The process exits 0 when the browser closes stdin, 1 if the pipe breaks mid-frame.
 
-An origin that no manifest of this host allows (`bridge::register::allowed_origins`: PluryFact's Web Store origin plus any extra origin a manifest lists) gets `origin_not_allowed` for every request.
+An origin that no manifest of this host allows (`bridge::register::allowed_origins`: Pluryfact's Web Store origin plus any extra origin a manifest lists) gets `origin_not_allowed` for every request.
 
 ### 6.2 Protocol v1
 
@@ -634,7 +634,7 @@ Every message is `{"v":1,"id":"<string ≤128 bytes>","type":"<type>",…}`. A r
 
 Error codes: `unsupported_version`, `unknown_type`, `bad_request`, `origin_not_allowed`, `too_large`, `too_many_files`, `bad_pdf`, `checksum_mismatch`, `unknown_job`, `job_incomplete`, `io_error`, `launch_failed`, `internal`. An XML document that is not well formed and a text document that is not text are `bad_request`.
 
-At most 4 jobs may be open per connection. A document restarts from chunk 0 after an error; a complete one cannot be sent twice. The canonical exchanges are the fixtures in `src-tauri/tests/fixtures/bridge-protocol/` (copied byte for byte into PluryFact), pinned by `tests/bridge_protocol_contract.rs`.
+At most 4 jobs may be open per connection. A document restarts from chunk 0 after an error; a complete one cannot be sent twice. The canonical exchanges are the fixtures in `src-tauri/tests/fixtures/bridge-protocol/` (copied byte for byte into Pluryfact), pinned by `tests/bridge_protocol_contract.rs`.
 
 ### 6.3 What the host checks and writes
 
@@ -644,7 +644,7 @@ At most 4 jobs may be open per connection. A document restarts from chunk 0 afte
 - **Handoff**: on `commitJob`, `<data dir>/handoff/pluryfact-<jobId>.json`, schema 1, `source: "pluryfact"`, the `action`, `profile_id`, the documents in order, and two optional fields any schema-1 reader may ignore: `label` and `overrides` (`printer`, `copies`, `duplex`, `color`, `paper`, `orientation`, `collate`, in the wire spelling of the profile fields). The app validates both like the rest of the file.
 - **Launch**: `pluryprint --invoke=context-menu --files-from <handoff> --action <a> [--profile <id>]`, the app next to the bridge, detached (own process group on macOS/Linux; `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`, plus `CREATE_BREAKAWAY_FROM_JOB` when the browser's job allows it, on Windows). If the app cannot be started the handoff is deleted, the reply is `launch_failed` and the job stays open.
 
-The app shows a selection whose `source` is `pluryfact` with a **From PluryFact** badge and the label: on the Print Job screen while every file in the job came from PluryFact (a batch that joins a job the user had already started, or a job the user drops more files into, is not labelled), and on each of its rows in the Queue (`Job.origin`). With `configure` the overrides pre-fill the Print Job settings, unless the job already had files: it then keeps its profile and settings and a toast says PluryFact's were not applied. With `queue`/`print-default` they are applied on top of the profile.
+The app shows a selection whose `source` is `pluryfact` with a **From Pluryfact** badge and the label: on the Print Job screen while every file in the job came from Pluryfact (a batch that joins a job the user had already started, or a job the user drops more files into, is not labelled), and on each of its rows in the Queue (`Job.origin`). With `configure` the overrides pre-fill the Print Job settings, unless the job already had files: it then keeps its profile and settings and a toast says Pluryfact's were not applied. With `queue`/`print-default` they are applied on top of the profile.
 
 ### 6.4 Registration
 
@@ -656,7 +656,7 @@ The manifest is `com.maecly.pluryprint.json`: `name`, `description`, `path` (abs
 | macOS | `~/Library/Application Support/{Google/Chrome, Microsoft Edge, BraveSoftware/Brave-Browser, Chromium}/NativeMessagingHosts/` | The app at every start, for each browser whose folder exists; idempotent; only from an installed `.app` bundle (never a development build) and never from an App Translocation path |
 | Linux | `~/.config/{google-chrome, microsoft-edge, BraveSoftware/Brave-Browser, chromium}/NativeMessagingHosts/` (`$XDG_CONFIG_HOME`) | `pluryprint bridge install` |
 
-`bridge install` with `--browser all` (the default) writes for the browsers found; a named browser is always written. Re-registering with `bridge install` (or **Reconnect** in Settings) keeps any extra origin a manifest already allows; `bridge uninstall` then `install` resets to PluryFact's origin only. **Windows exception:** the setup (every install and every update) rewrites the shared manifest from scratch with PluryFact's origin only, so it drops extra origins; run `pluryprint-cli bridge install --extra-origin <origin>` again after updating a development machine. Production loses nothing: PluryFact's origin is always there. `bridge status --json` prints one object per browser: `browser`, `detected`, `manifest_path`, `registered`, `points_here`, `binary_exists`, `allowed_origins`. The subcommand uses the existing exit codes (0; 1 when a manifest cannot be written or the bridge is not next to the CLI; 2 for an origin that is not `chrome-extension://<32 letters a-p>/`).
+`bridge install` with `--browser all` (the default) writes for the browsers found; a named browser is always written. Re-registering with `bridge install` (or **Reconnect** in Settings) keeps any extra origin a manifest already allows; `bridge uninstall` then `install` resets to Pluryfact's origin only. **Windows exception:** the setup (every install and every update) rewrites the shared manifest from scratch with Pluryfact's origin only, so it drops extra origins; run `pluryprint-cli bridge install --extra-origin <origin>` again after updating a development machine. Production loses nothing: Pluryfact's origin is always there. `bridge status --json` prints one object per browser: `browser`, `detected`, `manifest_path`, `registered`, `points_here`, `binary_exists`, `allowed_origins`. The subcommand uses the existing exit codes (0; 1 when a manifest cannot be written or the bridge is not next to the CLI; 2 for an origin that is not `chrome-extension://<32 letters a-p>/`).
 
 **Tests only:** `PLURYPRINT_BRIDGE_DATA_DIR=<absolute folder>` replaces the data folder (inbox, handoff, and a test manifest read for allowed origins) and turns logging off. Without it the bridge never reads a manifest from the app's data folder: the allowed origins come only from the browsers' manifests, so `bridge install --extra-origin` is the only way to add one and `bridge status`/`uninstall` see them all; `PLURYPRINT_BRIDGE_NO_LAUNCH=1` writes the handoff and answers `handed-off` without starting the app. Neither is meant for users.
 
@@ -666,4 +666,4 @@ The manifest is `com.maecly.pluryprint.json`: `name`, `description`, `path` (abs
 - [`data-model.md`](./data-model.md) — schemas referenced by these commands.
 - [`security-model.md`](./security-model.md) — capability narrowing and the network egress audit.
 - [`shell-extensions.md`](./shell-extensions.md) — who produces the `--files-from` handoff files.
-- [ADR-0016](../adr/0016-pluryfact-browser-bridge.md) — why PluryFact uses Native Messaging.
+- [ADR-0016](../adr/0016-pluryfact-browser-bridge.md) — why Pluryfact uses Native Messaging.
