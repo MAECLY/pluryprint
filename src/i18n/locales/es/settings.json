@@ -5,7 +5,8 @@
     "printing": "Impresión",
     "engine": "Motor",
     "updates": "Actualizaciones",
-    "privacy": "Privacidad"
+    "privacy": "Privacidad",
+    "browserIntegration": "Integración con navegadores"
   },
   "appearance": {
     "theme": {
@@ -115,6 +116,24 @@
     "htmlRendererRetired": {
       "title": "Las páginas web se imprimen ahora con el renderizador del sistema",
       "detail": "Tu config.toml pedía el renderizador Edge/Chrome sin interfaz para HTML, Markdown y texto. Esa opción se ha eliminado porque no podía mantener las páginas lejos de las carpetas compartidas de red de forma segura. Pluryprint usa ahora siempre la vista web del propio sistema operativo, que no necesita instalar nada; el resto de tus ajustes no cambia."
+    }
+  },
+  "browserIntegration": {
+    "intro": "PluryFact, la extensión del navegador que descarga tus comprobantes electrónicos del SRI, puede enviárselos a Pluryprint para imprimirlos. El navegador abre el puente de Pluryprint solo para PluryFact; nada escucha en la red.",
+    "loading": "Comprobando los navegadores…",
+    "unavailable": "El estado de la integración con navegadores solo está disponible en la app de escritorio.",
+    "translocated": "Pluryprint se está ejecutando desde una ubicación temporal (la imagen de disco o Descargas). Muévelo a la carpeta Aplicaciones y ábrelo desde ahí para que tus navegadores lo encuentren.",
+    "notInstalled": "Esta copia de Pluryprint no incluye el puente con el navegador. Reinstala Pluryprint.",
+    "reconnect": "Volver a conectar",
+    "reconnected": "Los navegadores se han vuelto a conectar con Pluryprint.",
+    "hint": "El instalador registra Chrome, Edge, Brave y Chromium para tu usuario.",
+    "hintMac": "Pluryprint registra cada navegador que encuentra cada vez que se abre.",
+    "hintLinux": "En Linux, ejecuta pluryprint bridge install después de instalar un navegador.",
+    "state": {
+      "connected": "Conectado",
+      "stale": "Hay que volver a conectar",
+      "notConnected": "Sin conectar",
+      "notFound": "No instalado"
     }
   }
 }

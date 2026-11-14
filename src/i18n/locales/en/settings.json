@@ -5,7 +5,8 @@
     "printing": "Printing",
     "engine": "Engine",
     "updates": "Updates",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "browserIntegration": "Browser integration"
   },
   "appearance": {
     "theme": {
@@ -115,6 +116,24 @@
     "htmlRendererRetired": {
       "title": "Web pages now print with the system renderer",
       "detail": "Your config.toml asked for the headless Edge/Chrome renderer for HTML, Markdown and text. That option has been removed because it could not keep pages away from network shares safely. Pluryprint now always uses the operating system's own web view, which needs nothing installed; your other settings are unchanged."
+    }
+  },
+  "browserIntegration": {
+    "intro": "PluryFact, the browser extension that downloads your electronic invoices from the SRI, can send them to Pluryprint to print. The browser starts Pluryprint's bridge only for PluryFact; nothing listens on the network.",
+    "loading": "Checking the browsers…",
+    "unavailable": "The browser integration status is only available in the desktop app.",
+    "translocated": "Pluryprint is running from a temporary location (the disk image or Downloads). Move it to the Applications folder and open it from there so your browsers can find it.",
+    "notInstalled": "This copy of Pluryprint does not include the browser bridge. Reinstall Pluryprint.",
+    "reconnect": "Reconnect",
+    "reconnected": "Browsers reconnected to Pluryprint.",
+    "hint": "The installer registers Chrome, Edge, Brave and Chromium for your user.",
+    "hintMac": "Pluryprint registers every browser it finds each time it starts.",
+    "hintLinux": "On Linux, run pluryprint bridge install after installing a browser.",
+    "state": {
+      "connected": "Connected",
+      "stale": "Needs reconnecting",
+      "notConnected": "Not connected",
+      "notFound": "Not installed"
     }
   }
 }
