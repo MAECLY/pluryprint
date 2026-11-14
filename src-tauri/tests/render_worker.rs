@@ -1115,3 +1115,136 @@ fn nfr_security_webkits_own_limit_holds_the_web_process_without_a_watchdog() {
     assert!(!dir.path().join("out.pdf").exists());
     assert!(started.elapsed() < Duration::from_secs(60));
 }
+
+// ---------------------------------------------------------------------------
+// FR-057a / FR-057b: XML through the real web view
+// ---------------------------------------------------------------------------
+
+/// The fictitious SRI receipts of `tests/fixtures/sri-xml/`, each with words
+/// its printed page must carry.
+const SRI_FIXTURES: &[(&str, &[&str])] = &[
+    (
+        "factura-1.1.0-autorizacion.xml",
+        &["Factura", "001-002-000000123", "207.88", "Subtotal 15%"],
+    ),
+    (
+        "factura-1.0.0-respuesta-soap.xml",
+        &["Factura", "IVA 12%", "11.20"],
+    ),
+    ("factura-2.0.0-no-autorizado.xml", &["NO AUTORIZADO"]),
+    ("factura-2.1.0.xml", &["IVA 5%", "ICE", "46.73"]),
+    ("nota-credito-1.1.0.xml", &["Nota de crédito", "41.69"]),
+    ("nota-credito-1.0.0.xml", &["Nota de crédito", "11.50"]),
+    (
+        "nota-debito-1.0.0.xml",
+        &["Nota de débito", "13.80", "Gastos de cobranza"],
+    ),
+    (
+        "retencion-1.0.0.xml",
+        &["Comprobante de retención", "62.50", "001-001-000004567"],
+    ),
+    (
+        "retencion-2.0.0.xml",
+        &["Comprobante de retención", "40.38"],
+    ),
+    (
+        "guia-remision-1.1.0.xml",
+        &["Guía de remisión", "GAA-0000", "Guayaquil - Cuenca"],
+    ),
+    ("guia-remision-1.0.0.xml", &["Guía de remisión", "GBB-1111"]),
+    (
+        "liquidacion-compra-1.1.0.xml",
+        &["Liquidación de compra", "300.00"],
+    ),
+    (
+        "liquidacion-compra-1.0.0.xml",
+        &["Liquidación de compra", "50.00"],
+    ),
+    (
+        "catalogo-generico.xml",
+        &["cat:catalogo", "Taladro percutor"],
+    ),
+];
+
+/// Where `PLURYPRINT_XML_SAMPLES` asks the sample PDFs to be kept (for the
+/// docs and the PR), if anywhere.
+fn keep_sample(pdf: &Path, name: &str) {
+    if let Some(dir) = std::env::var_os("PLURYPRINT_XML_SAMPLES") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(pdf, dir.join(name.replace(".xml", ".pdf"))).unwrap();
+    }
+}
+
+#[test]
+fn fr_057b_sri_receipts_print_as_ride_pages_on_a4() {
+    if !can_render() {
+        return;
+    }
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sri-xml");
+    let dir = tempfile::tempdir().unwrap();
+    for (name, needles) in SRI_FIXTURES {
+        let input = dir.path().join(name);
+        std::fs::copy(fixtures.join(name), &input).unwrap();
+        // Paper `auto`: an XML page is laid out on A4.
+        let pdf = convert(&input, &PageSetup::default()).unwrap();
+        assert!(pages(&pdf) >= 1, "{name}");
+        assert_eq!(first_page_size(&pdf), (595, 842), "{name}: A4 by default");
+        if let Some(text) = pdf_text(&pdf) {
+            for needle in *needles {
+                assert!(
+                    text.contains(needle),
+                    "{name}: {needle} is printed:\n{text}"
+                );
+            }
+        }
+        keep_sample(&pdf, name);
+    }
+}
+
+#[test]
+fn fr_057b_an_xml_page_follows_the_jobs_paper_and_fetches_nothing() {
+    if !can_render() {
+        return;
+    }
+    let wire = Tripwire::new();
+    let port = wire.port();
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("hostil.xml");
+    std::fs::write(
+        &input,
+        format!(
+            "<?xml-stylesheet href=\"http://127.0.0.1:{port}/x.xsl\"?>\
+             <r xmlns:xi=\"http://www.w3.org/2001/XInclude\">\
+             <xi:include href=\"http://127.0.0.1:{port}/inc\"/>\
+             <img src=\"http://127.0.0.1:{port}/img.png\"/>\
+             <t>&lt;img src=\"http://127.0.0.1:{port}/esc.png\"&gt;</t></r>"
+        ),
+    )
+    .unwrap();
+    let letter = PageSetup {
+        css_size: Some("8.5in 11in".into()),
+    };
+    let pdf = convert(&input, &letter).unwrap();
+    assert_eq!(first_page_size(&pdf), (612, 792), "the job's paper wins");
+    std::thread::sleep(Duration::from_millis(300));
+    wire.assert_untouched();
+}
+
+#[test]
+fn fr_057a_a_hostile_xml_fails_with_its_reason_before_rendering() {
+    setup();
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("lolz.xml");
+    std::fs::write(
+        &input,
+        "<!DOCTYPE l [<!ENTITY a \"aaaa\"><!ENTITY b \"&a;&a;&a;&a;\">]><l>&b;</l>",
+    )
+    .unwrap();
+    let err = convert(&input, &a4()).unwrap_err();
+    assert!(
+        matches!(&err, EngineError::ConversionFailed(f) if f.reason == Some("xml_dtd_refused")),
+        "{err:?}"
+    );
+    assert!(!dir.path().join("cache").join("job-lolz.pdf").exists());
+}

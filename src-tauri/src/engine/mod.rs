@@ -35,14 +35,15 @@ pub mod print;
 /// converter (see [`convert::route`]): PDF passthrough; raster images (the
 /// in-process `image` codecs); HEIC/HEIF (the OS decoder); SVG/SVGZ (vector,
 /// in-process); Office, OpenDocument and RTF (LibreOffice); TXT, HTML and
-/// Markdown (the system web view). GIF is deliberately absent (decision D9):
+/// Markdown (the system web view); XML (an SRI receipt as a RIDE-like page,
+/// anything else as a tree, then the web view). GIF is deliberately absent (decision D9):
 /// it is refused with its own reason, `gif_not_supported`. A format whose converter is not installed is accepted:
 /// its job pauses with the FR-058 remediation instead of being refused at drop
 /// time. The UI mirrors this list in `src/lib/formats.ts` (a test diffs them).
 pub const SUPPORTED_EXTS: &[&str] = &[
     "pdf", "jpg", "jpeg", "png", "tif", "tiff", "bmp", "webp", "heic", "heif", "svg", "svgz",
     "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "txt", "html", "htm",
-    "md", "markdown",
+    "md", "markdown", "xml",
 ];
 
 /// Whether `ext` (with or without a leading dot, any case) names a format the

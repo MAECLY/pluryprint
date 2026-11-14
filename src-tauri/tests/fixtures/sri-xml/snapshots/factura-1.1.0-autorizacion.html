@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>factura-1.1.0-autorizacion.xml</title>
+<style>
+* { box-sizing: border-box; }
+html { font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
+  font-size: 8.3pt; line-height: 1.32; color: #000; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; }
+.mono { font-family: "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; }
+.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.muted { color: #4a4a4a; }
+.nowrap, table.lines td.nowrap { white-space: nowrap; overflow-wrap: normal; }
+.box { border: 0.75pt solid #000; border-radius: 2.2mm; padding: 2.6mm 3mm; break-inside: avoid; }
+.head { display: flex; gap: 3mm; align-items: stretch; }
+.issuer { flex: 1 1 50%; display: flex; flex-direction: column; gap: 2.4mm; }
+.issuer .name { font-size: 13pt; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.issuer .trade { font-size: 9.5pt; margin-top: 0.8mm; overflow-wrap: anywhere; }
+.issuer .facts { margin-top: auto; }
+.doc { flex: 1 1 50%; }
+.doc .ruc { font-size: 10.5pt; }
+.doc .ruc b { font-weight: 700; margin-right: 1.5mm; }
+.doc .type { font-size: 14.5pt; font-weight: 700; line-height: 1.1; margin: 1.4mm 0 0.6mm; }
+.doc .no { font-size: 10.5pt; margin-bottom: 2mm; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; column-gap: 2.6mm; row-gap: 0.5mm; margin: 0; }
+dl.facts dt { color: #4a4a4a; }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+dl.facts.two { grid-template-columns: max-content 1fr max-content 1fr; }
+.auth { margin-bottom: 1.2mm; }
+.auth .label, .key .label { color: #4a4a4a; margin-bottom: 0.4mm; }
+.auth .authno { font-size: 7.4pt; letter-spacing: 0.01em; white-space: nowrap; }
+.key { margin-top: 2.2mm; }
+.key svg.barcode { display: block; width: 100%; margin-top: 0.6mm; }
+.key .segs { display: flex; justify-content: space-between; margin-top: 0.9mm; padding-bottom: 2.6mm; }
+.key .seg { position: relative; }
+.key .seg b { font-weight: 400; font-size: 6.9pt; letter-spacing: 0.01em; }
+.key .seg i { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); white-space: nowrap;
+  font-style: normal; font-size: 5pt; color: #4a4a4a; margin-top: 0.1mm; }
+.key .seg:last-child i, .key .seg:nth-last-child(2) i { left: auto; right: 0; transform: none; }
+.key .whole { font-size: 7.4pt; margin-top: 1mm; overflow-wrap: anywhere; }
+.party { margin-top: 3mm; }
+.alert { margin-top: 3mm; border: 1.5pt solid #000; border-radius: 2.2mm; padding: 2mm 3mm; font-weight: 700; }
+table.lines { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+table.lines thead { display: table-header-group; }
+table.lines th { font-weight: 700; font-size: 7.4pt; text-align: left; vertical-align: bottom;
+  background: #ececec; border-top: 0.75pt solid #000; border-bottom: 0.75pt solid #000; padding: 1.1mm 1.4mm; }
+table.lines th.n { text-align: right; }
+table.lines td { padding: 1mm 1.4mm; border-bottom: 0.4pt solid #b4b4b4; vertical-align: top; overflow-wrap: anywhere; }
+table.lines tr { break-inside: avoid; }
+table.lines td .extra { color: #4a4a4a; font-size: 7.2pt; margin-top: 0.3mm; }
+table.lines tr.group td { background: #f4f4f4; border-bottom: 0.75pt solid #000; padding-top: 1.4mm; }
+.section { margin-top: 3.5mm; }
+.section h2 { font-size: 8.6pt; font-weight: 700; margin: 0 0 1mm; }
+.foot { display: flex; gap: 3mm; margin-top: 3mm; align-items: flex-start; break-inside: avoid; }
+.foot .left { flex: 1 1 56%; display: flex; flex-direction: column; gap: 3mm; }
+.foot .right { flex: 0 0 42%; margin-left: auto; }
+table.totals { width: 100%; border-collapse: collapse; border-top: 0.75pt solid #000; }
+table.totals td { padding: 0.75mm 1.4mm; border-bottom: 0.4pt solid #b4b4b4; }
+table.totals tr.grand td { font-weight: 700; font-size: 9.6pt; border-top: 1pt solid #000; border-bottom: 1pt solid #000; padding: 1.3mm 1.4mm; }
+table.plain { width: 100%; border-collapse: collapse; }
+table.plain th { text-align: left; font-weight: 700; font-size: 7.4pt; border-bottom: 0.75pt solid #000; padding: 0.6mm 1.2mm 0.8mm; }
+table.plain th.n { text-align: right; }
+table.plain td { padding: 0.7mm 1.2mm; border-bottom: 0.4pt solid #b4b4b4; vertical-align: top; overflow-wrap: anywhere; }
+.note { margin-top: 5mm; padding-top: 1.4mm; border-top: 0.4pt solid #8a8a8a; font-size: 6.8pt; color: #333; }
+</style>
+</head><body>
+<div class="head">
+<div class="box issuer">
+<div><div class="name">COMERCIAL ANDINA DE PRUEBAS S.A. &amp; ASOCIADOS</div><div class="trade">Ferretería La Prueba</div></div>
+<dl class="facts"><dt>Dirección matriz</dt><dd>Av. Ficticia 123 y Calle Imaginaria, Guayaquil</dd><dt>Dirección sucursal</dt><dd>Sucursal Norte, Av. de Prueba 456, Guayaquil</dd><dt>Contribuyente especial Nro.</dt><dd>12345</dd><dt>Obligado a llevar contabilidad</dt><dd>SI</dd><dt>Régimen</dt><dd>CONTRIBUYENTE RÉGIMEN RIMPE</dd></dl>
+</div>
+<div class="box doc">
+<div class="ruc"><b>R.U.C.</b><span class="mono">0999999999001</span></div>
+<div class="type">Factura</div>
+<div class="no">No. <span class="mono">001-002-000000123</span></div>
+<div class="auth"><div class="label">Número de autorización</div><div class="authno mono">1510202601099999999900120010020000001231234567815</div></div>
+<dl class="facts"><dt>Fecha y hora de autorización</dt><dd>15/10/2026 10:24:31 -05:00</dd><dt>Ambiente</dt><dd>Producción</dd><dt>Emisión</dt><dd>Normal</dd></dl>
+<div class="key"><div class="label">Clave de acceso</div><svg class="barcode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 341 40" preserveAspectRatio="none" shape-rendering="crispEdges" role="img" aria-label="Code 128" style="height:11mm"><g fill="#000"><rect x="10" y="0" width="2" height="40"/><rect x="13" y="0" width="1" height="40"/><rect x="16" y="0" width="3" height="40"/><rect x="21" y="0" width="1" height="40"/><rect x="23" y="0" width="3" height="40"/><rect x="28" y="0" width="2" height="40"/><rect x="32" y="0" width="2" height="40"/><rect x="36" y="0" width="1" height="40"/><rect x="40" y="0" width="1" height="40"/><rect x="43" y="0" width="2" height="40"/><rect x="47" y="0" width="1" height="40"/><rect x="50" y="0" width="3" height="40"/><rect x="54" y="0" width="3" height="40"/><rect x="59" y="0" width="1" height="40"/><rect x="62" y="0" width="2" height="40"/><rect x="65" y="0" width="2" height="40"/><rect x="69" y="0" width="2" height="40"/><rect x="72" y="0" width="2" height="40"/><rect x="76" y="0" width="2" height="40"/><rect x="80" y="0" width="1" height="40"/><rect x="83" y="0" width="1" height="40"/><rect x="87" y="0" width="1" height="40"/><rect x="89" y="0" width="3" height="40"/><rect x="93" y="0" width="4" height="40"/><rect x="98" y="0" width="1" height="40"/><rect x="100" y="0" width="3" height="40"/><rect x="104" y="0" width="4" height="40"/><rect x="109" y="0" width="1" height="40"/><rect x="111" y="0" width="3" height="40"/><rect x="115" y="0" width="4" height="40"/><rect x="120" y="0" width="1" height="40"/><rect x="122" y="0" width="3" height="40"/><rect x="126" y="0" width="4" height="40"/><rect x="131" y="0" width="2" height="40"/><rect x="134" y="0" width="2" height="40"/><rect x="138" y="0" width="2" height="40"/><rect x="142" y="0" width="1" height="40"/><rect x="144" y="0" width="2" height="40"/><rect x="148" y="0" width="3" height="40"/><rect x="153" y="0" width="2" height="40"/><rect x="156" y="0" width="2" height="40"/><rect x="160" y="0" width="2" height="40"/><rect x="164" y="0" width="2" height="40"/><rect x="168" y="0" width="1" height="40"/><rect x="172" y="0" width="1" height="40"/><rect x="175" y="0" width="2" height="40"/><rect x="179" y="0" width="2" height="40"/><rect x="183" y="0" width="2" height="40"/><rect x="186" y="0" width="2" height="40"/><rect x="189" y="0" width="2" height="40"/><rect x="193" y="0" width="2" height="40"/><rect x="197" y="0" width="2" height="40"/><rect x="200" y="0" width="2" height="40"/><rect x="204" y="0" width="2" height="40"/><rect x="208" y="0" width="2" height="40"/><rect x="211" y="0" width="2" height="40"/><rect x="215" y="0" width="2" height="40"/><rect x="219" y="0" width="1" height="40"/><rect x="221" y="0" width="2" height="40"/><rect x="225" y="0" width="3" height="40"/><rect x="230" y="0" width="2" height="40"/><rect x="233" y="0" width="2" height="40"/><rect x="238" y="0" width="2" height="40"/><rect x="241" y="0" width="3" height="40"/><rect x="245" y="0" width="2" height="40"/><rect x="248" y="0" width="3" height="40"/><rect x="252" y="0" width="1" height="40"/><rect x="254" y="0" width="3" height="40"/><rect x="258" y="0" width="2" height="40"/><rect x="263" y="0" width="1" height="40"/><rect x="268" y="0" width="1" height="40"/><rect x="270" y="0" width="2" height="40"/><rect x="274" y="0" width="1" height="40"/><rect x="277" y="0" width="1" height="40"/><rect x="279" y="0" width="4" height="40"/><rect x="285" y="0" width="1" height="40"/><rect x="287" y="0" width="4" height="40"/><rect x="292" y="0" width="3" height="40"/><rect x="296" y="0" width="2" height="40"/><rect x="299" y="0" width="3" height="40"/><rect x="304" y="0" width="1" height="40"/><rect x="307" y="0" width="2" height="40"/><rect x="311" y="0" width="1" height="40"/><rect x="314" y="0" width="3" height="40"/><rect x="318" y="0" width="2" height="40"/><rect x="323" y="0" width="3" height="40"/><rect x="327" y="0" width="1" height="40"/><rect x="329" y="0" width="2" height="40"/></g></svg><div class="segs mono"><span class="seg"><b>15102026</b><i>fecha</i></span><span class="seg"><b>01</b><i>tipo</i></span><span class="seg"><b>0999999999001</b><i>RUC</i></span><span class="seg"><b>2</b><i>amb.</i></span><span class="seg"><b>001002</b><i>serie</i></span><span class="seg"><b>000000123</b><i>secuencial</i></span><span class="seg"><b>12345678</b><i>código</i></span><span class="seg"><b>1</b><i>em.</i></span><span class="seg"><b>5</b><i>DV</i></span></div></div>
+</div>
+</div>
+<div class="box party"><dl class="facts"><dt>Razón social / Nombres y apellidos</dt><dd>CLIENTE FICTICIO CÍA. LTDA.</dd><dt>RUC</dt><dd>0999999999001</dd><dt>Dirección</dt><dd>Calle Inventada 789, Quito</dd><dt>Fecha de emisión</dt><dd>15/10/2026</dd><dt>Guía de remisión</dt><dd>001-002-000000045</dd></dl></div>
+<table class="lines"><thead><tr><th>Cód. principal</th><th>Cód. auxiliar</th><th class="n">Cantidad</th><th>Descripción</th><th class="n">Precio unitario</th><th class="n">Descuento</th><th class="n">Precio total</th></tr></thead><tbody>
+<tr><td class="mono">TAL-001</td><td class="mono">7861234500011</td><td class="n">1.00</td><td>Taladro percutor 600 W<div class="extra">Garantía: 12 meses</div></td><td class="n">95.00</td><td class="n">5.00</td><td class="n">90.00</td></tr>
+<tr><td class="mono">BRO-010</td><td class="mono"></td><td class="n">2.00</td><td>Juego de brocas para concreto, 10 piezas</td><td class="n">36.25</td><td class="n">1.50</td><td class="n">71.00</td></tr>
+<tr><td class="mono">CIN-003</td><td class="mono"></td><td class="n">1.50</td><td>Cinta métrica 5 m</td><td class="n">1.00</td><td class="n">0.00</td><td class="n">1.50</td></tr>
+<tr><td class="mono">LIB-200</td><td class="mono"></td><td class="n">1.00</td><td>Manual de bricolaje (libro, IVA 0%)</td><td class="n">21.00</td><td class="n">0.00</td><td class="n">21.00</td></tr>
+</tbody></table>
+<div class="foot"><div class="left"><div class="box"><div class="section" style="margin:0"><h2>Información adicional</h2><dl class="facts"><dt>Email</dt><dd>compras@cliente-ficticio.ec</dd><dt>Teléfono</dt><dd>04-000-0000</dd><dt>Observación</dt><dd>Datos de prueba: comprobante ficticio para Pluryprint</dd></dl></div></div><table class="plain"><thead><tr><th>Forma de pago</th><th class="n">Valor</th><th class="n">Plazo</th></tr></thead><tbody><tr><td>Otros con utilización del sistema financiero</td><td class="n">150.00</td><td class="n">30 días</td></tr><tr><td>Sin utilización del sistema financiero</td><td class="n">57.88</td><td class="n"></td></tr></tbody></table></div><div class="right"><table class="totals"><tr><td>Subtotal 15%</td><td class="n">162.50</td></tr><tr><td>Subtotal 0%</td><td class="n">21.00</td></tr><tr><td>Subtotal sin impuestos</td><td class="n">183.50</td></tr><tr><td>Total descuento</td><td class="n">6.50</td></tr><tr><td>ICE</td><td class="n">0.00</td></tr><tr><td>IVA 15%</td><td class="n">24.38</td></tr><tr><td>Propina</td><td class="n">0.00</td></tr><tr class="grand"><td>Valor total</td><td class="n">207.88</td></tr></table></div></div>
+<div class="note">Representación impresa generada por Pluryprint a partir del XML autorizado. <span class="muted">Factura, esquema 1.1.0</span></div>
+</body></html>

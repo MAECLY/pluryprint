@@ -384,7 +384,7 @@ pub fn wait_with_timeout(
 /// The settings that actually apply to an input with extension `input_ext`.
 ///
 /// Page ranges apply to paged documents: PDFs, and the documents converted to
-/// one (Office, OpenDocument, TXT, RTF, HTML, Markdown — the range selects
+/// one (Office, OpenDocument, TXT, RTF, HTML, Markdown, XML — the range selects
 /// pages of the converted PDF). A picture is rasterised into a single-page PDF,
 /// so forwarding a range like `2-3` to the spooler would print nothing at all —
 /// a silent empty job. The UI already promises "images ignore the range"
@@ -395,7 +395,14 @@ pub fn effective_settings<'a>(settings: &'a JobSettings, input_ext: &str) -> Cow
     use crate::engine::convert::{route, Route};
     let paged = matches!(
         route(input_ext),
-        Some(Route::Passthrough | Route::Office | Route::Html | Route::Markdown | Route::Text)
+        Some(
+            Route::Passthrough
+                | Route::Office
+                | Route::Html
+                | Route::Markdown
+                | Route::Text
+                | Route::Xml
+        )
     );
     if paged || settings.page_ranges.is_none() {
         return Cow::Borrowed(settings);
@@ -815,7 +822,7 @@ mod tests {
         assert_eq!(pdf.page_ranges.as_deref(), Some("2-3"), "PDFs keep it");
 
         // Converted documents are paged: the range selects pages of their PDF.
-        for ext in ["docx", "ODT", "txt", "html", "md"] {
+        for ext in ["docx", "ODT", "txt", "html", "md", "xml"] {
             let doc = effective_settings(&settings, ext);
             assert_eq!(doc.page_ranges.as_deref(), Some("2-3"), "{ext} keeps it");
         }

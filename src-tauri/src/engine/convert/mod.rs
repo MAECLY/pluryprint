@@ -15,6 +15,7 @@
 //! | [`Route::Html`] | [`html::HTML_EXTS`] | the system web view (render worker) |
 //! | [`Route::Markdown`] | [`markdown::MARKDOWN_EXTS`] | Markdown → HTML → the HTML route |
 //! | [`Route::Text`] | [`text::TEXT_EXTS`] | decoded text → HTML → the HTML route |
+//! | [`Route::Xml`] | [`xml::XML_EXTS`] | SRI receipt → RIDE-like page, any other XML → tree; HTML → the HTML route |
 //!
 //! A PDF is inspected for encryption first ([`pdf_security`], FR-059): one
 //! that needs a password is refused with [`EngineError::PdfProtected`] unless
@@ -46,6 +47,7 @@ pub mod process;
 pub mod rtf_mac;
 pub mod svg;
 pub mod text;
+pub mod xml;
 
 #[cfg(test)]
 mod external_tests;
@@ -59,6 +61,7 @@ pub use markdown::MARKDOWN_EXTS;
 pub use office::OFFICE_EXTS;
 pub use svg::SVG_EXTS;
 pub use text::TEXT_EXTS;
+pub use xml::XML_EXTS;
 
 /// The page geometry a converter that lays pages out itself must honour.
 ///
@@ -166,6 +169,9 @@ pub enum Route {
     Svg,
     /// Plain text, decoded and laid out as an HTML page (FR-057).
     Text,
+    /// XML: an SRI electronic receipt as a RIDE-like page (FR-057b), any
+    /// other XML as a readable tree (FR-057a), then the HTML route.
+    Xml,
 }
 
 /// The converter for an extension (with or without a dot, any case), or
@@ -189,6 +195,8 @@ pub fn route(ext: &str) -> Option<Route> {
         Some(Route::Html)
     } else if MARKDOWN_EXTS.contains(&ext) {
         Some(Route::Markdown)
+    } else if XML_EXTS.contains(&ext) {
+        Some(Route::Xml)
     } else {
         None
     }
@@ -262,7 +270,7 @@ impl WorkDir {
 /// each external converter on its own; the dispatcher additionally raises
 /// `cancel` when its conversion timeout fires. `progress` receives
 /// `0.0..=1.0` updates. `page` is the paper the job prints on, which the
-/// web-view converters (HTML, Markdown, text) lay their pages out to.
+/// web-view converters (HTML, Markdown, text, XML) lay their pages out to.
 ///
 /// `password` opens an encrypted PDF (FR-059). Without one, such a PDF fails
 /// with [`EngineError::PdfProtected`]`(`[`super::PdfProtection::PasswordRequired`]`)`;
@@ -447,6 +455,13 @@ fn run_route(
             let work = WorkDir::new(job_id)?;
             progress(0.0);
             text::convert(input, output, &work, cancel, timeout, page)?;
+            progress(1.0);
+            Ok(())
+        }
+        Route::Xml => {
+            let work = WorkDir::new(job_id)?;
+            progress(0.0);
+            xml::convert(input, output, &work, cancel, timeout, page)?;
             progress(1.0);
             Ok(())
         }
@@ -1045,6 +1060,7 @@ mod tests {
             .chain(MARKDOWN_EXTS)
             .chain(SVG_EXTS)
             .chain(TEXT_EXTS)
+            .chain(XML_EXTS)
             .chain(&["pdf"]);
         for ext in routed {
             assert!(
@@ -1059,6 +1075,7 @@ mod tests {
         assert_eq!(route("SVGZ"), Some(Route::Svg));
         assert_eq!(route("txt"), Some(Route::Text));
         assert_eq!(route("rtf"), Some(Route::Office));
+        assert_eq!(route("XML"), Some(Route::Xml));
         assert_eq!(route("exe"), None);
     }
 

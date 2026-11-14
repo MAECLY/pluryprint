@@ -201,7 +201,11 @@
         "render_no_display": "Pages are laid out with the desktop's web view, which needs a graphical session (X11 or Wayland), and none was available. Print the file again from your desktop session.",
         "share_reference_refused": "The page used a file on a network share, which Pluryprint does not load. Pages now always print with the system renderer, which leaves such files out: print it again.",
         "page_not_checkable": "Pluryprint could not prepare this page safely for printing: its start is malformed (for example, a <!DOCTYPE> that never ends), so its security policy could not be placed first. Fix the start of the page, or save it again from a browser or editor, and print it again.",
-        "text_unreadable": "The text file could not be read as text."
+        "text_unreadable": "The text file could not be read as text.",
+        "xml_invalid": "This XML file is damaged or is not well-formed XML, so it cannot be printed.",
+        "xml_dtd_refused": "This XML file declares a DTD (<!DOCTYPE …>). Pluryprint does not process DTDs, for safety, so it is not printed.",
+        "xml_too_large": "This XML file is too large to print (limit: {{limit}} MB or 200,000 nodes).",
+        "xml_too_deep": "This XML file nests elements more than {{limit}} levels deep, so it is not printed."
       },
       "print_failed": {
         "sumatra_start_failed": "SumatraPDF could not be started.",
