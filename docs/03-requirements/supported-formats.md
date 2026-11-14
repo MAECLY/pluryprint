@@ -167,7 +167,7 @@ A Markdown file is text, and printing it must not make it active content:
 
 ### XML
 
-`engine::convert::xml` (FR-057a, FR-057b, [ADR-0017](../adr/0017-print-sri-xml-as-ride.md)) reads the file with `roxmltree` and writes an HTML page for the renderer above. The text is decoded first: a byte-order mark (UTF-8, UTF-16), else UTF-8, else Windows-1252 only when the declaration says ISO-8859-1, Latin-1 or Windows-1252.
+`engine::convert::xml` (FR-057a, FR-057b, [ADR-0017](../adr/0017-print-sri-xml-as-ride.md)) reads the file with `roxmltree` and writes an HTML page for the renderer above. The text is decoded first: a byte-order mark (UTF-8, UTF-16); else Windows-1252 when the declaration says ISO-8859-1, Latin-1 or Windows-1252 (the declaration governs, even over bytes that would also read as UTF-8); else strict UTF-8.
 
 **An Ecuadorian SRI electronic receipt prints as a RIDE-like representation.** Recognised shapes: the `<autorizacion>` the SRI web service and portal hand out (and Pluryfact saves), with the receipt inside `<comprobante>` as CDATA or escaped text; the whole `RespuestaAutorizacionComprobante`, bare or in its SOAP envelope (the `AUTORIZADO` entry is used, else the first); a bare signed receipt. Fields are found by local name, so namespace prefixes and the `ds:Signature` do not matter.
 

@@ -618,6 +618,17 @@ fn fr_057a_encodings() {
     // Declared ISO-8859-1.
     let latin = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><f>a\xf1o</f>";
     assert!(to_html(latin, "x.xml", Lang::Es).unwrap().contains("año"));
+    // The declaration governs even when the Latin-1 bytes also happen to be
+    // valid UTF-8: 0xC3 0xB1 is "Ã±" in ISO-8859-1, not "ñ".
+    let both = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><f>a\xc3\xb1o</f>";
+    assert!(std::str::from_utf8(both).is_ok());
+    let page = to_html(both, "x.xml", Lang::Es).unwrap();
+    assert!(page.contains("aÃ±o"), "{page}");
+    assert!(!page.contains("año"));
+    // Undeclared or declared UTF-8: UTF-8, strictly.
+    let utf8 = "<?xml version=\"1.0\" encoding='UTF-8'?><f>año</f>".as_bytes();
+    assert!(to_html(utf8, "x.xml", Lang::Es).unwrap().contains("año"));
+    assert!(to_html(b"<f>a\xf1o</f>", "x.xml", Lang::Es).is_err());
     // The prolog walk.
     assert!(declares_dtd(
         "\u{FEFF}<?xml version=\"1.0\"?>\n<!DOCTYPE x><x/>"

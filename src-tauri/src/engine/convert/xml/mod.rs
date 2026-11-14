@@ -150,10 +150,11 @@ pub fn escape(s: &str) -> String {
     out
 }
 
-/// The text of an XML file: a byte-order mark (UTF-8, UTF-16 LE/BE) first,
-/// else UTF-8, else — only when the declaration says ISO-8859-1, Latin-1 or
-/// Windows-1252 — Windows-1252. Anything else is not text this converter
-/// reads. Pure.
+/// The text of an XML file: a byte-order mark (UTF-8, UTF-16 LE/BE) first;
+/// else, when the declaration says ISO-8859-1, Latin-1 or Windows-1252,
+/// Windows-1252 — even if the bytes would also read as UTF-8, because the
+/// declaration governs (XML 1.0, appendix F); else UTF-8. Anything else is
+/// not text this converter reads. Pure.
 pub fn decode(bytes: &[u8]) -> Result<String, XmlError> {
     if let Some((encoding, bom)) = encoding_rs::Encoding::for_bom(bytes) {
         let (text, had_errors) = encoding.decode_without_bom_handling(&bytes[bom..]);
@@ -164,12 +165,26 @@ pub fn decode(bytes: &[u8]) -> Result<String, XmlError> {
         }
         return Ok(text.into_owned());
     }
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        return Ok(text.to_owned());
+    if matches!(
+        declared_encoding(bytes).as_str(),
+        "iso-8859-1" | "latin1" | "latin-1" | "iso8859-1" | "windows-1252" | "cp1252"
+    ) {
+        return Ok(encoding_rs::WINDOWS_1252
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned());
     }
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|_| XmlError::Invalid("the file is not UTF-8 text".into()))
+}
+
+/// The encoding the XML declaration at the very start of `bytes` names,
+/// lower-cased; empty when there is no declaration or it names none. The
+/// declaration is ASCII in every encoding this converter reads. Pure.
+fn declared_encoding(bytes: &[u8]) -> String {
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(200)]).to_ascii_lowercase();
-    let declared = head
-        .strip_prefix("<?xml")
+    head.strip_prefix("<?xml")
         .and_then(|rest| rest.split("?>").next())
         .and_then(|decl| decl.split("encoding").nth(1))
         .map(|v| {
@@ -179,17 +194,7 @@ pub fn decode(bytes: &[u8]) -> Result<String, XmlError> {
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
                 .collect::<String>()
         })
-        .unwrap_or_default();
-    if matches!(
-        declared.as_str(),
-        "iso-8859-1" | "latin1" | "latin-1" | "iso8859-1" | "windows-1252" | "cp1252"
-    ) {
-        return Ok(encoding_rs::WINDOWS_1252
-            .decode_without_bom_handling(bytes)
-            .0
-            .into_owned());
-    }
-    Err(XmlError::Invalid("the file is not UTF-8 text".into()))
+        .unwrap_or_default()
 }
 
 /// Whether the prolog of `text` declares a DTD. A `<!DOCTYPE` may only stand
