@@ -1,4 +1,5 @@
 import {
+  MPBadge,
   MPButton,
   MPCard,
   MPIconButton,
@@ -76,6 +77,7 @@ import {
   subscribePendingFolders,
 } from '@/lib/jobFiles';
 import type { Density } from '@/lib/theme';
+import type { JobOrigin } from '@/lib/selectionSource';
 import type { UiFile, UiProfile } from '@/types/domain';
 
 // Re-exported for callers that still import the override shape from the screen
@@ -159,6 +161,11 @@ interface PrintJobScreenProps {
   setCopiesDraft?: (draft: string | null) => void;
   density?: Density;
   onPrint?: () => void;
+  /**
+   * FR-124: the batch came from an integration the screen names ("From
+   * PluryFact"), with that integration's label for it.
+   */
+  origin?: JobOrigin | null;
 }
 
 export function PrintJobScreen({
@@ -172,6 +179,7 @@ export function PrintJobScreen({
   setCopiesDraft: setDraftProp,
   density = 'comfortable',
   onPrint,
+  origin = null,
 }: PrintJobScreenProps) {
   const t = useT('printJob');
   // macOS labels the modifier Option (⌥), everywhere else it is Alt.
@@ -667,7 +675,19 @@ export function PrintJobScreen({
       )}
       <MPTopBar
         title={t('title')}
-        subtitle={summary}
+        subtitle={
+          origin ? (
+            <span data-testid="job-origin">
+              <MPBadge tone="accent">
+                {tCommon('selection.fromPluryfact')}
+              </MPBadge>{' '}
+              {origin.label ? `${origin.label} · ` : ''}
+              {summary}
+            </span>
+          ) : (
+            summary
+          )
+        }
         right={
           <>
             <MPButton

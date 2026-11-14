@@ -40,7 +40,8 @@
     "profilesUnreadableNotPrinted": "No se han podido leer tus perfiles ({{reason}}), así que no se ha impreso nada. Los archivos están en la pantalla Trabajo de impresión."
   },
   "selection": {
-    "truncated": "Solo han llegado a Pluryprint los primeros {{sent}} de los {{total}} elementos seleccionados. Selecciona el resto por separado para imprimirlos."
+    "truncated": "Solo han llegado a Pluryprint los primeros {{sent}} de los {{total}} elementos seleccionados. Selecciona el resto por separado para imprimirlos.",
+    "fromPluryfact": "Desde PluryFact"
   },
   "shellMenu": {
     "print_one": "Imprimir 1 archivo",

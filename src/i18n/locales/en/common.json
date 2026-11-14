@@ -40,7 +40,8 @@
     "profilesUnreadableNotPrinted": "Your profiles could not be read ({{reason}}), so nothing was printed. The files are on the Print Job screen."
   },
   "selection": {
-    "truncated": "Only the first {{sent}} of the {{total}} selected items reached Pluryprint. Select the rest separately to print them."
+    "truncated": "Only the first {{sent}} of the {{total}} selected items reached Pluryprint. Select the rest separately to print them.",
+    "fromPluryfact": "From PluryFact"
   },
   "shellMenu": {
     "print_one": "Print 1 file",

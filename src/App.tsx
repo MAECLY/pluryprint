@@ -30,6 +30,11 @@ import {
   type Selection,
 } from '@/lib/ipc';
 import { logError } from '@/lib/errorLog';
+import {
+  jobOriginOf,
+  overridesFromSelection,
+  type JobOrigin,
+} from '@/lib/selectionSource';
 import { errorMessage } from '@/lib/ipcError';
 import {
   addPathsToJob,
@@ -171,6 +176,10 @@ function App() {
   const [files, setFiles] = useState<UiFile[]>([]);
   const [profileChoice, setProfileChoice] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PrintJobOverrides>({});
+  // FR-124: the batch on the Print Job screen came from PluryFact (through
+  // the browser bridge), so the screen says so. Cleared once the job is
+  // printed or emptied.
+  const [jobOrigin, setJobOrigin] = useState<JobOrigin | null>(null);
   // What the copies field shows while it differs from the committed value
   // (see PrintJobScreen). Lives here so Ctrl/⌘+P refuses the same invalid
   // entry the Print button does.
@@ -311,6 +320,12 @@ function App() {
     !profiles.some((p) => p.id === profileChoice)
   ) {
     setProfileChoice(null);
+  }
+
+  // An emptied job is no longer the batch an integration sent (FR-124).
+  // Adjusted while rendering, like the profile choice above.
+  if (files.length === 0 && jobOrigin !== null) {
+    setJobOrigin(null);
   }
 
   // App-level drag & drop (FR-007): the Home screen advertises "drag them
@@ -472,7 +487,10 @@ function App() {
       const remaining = filesRef.current.filter((f) => !sent.has(f.path));
       setFiles((cur) => cur.filter((f) => !sent.has(f.path)));
       resetJobSettings();
-      if (remaining.length === 0) clearPendingFolders();
+      if (remaining.length === 0) {
+        clearPendingFolders();
+        setJobOrigin(null);
+      }
       setActive('queue');
     } catch (e) {
       // Keep the files so the user can fix and resubmit. NFR-033: the error
@@ -508,6 +526,8 @@ function App() {
     list: UiFile[],
     profileObj: UiProfile,
     hold: boolean,
+    selectionOverrides: PrintJobOverrides = {},
+    origin: JobOrigin | null = null,
   ) => {
     if (!isTauri()) {
       toast.error(t('errors.desktopOnly'));
@@ -516,16 +536,22 @@ function App() {
     const req = buildPrintRequest(
       list.map((f) => f.path),
       profileObj,
-      {},
+      selectionOverrides,
       { hold },
     );
     const id = toast.loading(t('print.sending', { count: list.length }));
     try {
       const batch = await printFiles(req);
       const count = batch.job_ids.length;
+      // FR-124: a batch PluryFact sent says so, with PluryFact's own label.
+      const description = origin
+        ? [t('selection.fromPluryfact'), origin.label, profileObj.name]
+            .filter(Boolean)
+            .join(' · ')
+        : profileObj.name;
       toast.success(
         hold ? t('print.held', { count }) : t('print.queued', { count }),
-        { id, description: profileObj.name },
+        { id, description },
       );
       setActive('queue');
     } catch (e) {
@@ -607,7 +633,23 @@ function App() {
       }
       setActive('job');
       if (named) chooseProfile(named.id);
-      await addPathsToJob(selection.paths, setFiles, currentPaths);
+      // FR-123: settings the integration asked for pre-fill the screen; the
+      // user still confirms. (Choosing the profile above already cleared the
+      // previous job's tweaks.)
+      const wanted = overridesFromSelection(selection.overrides);
+      if (Object.keys(wanted).length > 0) {
+        if (!named) resetJobSettings();
+        setOverrides(wanted);
+      }
+      const origin = jobOriginOf(selection);
+      const hadFiles = filesRef.current.length > 0;
+      const added = await addPathsToJob(
+        selection.paths,
+        setFiles,
+        currentPaths,
+      );
+      // Labelled once its files are in the job (an empty job has no origin).
+      if (origin && (added.length > 0 || hadFiles)) setJobOrigin(origin);
       return;
     }
 
@@ -620,6 +662,8 @@ function App() {
       files,
       named ?? findProfileIn(profiles, null),
       selection.action === 'queue',
+      overridesFromSelection(selection.overrides),
+      jobOriginOf(selection),
     );
   };
 
@@ -851,6 +895,7 @@ function App() {
                 setCopiesDraft={setCopiesDraft}
                 density={density}
                 onPrint={() => void printJob()}
+                origin={files.length > 0 ? jobOrigin : null}
               />
             )}
             {active === 'queue' && (

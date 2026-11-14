@@ -512,6 +512,76 @@ describe('App', () => {
       expect(await screen.findByText('Contracts duplex')).toBeInTheDocument();
     });
 
+    /** What the browser bridge hands over for a PluryFact batch. */
+    const PLURYFACT = {
+      source: 'pluryfact',
+      label: 'Recibidos · octubre 2026',
+      overrides: {
+        copies: 2,
+        duplex: 'long-edge',
+        color: 'monochrome',
+        paper: 'a4',
+        collate: false,
+      },
+    } as const;
+
+    it('FR-124: a PluryFact selection is labelled on the Print Job screen and pre-fills its settings', async () => {
+      const { calls, park } = mockSelections();
+      park([{ ...selection('configure'), ...PLURYFACT }]);
+
+      render(<App />);
+
+      expect((await reportRows()).length).toBeGreaterThan(0);
+      const origin = await screen.findByTestId('job-origin');
+      expect(origin).toHaveTextContent('From PluryFact');
+      expect(origin).toHaveTextContent('Recibidos · octubre 2026');
+      // FR-123: the settings PluryFact asked for are in the panel, unprinted.
+      expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(2);
+      expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
+    });
+
+    it('FR-124: a selection from a file manager carries no PluryFact label', async () => {
+      const { park } = mockSelections();
+      park([{ ...selection('configure'), source: 'windows-explorer' }]);
+
+      render(<App />);
+
+      expect((await reportRows()).length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('job-origin')).toBeNull();
+      expect(screen.queryByText('From PluryFact')).toBeNull();
+    });
+
+    it('FR-123: a PluryFact queue selection is submitted with its overrides on top of the profile', async () => {
+      const { calls, park } = mockSelections();
+      park([{ ...selection('queue'), ...PLURYFACT }]);
+
+      render(<App />);
+
+      await waitFor(() =>
+        expect(calls.some((c) => c.cmd === 'print_files')).toBe(true),
+      );
+      const req = calls.find((c) => c.cmd === 'print_files')!.args.req as {
+        hold?: boolean;
+        settings: {
+          copies: number;
+          duplex: string;
+          color_mode: string;
+          paper_size: string;
+          collate: boolean;
+        };
+      };
+      expect(req.hold).toBe(true);
+      expect(req.settings.copies).toBe(2);
+      expect(req.settings.duplex).toBe('long');
+      expect(req.settings.color_mode).toBe('monochrome');
+      expect(req.settings.paper_size).toBe('a4');
+      expect(req.settings.collate).toBe(false);
+      // The confirmation names where the batch came from.
+      expect(
+        await screen.findByText(/From PluryFact · Recibidos · octubre 2026/),
+      ).toBeInTheDocument();
+    });
+
     it('FR-001: “Add to print queue” enqueues without starting the printer', async () => {
       const { calls, park } = mockSelections();
       park([selection('queue')]);
