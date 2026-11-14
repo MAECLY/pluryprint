@@ -316,6 +316,11 @@ pub const JOB_REASONS: &[ReasonSpec<&'static str>] = &[
     // malformed, e.g. a doctype that never closes) is not printed.
     ("conversion_failed", "page_not_checkable", &[]),
     ("conversion_failed", "text_unreadable", &[]),
+    // FR-057a/FR-057b (XML, ADR-0017).
+    ("conversion_failed", "xml_invalid", &[]),
+    ("conversion_failed", "xml_dtd_refused", &[]),
+    ("conversion_failed", "xml_too_large", &["limit"]),
+    ("conversion_failed", "xml_too_deep", &["limit"]),
     // --- Printing ---
     ("print_failed", "sumatra_start_failed", &[]),
     ("print_failed", "sumatra_exit", &["status"]),
@@ -372,6 +377,10 @@ pub const TERMINAL_CONVERSION_REASONS: &[&str] = &[
     "svg_too_large",
     "page_too_large",
     "heif_size_unsupported",
+    "xml_invalid",
+    "xml_dtd_refused",
+    "xml_too_large",
+    "xml_too_deep",
 ];
 
 /// Whether a `conversion_failed` `reason` is terminal

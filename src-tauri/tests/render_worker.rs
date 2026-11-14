@@ -1115,3 +1115,264 @@ fn nfr_security_webkits_own_limit_holds_the_web_process_without_a_watchdog() {
     assert!(!dir.path().join("out.pdf").exists());
     assert!(started.elapsed() < Duration::from_secs(60));
 }
+
+// ---------------------------------------------------------------------------
+// FR-057a / FR-057b: XML through the real web view
+// ---------------------------------------------------------------------------
+
+/// A fictitious SRI receipt of `tests/fixtures/sri-xml/` and what its print
+/// must look like.
+struct XmlCase {
+    name: &'static str,
+    /// The exact number of A4 pages: a pagination regression fails here
+    /// even without `pdftotext`.
+    pages: usize,
+    /// Words the printed pages must carry.
+    needles: &'static [&'static str],
+    /// Whether the page ends with the RIDE footer (only on the last page).
+    footer: bool,
+    /// A word of the closing blocks (totals or additional information) that
+    /// must share the last page with the footer, which is never alone on
+    /// it; `None` when the receipt has no closing block.
+    closing: Option<&'static str>,
+}
+
+const SRI_FIXTURES: &[XmlCase] = &[
+    XmlCase {
+        name: "factura-1.1.0-autorizacion.xml",
+        pages: 1,
+        needles: &["Factura", "001-002-000000123", "207.88", "Subtotal 15%"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "factura-1.0.0-respuesta-soap.xml",
+        pages: 1,
+        needles: &["Factura", "IVA 12%", "11.20"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "factura-2.0.0-no-autorizado.xml",
+        pages: 1,
+        needles: &["NO AUTORIZADO"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "factura-2.1.0.xml",
+        pages: 1,
+        needles: &["IVA 5%", "ICE", "46.73"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "nota-credito-1.1.0.xml",
+        pages: 1,
+        needles: &["Nota de crédito", "41.69"],
+        footer: true,
+        closing: Some("Valor de la modificación"),
+    },
+    XmlCase {
+        name: "nota-credito-1.0.0.xml",
+        pages: 1,
+        needles: &["Nota de crédito", "11.50"],
+        footer: true,
+        closing: Some("Valor de la modificación"),
+    },
+    XmlCase {
+        name: "nota-debito-1.0.0.xml",
+        pages: 1,
+        needles: &["Nota de débito", "13.80", "Gastos de cobranza"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "retencion-1.0.0.xml",
+        pages: 1,
+        needles: &["Comprobante de retención", "62.50", "001-001-000004567"],
+        footer: true,
+        closing: Some("Total retenido (calculado)"),
+    },
+    XmlCase {
+        name: "retencion-2.0.0.xml",
+        pages: 1,
+        needles: &["Comprobante de retención", "40.38"],
+        footer: true,
+        closing: Some("Total retenido (calculado)"),
+    },
+    // Two recipients overflow the first page: the closing blocks and the
+    // footer move to the second one together (8530b29).
+    XmlCase {
+        name: "guia-remision-1.1.0.xml",
+        pages: 2,
+        needles: &["Guía de remisión", "GAA-0000", "Guayaquil - Cuenca"],
+        footer: true,
+        closing: Some("Información adicional"),
+    },
+    XmlCase {
+        name: "guia-remision-1.0.0.xml",
+        pages: 1,
+        needles: &["Guía de remisión", "GBB-1111"],
+        footer: true,
+        closing: None,
+    },
+    XmlCase {
+        name: "liquidacion-compra-1.1.0.xml",
+        pages: 1,
+        needles: &["Liquidación de compra", "300.00"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "liquidacion-compra-1.0.0.xml",
+        pages: 1,
+        needles: &["Liquidación de compra", "50.00"],
+        footer: true,
+        closing: Some("Valor total"),
+    },
+    XmlCase {
+        name: "catalogo-generico.xml",
+        pages: 1,
+        needles: &["cat:catalogo", "Taladro percutor"],
+        footer: false,
+        closing: None,
+    },
+];
+
+/// The text of page `page` (1-based) of `pdf`, as [`pdf_text`] reads it.
+fn pdf_page_text(pdf: &Path, page: usize) -> Option<String> {
+    let n = page.to_string();
+    let out = std::process::Command::new("pdftotext")
+        .args(["-layout", "-enc", "UTF-8", "-f", &n, "-l", &n])
+        .arg(pdf)
+        .arg("-")
+        .output()
+        .ok()?;
+    out.status.success().then(|| {
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+/// Whether `text` carries the RIDE footer, in either app language.
+fn has_ride_footer(text: &str) -> bool {
+    text.contains("Representación impresa generada por Pluryprint")
+        || text.contains("Printed representation generated by Pluryprint")
+}
+
+/// Where `PLURYPRINT_XML_SAMPLES` asks the sample PDFs to be kept (for the
+/// docs and the PR), if anywhere.
+fn keep_sample(pdf: &Path, name: &str) {
+    if let Some(dir) = std::env::var_os("PLURYPRINT_XML_SAMPLES") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(pdf, dir.join(name.replace(".xml", ".pdf"))).unwrap();
+    }
+}
+
+#[test]
+fn fr_057b_sri_receipts_print_as_ride_pages_on_a4() {
+    if !can_render() {
+        return;
+    }
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sri-xml");
+    let dir = tempfile::tempdir().unwrap();
+    let mut text_checked = true;
+    for case in SRI_FIXTURES {
+        let name = case.name;
+        let input = dir.path().join(name);
+        std::fs::copy(fixtures.join(name), &input).unwrap();
+        // Paper `auto`: an XML page is laid out on A4.
+        let pdf = convert(&input, &PageSetup::default()).unwrap();
+        assert_eq!(pages(&pdf), case.pages, "{name}: page count");
+        assert_eq!(first_page_size(&pdf), (595, 842), "{name}: A4 by default");
+        let Some(text) = pdf_text(&pdf) else {
+            text_checked = false;
+            keep_sample(&pdf, name);
+            continue;
+        };
+        for needle in case.needles {
+            assert!(
+                text.contains(needle),
+                "{name}: {needle} is printed:\n{text}"
+            );
+        }
+        if case.footer {
+            // The footer is on the last page, with the closing blocks.
+            let last = pdf_page_text(&pdf, case.pages).unwrap();
+            assert!(
+                has_ride_footer(&last),
+                "{name}: footer on the last page:\n{last}"
+            );
+            if let Some(closing) = case.closing {
+                assert!(
+                    last.contains(closing),
+                    "{name}: {closing} shares the last page with the footer:\n{last}"
+                );
+            }
+            for page in 1..case.pages {
+                let earlier = pdf_page_text(&pdf, page).unwrap();
+                assert!(
+                    !has_ride_footer(&earlier),
+                    "{name}: footer only once, at the end"
+                );
+            }
+        }
+        keep_sample(&pdf, name);
+    }
+    if !text_checked {
+        // Page counts were still checked; the words need Poppler.
+        eprintln!("pdftotext not found: printed words and footer placement not checked");
+    }
+}
+
+#[test]
+fn fr_057b_an_xml_page_follows_the_jobs_paper_and_fetches_nothing() {
+    if !can_render() {
+        return;
+    }
+    let wire = Tripwire::new();
+    let port = wire.port();
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("hostil.xml");
+    std::fs::write(
+        &input,
+        format!(
+            "<?xml-stylesheet href=\"http://127.0.0.1:{port}/x.xsl\"?>\
+             <r xmlns:xi=\"http://www.w3.org/2001/XInclude\">\
+             <xi:include href=\"http://127.0.0.1:{port}/inc\"/>\
+             <img src=\"http://127.0.0.1:{port}/img.png\"/>\
+             <t>&lt;img src=\"http://127.0.0.1:{port}/esc.png\"&gt;</t></r>"
+        ),
+    )
+    .unwrap();
+    let letter = PageSetup {
+        css_size: Some("8.5in 11in".into()),
+    };
+    let pdf = convert(&input, &letter).unwrap();
+    assert_eq!(first_page_size(&pdf), (612, 792), "the job's paper wins");
+    std::thread::sleep(Duration::from_millis(300));
+    wire.assert_untouched();
+}
+
+#[test]
+fn fr_057a_a_hostile_xml_fails_with_its_reason_before_rendering() {
+    setup();
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("lolz.xml");
+    std::fs::write(
+        &input,
+        "<!DOCTYPE l [<!ENTITY a \"aaaa\"><!ENTITY b \"&a;&a;&a;&a;\">]><l>&b;</l>",
+    )
+    .unwrap();
+    let err = convert(&input, &a4()).unwrap_err();
+    assert!(
+        matches!(&err, EngineError::ConversionFailed(f) if f.reason == Some("xml_dtd_refused")),
+        "{err:?}"
+    );
+    assert!(!dir.path().join("cache").join("job-lolz.pdf").exists());
+}

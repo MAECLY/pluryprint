@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>catalogo-generico.xml</title>
+<style>
+* { box-sizing: border-box; }
+html { font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
+  font-size: 8.5pt; line-height: 1.4; color: #000; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0; }
+header { border-bottom: 0.75pt solid #000; padding-bottom: 2mm; margin-bottom: 2.5mm; }
+header h1 { font-size: 12pt; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+header p { margin: 0.6mm 0 0; color: #4a4a4a; }
+.tree { font-family: "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; font-size: 7.8pt; }
+.l { display: flex; break-inside: avoid; }
+.l > s { flex: none; display: flex; text-decoration: none; }
+.l > s > i { width: 4.2mm; border-left: 0.5pt solid #bdbdbd; }
+.l > s > u { width: calc(var(--d) * 4.2mm); }
+.l > span.b { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.t { color: #000; font-weight: 700; }
+.a { color: #4a4a4a; }
+.v { color: #000; }
+.x { color: #000; }
+.c { color: #6a6a6a; font-style: italic; }
+.p { color: #6a6a6a; }
+.txt > span.b { padding-left: 2.4mm; }
+</style>
+</head><body>
+<header><h1>catalogo-generico.xml</h1><p>Documento XML, elemento raíz &lt;cat:catalogo&gt;, 9 elementos.</p></header>
+<div class="tree">
+<div class="l p" style="--d:0"><s></s><span class="b">&lt;?xml-stylesheet type=&quot;text/xsl&quot; href=&quot;catalogo.xsl&quot;?&gt;</span></div>
+<div class="l c" style="--d:0"><s></s><span class="b">&lt;!-- Catálogo ficticio para probar la vista genérica de Pluryprint --&gt;</span></div>
+<div class="l" style="--d:0"><s></s><span class="b"><span class="t">&lt;cat:catalogo</span> <span class="a">version=</span><span class="v">"3"</span> <span class="a">actualizado=</span><span class="v">"2026-11-14"</span><span class="t">&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i></s><span class="b"><span class="t">&lt;cat:producto</span> <span class="a">id=</span><span class="v">"p-1"</span> <span class="a">disponible=</span><span class="v">"true"</span><span class="t">&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:nombre</span><span class="t">&gt;</span><span class="x">Taladro percutor</span><span class="t">&lt;/cat:nombre&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:precio</span> <span class="a">moneda=</span><span class="v">"USD"</span><span class="t">&gt;</span><span class="x">95.00</span><span class="t">&lt;/cat:precio&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:enlace</span> <span class="a">xlink:href=</span><span class="v">"https://example.invalid/taladro"</span><span class="t">/&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i></s><span class="b"><span class="t">&lt;/cat:producto&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i></s><span class="b"><span class="t">&lt;cat:producto</span> <span class="a">id=</span><span class="v">"p-2"</span> <span class="a">disponible=</span><span class="v">"false"</span><span class="t">&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:nombre</span><span class="t">&gt;</span><span class="x">Juego de brocas &amp; accesorios</span><span class="t">&lt;/cat:nombre&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:descripcion</span><span class="t">&gt;</span></span></div>
+<div class="l x txt" style="--d:0"><s><i></i><i></i><i></i></s><span class="b">Un texto largo que no cabe en una sola línea junto a su elemento, así que se imprime debajo, envuelto y con la sangría de su nivel en el árbol.</span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;/cat:descripcion&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i><i></i></s><span class="b"><span class="t">&lt;cat:notas</span><span class="t">&gt;</span><span class="x">&lt;b&gt;no es HTML&lt;/b&gt; &amp; se imprime tal cual</span><span class="t">&lt;/cat:notas&gt;</span></span></div>
+<div class="l" style="--d:0"><s><i></i></s><span class="b"><span class="t">&lt;/cat:producto&gt;</span></span></div>
+<div class="l" style="--d:0"><s></s><span class="b"><span class="t">&lt;/cat:catalogo&gt;</span></span></div>
+</div>
+</body></html>

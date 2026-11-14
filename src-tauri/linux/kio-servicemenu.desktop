@@ -20,7 +20,7 @@
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 Name=Pluryprint
-MimeType=application/pdf;image/jpeg;image/png;image/tiff;image/bmp;image/webp;image/heif;image/heic;image/svg+xml;image/svg+xml-compressed;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.presentation;application/rtf;text/rtf;text/plain;text/html;text/markdown;text/x-markdown;inode/directory;
+MimeType=application/pdf;image/jpeg;image/png;image/tiff;image/bmp;image/webp;image/heif;image/heic;image/svg+xml;image/svg+xml-compressed;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint;application/vnd.oasis.opendocument.text;application/vnd.oasis.opendocument.spreadsheet;application/vnd.oasis.opendocument.presentation;application/rtf;text/rtf;text/plain;text/html;text/markdown;text/x-markdown;application/xml;text/xml;inode/directory;
 X-KDE-Protocols=file
 X-KDE-Submenu=Pluryprint
 Icon=pluryprint

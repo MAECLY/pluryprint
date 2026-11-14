@@ -335,15 +335,16 @@ This arrives with Pluryprint 0.0.6 and PluryFact 0.2. Design and protocol:
 
 ## Supported files
 
-| Kind                    | Extensions                                     | How                                                                                                                                            |
-| ----------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| PDF                     | PDF                                            | Printed as-is after a structural check. Password-protected PDFs too.                                                                           |
-| Images                  | JPG, JPEG, PNG, TIF, TIFF, BMP, WebP           | Converted in the app (transparency on white).                                                                                                  |
-| Vector                  | SVG, SVGZ                                      | Vector PDF pages, in the app.                                                                                                                  |
-| Text                    | TXT, HTML, HTM, MD, MARKDOWN                   | In the app, paginated by the system web view with scripts and network off.                                                                     |
-| HEIC                    | HEIC, HEIF                                     | `sips` on macOS; the Microsoft Store HEIF and HEVC codecs on Windows; libheif's `heif-convert` or ImageMagick, installed separately, on Linux. |
-| Rich text               | RTF                                            | `textutil` on macOS; LibreOffice on Windows and Linux.                                                                                         |
-| Office and OpenDocument | DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP | LibreOffice, installed separately (the app offers to install it).                                                                              |
+| Kind                    | Extensions                                     | How                                                                                                                                                                          |
+| ----------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PDF                     | PDF                                            | Printed as-is after a structural check. Password-protected PDFs too.                                                                                                         |
+| Images                  | JPG, JPEG, PNG, TIF, TIFF, BMP, WebP           | Converted in the app (transparency on white).                                                                                                                                |
+| Vector                  | SVG, SVGZ                                      | Vector PDF pages, in the app.                                                                                                                                                |
+| Text                    | TXT, HTML, HTM, MD, MARKDOWN                   | In the app, paginated by the system web view with scripts and network off.                                                                                                   |
+| HEIC                    | HEIC, HEIF                                     | `sips` on macOS; the Microsoft Store HEIF and HEVC codecs on Windows; libheif's `heif-convert` or ImageMagick, installed separately, on Linux.                               |
+| Rich text               | RTF                                            | `textutil` on macOS; LibreOffice on Windows and Linux.                                                                                                                       |
+| Office and OpenDocument | DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP | LibreOffice, installed separately (the app offers to install it).                                                                                                            |
+| XML                     | XML                                            | In the app. Ecuadorian SRI electronic receipts (all six types) print as a RIDE-like page with the access-key barcode; any other XML as a readable tree. No DTD is ever read. |
 
 Not supported: GIF (refused with a note to convert it to PNG or JPEG), EPUB,
 email (EML, MSG), CAD, PostScript and archives. Details in
