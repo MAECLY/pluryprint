@@ -697,6 +697,28 @@ async takePendingSelections() : Promise<Result<Selection[], IpcError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * The registration state of the browser bridge.
+ */
+async bridgeStatus() : Promise<Result<BridgeOverview, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bridge_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Register the browser bridge again (the "Reconnect" button).
+ */
+async bridgeReconnect() : Promise<Result<BridgeOverview, IpcError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("bridge_reconnect") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -902,6 +924,82 @@ default: number;
  * What a stored `0` means for this knob.
  */
 zero: ZeroPolicy }
+/**
+ * What the Settings section shows.
+ */
+export type BridgeOverview = { 
+/**
+ * `windows`, `macos` or `linux`.
+ */
+platform: string; 
+/**
+ * Whether the bridge executable is installed next to the app.
+ */
+installed: boolean; 
+/**
+ * Whether the app runs from a translocated copy (macOS): registration is
+ * then refused until the app is moved to Applications.
+ */
+translocated: boolean; 
+/**
+ * One row per browser, in display order.
+ */
+browsers: BrowserStatus[] }
+/**
+ * The browsers the bridge registers with.
+ */
+export type Browser = 
+/**
+ * Google Chrome.
+ */
+"chrome" | 
+/**
+ * Microsoft Edge.
+ */
+"edge" | 
+/**
+ * Brave.
+ */
+"brave" | 
+/**
+ * Chromium.
+ */
+"chromium"
+/**
+ * The registration state of one browser, for `bridge status` and the
+ * Settings screen.
+ */
+export type BrowserStatus = { 
+/**
+ * Which browser.
+ */
+browser: Browser; 
+/**
+ * Whether the browser seems installed for this user (its support folder
+ * exists on macOS/Linux; on Windows this is not checked and is `true`).
+ */
+detected: boolean; 
+/**
+ * Where its manifest is (or would be) written.
+ */
+manifest_path: string; 
+/**
+ * Whether that manifest exists and names this host.
+ */
+registered: boolean; 
+/**
+ * Whether the manifest's `path` is the bridge this process would
+ * register (`false` after the app moved, until it registers again).
+ */
+points_here: boolean; 
+/**
+ * Whether the executable the manifest names exists.
+ */
+binary_exists: boolean; 
+/**
+ * The origins the manifest allows.
+ */
+allowed_origins: string[] }
 /**
  * Color vs. grayscale output.
  */
@@ -1629,7 +1727,13 @@ started_at: string | null;
 /**
  * RFC 3339 UTC timestamp of reaching a terminal state, if finished.
  */
-finished_at: string | null }
+finished_at: string | null; 
+/**
+ * The integration the job's batch came from ([`PrintRequest::origin`]),
+ * shown on its Queue row. `#[serde(default)]` so an older `queue.json`
+ * loads.
+ */
+origin?: JobOrigin | null }
 /**
  * The result of submitting a [`PrintRequest`]: the batch id and the ids of the
  * jobs it produced (one per input file).
@@ -1692,6 +1796,18 @@ reason?: string | null;
  * Interpolation values for the translated sentence (`secs`, `printer`…).
  */
 params?: Partial<{ [key in string]: string }> | null }
+/**
+ * The integration a batch came from, as the queue shows it (FR-124).
+ */
+export type JobOrigin = { 
+/**
+ * Which integration (`pluryfact`, the only one labelled today).
+ */
+source: string; 
+/**
+ * The integration's own label for the batch, when it sent one.
+ */
+label?: string | null }
 /**
  * Coarse progress for the currently-running phase of a job. `phase` is a short
  * label such as `"converting"` or `"printing"`.
@@ -1901,7 +2017,14 @@ profile_name: string | null;
  * also stop every other batch that was waiting. Optional on the wire —
  * absent means "start normally".
  */
-hold?: boolean }
+hold?: boolean; 
+/**
+ * Where the batch came from, when an integration labelled it (FR-124):
+ * every job of the batch carries it, and the Queue screen shows "From
+ * Pluryfact" on its rows. Optional and additive on the wire; absent for
+ * everything the user added by hand.
+ */
+origin?: JobOrigin | null }
 /**
  * A printer installed on the system, enriched with whatever capabilities the
  * OS could be coaxed into reporting.
@@ -2324,11 +2447,70 @@ profile_id: string | null;
  * handoff cap: the number of items the user actually selected. `paths`
  * then holds only the first ones, and the UI says so.
  */
-truncated_from?: number | null }
+truncated_from?: number | null; 
+/**
+ * Which integration handed the selection over (`windows-explorer`,
+ * `macos-services`, `pluryfact`, …), when it said. The UI labels a
+ * selection from the browser bridge ("From Pluryfact", FR-124); any
+ * other value is informational only and never changes what is printed.
+ */
+source?: string | null; 
+/**
+ * A short human label the integration gave the batch (Pluryfact sends
+ * the period and mailbox, e.g. "Recibidos · octubre 2026"). Display only.
+ */
+label?: string | null; 
+/**
+ * Print settings the integration asked for on top of the profile
+ * (Pluryfact's `beginJob` overrides, FR-123). With `configure` they only
+ * pre-fill the Print Job screen; with `queue`/`print-default` they are
+ * applied to the batch. `None` (or every field `None`) keeps the profile.
+ */
+overrides?: SelectionOverrides | null }
 /**
  * A second launch handed us a selection while this window was already open.
  */
 export type SelectionForwarded = Selection
+/**
+ * Per-batch print settings an integration asked for, layered on top of the
+ * chosen profile exactly like the Print Job screen's overrides (FR-040).
+ * 
+ * The vocabulary is the one `pluryprint print`'s flags and the profile
+ * editor already use (`docs/04-architecture/ipc-and-cli.md` §3.3), in its
+ * wire form, so nothing here is a new setting: it is only a new way to
+ * pre-fill existing ones. Unknown fields are refused rather than ignored: a
+ * print setting that silently does nothing is how the wrong pages reach the
+ * wrong printer.
+ */
+export type SelectionOverrides = { 
+/**
+ * Printer id (as `printers list` reports it) instead of the profile's.
+ */
+printer?: string | null; 
+/**
+ * Number of copies, 1-999.
+ */
+copies?: number | null; 
+/**
+ * Double-sided mode.
+ */
+duplex?: ProfileDuplex | null; 
+/**
+ * Colour or grayscale.
+ */
+color?: ColorMode | null; 
+/**
+ * Paper size, as `--paper` accepts it.
+ */
+paper?: PaperSize | null; 
+/**
+ * Page orientation.
+ */
+orientation?: Orientation | null; 
+/**
+ * Collate multiple copies.
+ */
+collate?: boolean | null }
 /**
  * Read-only annotations the server attaches to every settings response: state
  * the UI cannot derive from the values themselves.

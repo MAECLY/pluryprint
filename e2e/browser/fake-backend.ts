@@ -18,6 +18,7 @@
 import type {
   AppInfo,
   AppSettings,
+  BridgeOverview,
   DiscoveredPrinter,
   FileInfo,
   FolderExpansion,
@@ -173,6 +174,30 @@ export class FakeBackend {
   updateState: UpdateState = { last_check_at: null, skipped_version: null };
   queue: QueueSnapshot;
   pendingSelections: Selection[] = [];
+  /**
+   * FR-127: the browser bridge as Settings > Browser integration sees it.
+   * Chrome is registered; Brave and Edge are installed but not; Chromium is
+   * absent. `bridge_reconnect` registers every browser found.
+   */
+  bridge: BridgeOverview = {
+    platform: 'macos',
+    installed: true,
+    translocated: false,
+    browsers: (['chrome', 'edge', 'brave', 'chromium'] as const).map(
+      (browser) => ({
+        browser,
+        detected: browser !== 'chromium',
+        manifest_path: `/Users/e2e/Library/Application Support/${browser}/NativeMessagingHosts/com.maecly.pluryprint.json`,
+        registered: browser === 'chrome',
+        points_here: browser === 'chrome',
+        binary_exists: browser === 'chrome',
+        allowed_origins:
+          browser === 'chrome'
+            ? ['chrome-extension://ibgodfpcihlddbbfaoooehfgbmahipbj/']
+            : [],
+      }),
+    ),
+  };
   openPaths: string[];
   savePath: string | null;
 
@@ -349,6 +374,28 @@ export class FakeBackend {
         this.pendingSelections = [];
         return out;
       }
+
+      // --- browser bridge (FR-127) ---
+      case 'bridge_status':
+        return clone(this.bridge);
+      case 'bridge_reconnect':
+        this.bridge = {
+          ...this.bridge,
+          browsers: this.bridge.browsers.map((b) =>
+            b.detected
+              ? {
+                  ...b,
+                  registered: true,
+                  points_here: true,
+                  binary_exists: true,
+                  allowed_origins: [
+                    'chrome-extension://ibgodfpcihlddbbfaoooehfgbmahipbj/',
+                  ],
+                }
+              : b,
+          ),
+        };
+        return clone(this.bridge);
 
       // --- profiles ---
       case 'list_profiles':

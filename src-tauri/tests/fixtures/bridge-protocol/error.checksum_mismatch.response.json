@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "27",
+  "type": "putFile",
+  "ok": false,
+  "error": {
+    "code": "checksum_mismatch",
+    "message": "the document's SHA-256 does not match"
+  }
+}

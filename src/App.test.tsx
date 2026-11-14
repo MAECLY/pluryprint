@@ -512,6 +512,112 @@ describe('App', () => {
       expect(await screen.findByText('Contracts duplex')).toBeInTheDocument();
     });
 
+    /** What the browser bridge hands over for a Pluryfact batch. */
+    const PLURYFACT = {
+      source: 'pluryfact',
+      label: 'Recibidos · octubre 2026',
+      overrides: {
+        copies: 2,
+        duplex: 'long-edge',
+        color: 'monochrome',
+        paper: 'a4',
+        collate: false,
+      },
+    } as const;
+
+    it('FR-124: a Pluryfact selection is labelled on the Print Job screen and pre-fills its settings', async () => {
+      const { calls, park } = mockSelections();
+      park([{ ...selection('configure'), ...PLURYFACT }]);
+
+      render(<App />);
+
+      expect((await reportRows()).length).toBeGreaterThan(0);
+      const origin = await screen.findByTestId('job-origin');
+      expect(origin).toHaveTextContent('From Pluryfact');
+      expect(origin).toHaveTextContent('Recibidos · octubre 2026');
+      // FR-123: the settings Pluryfact asked for are in the panel, unprinted.
+      expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(2);
+      expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
+    });
+
+    it('FR-124: a Pluryfact batch joining a job the user started is not labelled and keeps the job settings', async () => {
+      const { calls, park } = mockSelections();
+      // The user's own file, from Explorer, already in the job.
+      park([{ ...selection('configure'), source: 'windows-explorer' }]);
+      render(<App />);
+      expect((await reportRows()).length).toBeGreaterThan(0);
+
+      // Then Pluryfact sends a batch (with its own print settings).
+      park([
+        {
+          ...selection('configure'),
+          ...PLURYFACT,
+          paths: ['/tmp/inbox/0000-factura.pdf'],
+        },
+      ]);
+      ringDoorbell();
+
+      expect(
+        (await screen.findAllByRole('button', { name: /0000-factura\.pdf/ }))
+          .length,
+      ).toBeGreaterThan(0);
+      // Mixed job: no "From Pluryfact" on the user's own file.
+      expect(screen.queryByTestId('job-origin')).toBeNull();
+      // The job keeps its settings, and the user is told why.
+      expect(
+        await screen.findByText(/Pluryfact's print settings were not applied/),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/^Copies$/i)).toHaveValue(1);
+      expect(calls.some((c) => c.cmd === 'print_files')).toBe(false);
+    });
+
+    it('FR-124: a selection from a file manager carries no Pluryfact label', async () => {
+      const { park } = mockSelections();
+      park([{ ...selection('configure'), source: 'windows-explorer' }]);
+
+      render(<App />);
+
+      expect((await reportRows()).length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('job-origin')).toBeNull();
+      expect(screen.queryByText('From Pluryfact')).toBeNull();
+    });
+
+    it('FR-123: a Pluryfact queue selection is submitted with its overrides on top of the profile', async () => {
+      const { calls, park } = mockSelections();
+      park([{ ...selection('queue'), ...PLURYFACT }]);
+
+      render(<App />);
+
+      await waitFor(() =>
+        expect(calls.some((c) => c.cmd === 'print_files')).toBe(true),
+      );
+      const req = calls.find((c) => c.cmd === 'print_files')!.args.req as {
+        hold?: boolean;
+        settings: {
+          copies: number;
+          duplex: string;
+          color_mode: string;
+          paper_size: string;
+          collate: boolean;
+        };
+      };
+      expect(req.hold).toBe(true);
+      // FR-124: every queued job carries where it came from.
+      expect((req as { origin?: unknown }).origin).toEqual({
+        source: 'pluryfact',
+        label: 'Recibidos · octubre 2026',
+      });
+      expect(req.settings.copies).toBe(2);
+      expect(req.settings.duplex).toBe('long');
+      expect(req.settings.color_mode).toBe('monochrome');
+      expect(req.settings.paper_size).toBe('a4');
+      expect(req.settings.collate).toBe(false);
+      // The confirmation names where the batch came from.
+      expect(
+        await screen.findByText(/From Pluryfact · Recibidos · octubre 2026/),
+      ).toBeInTheDocument();
+    });
+
     it('FR-001: “Add to print queue” enqueues without starting the printer', async () => {
       const { calls, park } = mockSelections();
       park([selection('queue')]);

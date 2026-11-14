@@ -4,6 +4,7 @@
 //! the `tauri-specta` builder in `lib.rs`, which also generates
 //! `src/ipc/bindings.ts` from these signatures.
 
+pub mod bridge;
 pub mod deps_install;
 pub mod diag;
 pub mod events;

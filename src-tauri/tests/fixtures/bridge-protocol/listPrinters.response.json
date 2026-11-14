@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "id": "2",
+  "type": "listPrinters",
+  "ok": true,
+  "printers": [
+    {
+      "id": "HP_LaserJet_Pro_M404",
+      "name": "HP LaserJet Pro M404",
+      "isDefault": true,
+      "capabilities": {
+        "duplex": true,
+        "color": false,
+        "papers": [
+          "A4",
+          "Letter",
+          "Legal"
+        ]
+      }
+    },
+    {
+      "id": "Brother_HL_L3270CDW",
+      "name": "Brother HL-L3270CDW",
+      "isDefault": false,
+      "capabilities": {
+        "duplex": true,
+        "color": true,
+        "papers": [
+          "A4",
+          "Letter"
+        ]
+      }
+    }
+  ]
+}

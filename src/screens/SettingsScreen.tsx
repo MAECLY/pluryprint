@@ -21,6 +21,7 @@ import { useLocale, useT, type TFunction } from '@/i18n/I18nProvider';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useProfilesStore } from '@/stores/profilesStore';
 import { useHostPlatform, type HostPlatform } from '@/lib/platform';
+import { BrowserIntegrationSection } from '@/screens/settings/BrowserIntegrationSection';
 
 interface SettingsScreenProps {
   /** Resolved (light/dark) theme — always present for the 2-way fallback. */
@@ -647,6 +648,8 @@ export function SettingsScreen({
           </Note>
         )}
         <Note>{t(shellNoteKey(host))}</Note>
+
+        <BrowserIntegrationSection />
 
         <div style={{ height: 24 }} />
         <MPSectionLabel>{t('sections.engine')}</MPSectionLabel>

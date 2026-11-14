@@ -13,6 +13,7 @@ import type {
   JobError,
   JobProgress,
   JobSettings,
+  JobOrigin,
   JobState,
   Printer,
   Profile,
@@ -138,6 +139,7 @@ interface JobOverrides {
   printer_resolved?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  origin?: JobOrigin | null;
 }
 
 /** Build a wire `Job` with realistic defaults; override only what a test varies. */
@@ -165,6 +167,7 @@ export function mkJob(o: JobOverrides): Job {
     started_at:
       o.started_at === undefined ? '2026-07-11T10:42:01Z' : o.started_at,
     finished_at: o.finished_at ?? null,
+    ...(o.origin ? { origin: o.origin } : {}),
   };
 }
 

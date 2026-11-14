@@ -109,6 +109,9 @@ mod tests {
             action: ContextAction::Configure,
             profile_id: None,
             truncated_from: None,
+            source: None,
+            label: None,
+            overrides: None,
         }
     }
 

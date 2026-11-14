@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "23",
+  "type": "hello",
+  "client": "otra-extension",
+  "clientVersion": "1.0.0",
+  "protocols": [
+    1
+  ]
+}

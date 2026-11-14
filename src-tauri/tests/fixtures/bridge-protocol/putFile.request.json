@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "5",
+  "type": "putFile",
+  "jobId": "019a7f3e-8c41-7d2a-9b6e-3f0c5a1d2e4b",
+  "index": 0,
+  "name": "RIDE_001-001-000000123.pdf",
+  "kind": "pdf",
+  "size": 142,
+  "sha256": "93e31154c364805a3ef8c904bc257f5ef77600c31b67d392704cd6e1e9cd0657",
+  "chunk": 0,
+  "chunks": 1,
+  "data": "JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4gZW5kb2JqCjIgMCBvYmogPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFtdIC9Db3VudCAwID4+IGVuZG9iagp0cmFpbGVyIDw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg=="
+}

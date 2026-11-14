@@ -207,6 +207,9 @@ pub const IPC_REASONS: &[ReasonSpec<IpcErrorCode>] = &[
     (IpcErrorCode::InvalidRequest, "printer_option_invalid", &[]),
     // FR-059: `job_supply_password` with nothing typed.
     (IpcErrorCode::InvalidRequest, "password_empty", &[]),
+    // FR-127: "Reconnect" in Settings > Browser integration.
+    (IpcErrorCode::InvalidRequest, "bridge_translocated", &[]),
+    (IpcErrorCode::Internal, "bridge_missing", &[]),
     // --- Unsupported format (drop-time refusals) ---
     (IpcErrorCode::UnsupportedFormat, "not_printable", &["name"]),
     (

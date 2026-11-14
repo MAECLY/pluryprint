@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "30",
+  "type": "beginJob",
+  "ok": false,
+  "error": {
+    "code": "io_error",
+    "message": "disk error: permission denied"
+  }
+}

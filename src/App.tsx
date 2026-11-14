@@ -30,6 +30,14 @@ import {
   type Selection,
 } from '@/lib/ipc';
 import { logError } from '@/lib/errorLog';
+import {
+  jobOriginOf,
+  originForFiles,
+  overridesFromSelection,
+  trackOrigin,
+  type JobOrigin,
+  type TrackedOrigin,
+} from '@/lib/selectionSource';
 import { errorMessage } from '@/lib/ipcError';
 import {
   addPathsToJob,
@@ -171,6 +179,11 @@ function App() {
   const [files, setFiles] = useState<UiFile[]>([]);
   const [profileChoice, setProfileChoice] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PrintJobOverrides>({});
+  // FR-124: files on the Print Job screen that came from Pluryfact (through
+  // the browser bridge). The screen says so only while every file in the job
+  // is one of them (`shownOrigin` below). Cleared once the job is printed or
+  // emptied.
+  const [jobOrigin, setJobOrigin] = useState<TrackedOrigin | null>(null);
   // What the copies field shows while it differs from the committed value
   // (see PrintJobScreen). Lives here so Ctrl/⌘+P refuses the same invalid
   // entry the Print button does.
@@ -312,6 +325,18 @@ function App() {
   ) {
     setProfileChoice(null);
   }
+
+  // An emptied job is no longer the batch an integration sent (FR-124).
+  // Adjusted while rendering, like the profile choice above.
+  if (files.length === 0 && jobOrigin !== null) {
+    setJobOrigin(null);
+  }
+  // The badge the Print Job screen shows: none for a mixed job, so neither
+  // the user's own files nor a later drop are labelled as Pluryfact's.
+  const shownOrigin = originForFiles(
+    jobOrigin,
+    files.map((f) => f.path),
+  );
 
   // App-level drag & drop (FR-007): the Home screen advertises "drag them
   // here", so drops must work from any screen, not only while the Print Job
@@ -456,11 +481,12 @@ function App() {
       useProfilesStore.getState().profiles,
       profileChoice,
     );
-    const req = buildPrintRequest(
-      list.map((f) => f.path),
-      profileObj,
-      overrides,
-    );
+    const paths = list.map((f) => f.path);
+    // FR-124: a batch made only of Pluryfact's files is tagged as such in
+    // the Queue.
+    const req = buildPrintRequest(paths, profileObj, overrides, {
+      origin: originForFiles(jobOrigin, paths),
+    });
     const id = toast.loading(t('print.sending', { count: list.length }));
     try {
       const batch = await printFiles(req);
@@ -472,7 +498,10 @@ function App() {
       const remaining = filesRef.current.filter((f) => !sent.has(f.path));
       setFiles((cur) => cur.filter((f) => !sent.has(f.path)));
       resetJobSettings();
-      if (remaining.length === 0) clearPendingFolders();
+      if (remaining.length === 0) {
+        clearPendingFolders();
+        setJobOrigin(null);
+      }
       setActive('queue');
     } catch (e) {
       // Keep the files so the user can fix and resubmit. NFR-033: the error
@@ -508,6 +537,8 @@ function App() {
     list: UiFile[],
     profileObj: UiProfile,
     hold: boolean,
+    selectionOverrides: PrintJobOverrides = {},
+    origin: JobOrigin | null = null,
   ) => {
     if (!isTauri()) {
       toast.error(t('errors.desktopOnly'));
@@ -516,16 +547,22 @@ function App() {
     const req = buildPrintRequest(
       list.map((f) => f.path),
       profileObj,
-      {},
-      { hold },
+      selectionOverrides,
+      { hold, origin },
     );
     const id = toast.loading(t('print.sending', { count: list.length }));
     try {
       const batch = await printFiles(req);
       const count = batch.job_ids.length;
+      // FR-124: a batch Pluryfact sent says so, with Pluryfact's own label.
+      const description = origin
+        ? [t('selection.fromPluryfact'), origin.label, profileObj.name]
+            .filter(Boolean)
+            .join(' · ')
+        : profileObj.name;
       toast.success(
         hold ? t('print.held', { count }) : t('print.queued', { count }),
-        { id, description: profileObj.name },
+        { id, description },
       );
       setActive('queue');
     } catch (e) {
@@ -606,8 +643,40 @@ function App() {
         );
       }
       setActive('job');
-      if (named) chooseProfile(named.id);
-      await addPathsToJob(selection.paths, setFiles, currentPaths);
+      const origin = jobOriginOf(selection);
+      const wanted = overridesFromSelection(selection.overrides);
+      // A job the user had already started keeps its profile and tweaks:
+      // the settings a Pluryfact batch asks for are for that batch, not for
+      // files from somewhere else. The user is told, and decides.
+      const hadFiles = filesRef.current.length > 0;
+      const asksSettings =
+        origin !== null &&
+        (named !== undefined || Object.keys(wanted).length > 0);
+      if (hadFiles && asksSettings) {
+        toast.info(t('selection.settingsKept'));
+      } else {
+        if (named) chooseProfile(named.id);
+        // FR-123: settings the integration asked for pre-fill the screen;
+        // the user still confirms. (Choosing the profile above already
+        // cleared the previous job's tweaks.)
+        if (Object.keys(wanted).length > 0) {
+          if (!named) resetJobSettings();
+          setOverrides(wanted);
+        }
+      }
+      const added = await addPathsToJob(
+        selection.paths,
+        setFiles,
+        currentPaths,
+      );
+      // FR-124: remember which files Pluryfact brought; the badge shows only
+      // while they are all the job holds.
+      if (origin) {
+        const addedPaths = added.map((f) => f.path);
+        setJobOrigin((prev) =>
+          trackOrigin(prev, origin, addedPaths, currentPaths()),
+        );
+      }
       return;
     }
 
@@ -620,6 +689,8 @@ function App() {
       files,
       named ?? findProfileIn(profiles, null),
       selection.action === 'queue',
+      overridesFromSelection(selection.overrides),
+      jobOriginOf(selection),
     );
   };
 
@@ -851,6 +922,7 @@ function App() {
                 setCopiesDraft={setCopiesDraft}
                 density={density}
                 onPrint={() => void printJob()}
+                origin={shownOrigin}
               />
             )}
             {active === 'queue' && (

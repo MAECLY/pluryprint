@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "20",
+  "type": "hello",
+  "ok": false,
+  "error": {
+    "code": "unsupported_version",
+    "message": "this host speaks protocol version 1"
+  }
+}

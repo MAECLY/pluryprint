@@ -51,6 +51,7 @@ The tables below are derived from the **actual manifests**: `src-tauri/Cargo.tom
 | `flate2` | 1 | MIT / Apache-2.0 | Inflating an SVGZ with a size cap (FR-052a); already in the tree through `usvg`, `lopdf` and `png` | Yes |
 | `libc` *(macOS/Linux targets only)* | 0.2 | MIT / Apache-2.0 | The SVG worker's memory cap: `setrlimit(RLIMIT_DATA)` and the parent's memory watchdog (`proc_pid_rusage` on macOS; on Linux the watchdog reads `/proc`); already in the tree through `tokio` and others | Yes |
 | `uuid` | 1 (`v7`) | MIT / Apache-2.0 | Time-sortable job ids | Yes |
+| `base64`, `sha2`, `roxmltree` | 0.22 / 0.11 / 0.20 | MIT / Apache-2.0 | The browser bridge for Pluryfact (FR-120..FR-127): decoding the documents' base64 chunks, checking their SHA-256, and refusing XML that is not well formed (no DTD support). All three were already in the tree through `usvg`, `printpdf` and `lopdf` | Yes |
 | `time` | 0.3 | MIT / Apache-2.0 | RFC 3339 timestamps | Yes |
 | `windows` *(Windows targets only)* | 0.62 | MIT / Apache-2.0 | winspool + GDI `DeviceCapabilities`, PrintTicket ↔ DEVMODE, console attach, policy registry/owner checks, and `IStream` / `SHCreateMemStream` for the render worker (the line `webview2-com` and wry use) | Yes |
 | `webview2-com` *(Windows targets only)* | 0.39 | MIT | WebView2 `PrintToPdf` in the render worker (FR-055) | Yes |

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "24",
+  "type": "putFile",
+  "ok": false,
+  "error": {
+    "code": "too_large",
+    "message": "documents are limited to 52428800 bytes"
+  }
+}

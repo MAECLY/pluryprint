@@ -49,6 +49,7 @@ Free · No account · No telemetry · AGPL-3.0
 - [Download](#download)
 - [First launch](#first-launch)
 - [Usage](#usage)
+- [Integrations](#integrations)
 - [Supported files](#supported-files)
 - [Privacy](#privacy)
 - [What it doesn't do yet](#what-it-doesnt-do-yet)
@@ -304,6 +305,33 @@ $ pluryprint-cli print --files "invoices/*.pdf" --profile "Duplex BW" --json
 Password-protected PDFs take `--password-file` or `--password-stdin`. Every
 option, the JSON output and the exit codes are in
 [ipc-and-cli.md](./docs/04-architecture/ipc-and-cli.md).
+
+## Integrations
+
+### Pluryfact (in development)
+
+[Pluryfact](https://pluryfact.maecly.com/) is a browser extension that
+downloads your electronic invoices from Ecuador's SRI. Once both apps are
+connected, Pluryfact can send what it downloaded (the RIDEs in PDF, the
+vouchers' XML and its TXT report) straight to Pluryprint, which opens them on
+the Print Job screen marked **From Pluryfact**, with the settings you chose
+in Pluryfact filled in. Nothing prints until you confirm, unless you chose
+"print right away" in Pluryfact.
+
+How it works: Pluryfact talks to a small helper that ships with Pluryprint,
+`pluryprint-bridge`, through the browser's Native Messaging. The browser
+starts the helper only for Pluryfact. No port is opened and nothing goes over
+the network: the documents travel from the browser to Pluryprint on your
+machine, are checked (size, checksum, type) and kept in Pluryprint's data
+folder for a week. Chrome, Edge, Brave and Chromium on Windows and macOS. The
+Windows installer registers the helper; on macOS Pluryprint registers it each
+time it opens. **Settings → Browser integration** shows the state per browser
+and can reconnect them; `pluryprint-cli bridge status` does the same from a
+script.
+
+This arrives with Pluryprint 0.0.6 and Pluryfact 0.2. Design and protocol:
+[ADR-0016](./docs/adr/0016-pluryfact-browser-bridge.md) and
+[ipc-and-cli.md §6](./docs/04-architecture/ipc-and-cli.md#6-browser-bridge-native-messaging).
 
 ## Supported files
 

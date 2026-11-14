@@ -37,3 +37,23 @@ fn fr_009_console_binary_reports_usage_errors_as_2() {
         "the usage error is explained on stderr"
     );
 }
+
+/// FR-127: `bridge status --json` is a read-only query with the usual exit
+/// code and nothing but JSON on stdout: one entry per browser.
+#[test]
+fn fr_127_bridge_status_reports_json() {
+    let out = cli()
+        .args(["bridge", "status", "--json"])
+        .output()
+        .expect("run pluryprint-cli");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let value: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("stdout is one JSON document");
+    let browsers: Vec<&str> = value
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|b| b["browser"].as_str().unwrap())
+        .collect();
+    assert_eq!(browsers, ["chrome", "edge", "brave", "chromium"]);
+}

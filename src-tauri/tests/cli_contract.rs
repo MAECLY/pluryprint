@@ -14,8 +14,8 @@
 use clap::Parser;
 
 use pluryprint_lib::cli::args::{
-    Cli, CliChannel, CliDuplex, CliScale, Command, ContextAction, InvokeSource, PrintersCmd,
-    ProfilesCmd, QueueCmd, UpdateCmd, SUBCOMMANDS,
+    BridgeCmd, Cli, CliBrowser, CliChannel, CliDuplex, CliScale, Command, ContextAction,
+    InvokeSource, PrintersCmd, ProfilesCmd, QueueCmd, UpdateCmd, SUBCOMMANDS,
 };
 use pluryprint_lib::cli::exit::{exit_code_for, CliError, ExitCode};
 use pluryprint_lib::cli::handoff::{
@@ -238,6 +238,66 @@ fn fr_008_the_other_four_subcommands_parse() {
             cmd: UpdateCmd::Channel { channel: None }
         })
     );
+}
+
+/// FR-127: `bridge install|uninstall|status` is a headless subcommand like
+/// the others; `--browser` defaults to every browser, `--extra-origin`
+/// repeats, and `--json` works before or after it. It adds no exit code.
+#[test]
+fn fr_127_the_bridge_subcommand_parses() {
+    assert_eq!(classify(&["bridge", "status"]), Intent::Headless);
+    assert!(SUBCOMMANDS.contains(&"bridge"));
+    assert_eq!(
+        parse(&["bridge", "install"]).unwrap().command,
+        Some(Command::Bridge {
+            cmd: BridgeCmd::Install {
+                browser: CliBrowser::All,
+                extra_origin: vec![],
+            }
+        })
+    );
+    let origin = format!("chrome-extension://{}/", "a".repeat(32));
+    assert_eq!(
+        parse(&[
+            "bridge",
+            "install",
+            "--browser",
+            "Edge",
+            "--extra-origin",
+            &origin,
+            "--extra-origin",
+            &origin,
+        ])
+        .unwrap()
+        .command,
+        Some(Command::Bridge {
+            cmd: BridgeCmd::Install {
+                browser: CliBrowser::Edge,
+                extra_origin: vec![origin.clone(), origin.clone()],
+            }
+        })
+    );
+    assert_eq!(
+        parse(&["bridge", "uninstall", "--browser", "brave"])
+            .unwrap()
+            .command,
+        Some(Command::Bridge {
+            cmd: BridgeCmd::Uninstall {
+                browser: CliBrowser::Brave
+            }
+        })
+    );
+    let cli = parse(&["bridge", "status", "--json"]).unwrap();
+    assert!(cli.json);
+    assert_eq!(
+        cli.command,
+        Some(Command::Bridge {
+            cmd: BridgeCmd::Status
+        })
+    );
+    assert!(parse(&["--json", "bridge", "status"]).unwrap().json);
+    assert!(parse(&["bridge", "install", "--browser", "firefox"]).is_err());
+    assert!(parse(&["bridge"]).is_err(), "an action is required");
 }
 
 #[test]

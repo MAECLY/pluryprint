@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "31",
+  "type": "commitJob",
+  "ok": false,
+  "error": {
+    "code": "launch_failed",
+    "message": "cannot start the app: No such file or directory (os error 2)"
+  }
+}

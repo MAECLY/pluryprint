@@ -12,6 +12,7 @@
 
 #![deny(missing_docs)]
 
+pub mod bridge;
 pub mod cli;
 pub mod engine;
 pub mod ipc;
@@ -83,6 +84,28 @@ pub fn run_with(selection: Option<cli::Selection>, handoff: Option<std::path::Pa
         &cli::handoff::handoff_dir(),
         cli::handoff::ORPHAN_HANDOFF_AGE,
     );
+    // FR-126/FR-127, off the startup path: delete the documents Pluryfact
+    // sent more than a week ago, and (macOS, where there is no installer)
+    // make sure every browser this user has can find the bridge of *this*
+    // copy of the app.
+    std::thread::spawn(|| {
+        bridge::inbox::sweep(
+            &bridge::inbox_dir(&util::paths::data_dir()),
+            bridge::INBOX_RETENTION,
+        );
+        if let Some(target) = bridge::register::Target::current() {
+            let outcome = bridge::register::register_at_startup(&target);
+            if outcome.not_attempted != Some("platform") {
+                tracing::info!(
+                    event = "bridge_registered_at_startup",
+                    written = outcome.written.len(),
+                    unchanged = outcome.unchanged.len(),
+                    skipped = outcome.skipped.len(),
+                    not_attempted = outcome.not_attempted.unwrap_or(""),
+                );
+            }
+        }
+    });
     // Put back a printer default a killed print left swapped (D16).
     #[cfg(windows)]
     engine::print::devmode_swap::recover_stale_journals_in_background();
@@ -405,6 +428,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             ipc::update::install_update,
             ipc::update::restart_app,
             cli::pending::take_pending_selections,
+            ipc::bridge::bridge_status,
+            ipc::bridge::bridge_reconnect,
         ])
         .events(tauri_specta::collect_events![
             ipc::events::QueueUpdated,

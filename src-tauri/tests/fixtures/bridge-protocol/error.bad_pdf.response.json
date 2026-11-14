@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "26",
+  "type": "putFile",
+  "ok": false,
+  "error": {
+    "code": "bad_pdf",
+    "message": "the document does not start with %PDF-"
+  }
+}

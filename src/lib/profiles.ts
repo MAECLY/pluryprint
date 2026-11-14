@@ -503,18 +503,26 @@ export function toJobSettings(
  * Build the full [`PrintRequest`] for `paths` under the given profile/overrides.
  *
  * `hold` submits the batch with every job paused (the context menu's "add to
- * the queue"); it is left off the request entirely otherwise.
+ * the queue"); it is left off the request entirely otherwise. `origin` tags
+ * every job with the integration the batch came from (FR-124), so the Queue
+ * says so; left off when there is none.
  */
 export function buildPrintRequest(
   paths: string[],
   profile: UiProfile,
   overrides: PrintJobOverrides,
-  opts: { hold?: boolean } = {},
+  opts: {
+    hold?: boolean;
+    origin?: { source: string; label: string | null } | null;
+  } = {},
 ): PrintRequest {
   return {
     files: paths,
     settings: toJobSettings(profile, overrides),
     profile_name: profile.name,
     ...(opts.hold ? { hold: true } : {}),
+    ...(opts.origin
+      ? { origin: { source: opts.origin.source, label: opts.origin.label } }
+      : {}),
   };
 }

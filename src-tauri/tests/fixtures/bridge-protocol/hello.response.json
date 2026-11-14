@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "id": "1",
+  "type": "hello",
+  "ok": true,
+  "host": "pluryprint",
+  "hostVersion": "0.0.6",
+  "protocol": 1,
+  "capabilities": [
+    "listPrinters",
+    "listProfiles",
+    "beginJob",
+    "putFile",
+    "commitJob",
+    "abortJob"
+  ],
+  "limits": {
+    "maxFileBytes": 52428800,
+    "maxFiles": 5000,
+    "maxChunkBytes": 16777216,
+    "maxJobBytes": 1073741824
+  }
+}

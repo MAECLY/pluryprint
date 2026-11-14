@@ -248,6 +248,8 @@ fn fr_001_profile_created_out_of_process_is_resolvable_without_restart() {
             invoked_at: String::new(),
             paths: vec!["C:\\x.pdf".into()],
             truncated_from: None,
+            label: None,
+            overrides: None,
         },
         ContextAction::Configure,
         None,

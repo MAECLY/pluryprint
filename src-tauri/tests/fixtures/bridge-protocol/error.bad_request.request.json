@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "id": "22",
+  "type": "beginJob",
+  "source": "otra-extension",
+  "label": "x",
+  "action": "configure",
+  "profileId": null,
+  "printerId": null,
+  "expectedFiles": 1
+}
