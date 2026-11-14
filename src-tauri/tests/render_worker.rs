@@ -1124,9 +1124,11 @@ fn nfr_security_webkits_own_limit_holds_the_web_process_without_a_watchdog() {
 /// must look like.
 struct XmlCase {
     name: &'static str,
-    /// The exact number of A4 pages: a pagination regression fails here
-    /// even without `pdftotext`.
-    pages: usize,
+    /// The A4 page counts allowed: a pagination regression fails here even
+    /// without `pdftotext`. A single count except where the system web views
+    /// break a borderline receipt differently (WebView2 fits on one page what
+    /// WKWebView spreads over two).
+    pages: std::ops::RangeInclusive<usize>,
     /// Words the printed pages must carry.
     needles: &'static [&'static str],
     /// Whether the page ends with the RIDE footer (only on the last page).
@@ -1140,100 +1142,101 @@ struct XmlCase {
 const SRI_FIXTURES: &[XmlCase] = &[
     XmlCase {
         name: "factura-1.1.0-autorizacion.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Factura", "001-002-000000123", "207.88", "Subtotal 15%"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "factura-1.0.0-respuesta-soap.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Factura", "IVA 12%", "11.20"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "factura-2.0.0-no-autorizado.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["NO AUTORIZADO"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "factura-2.1.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["IVA 5%", "ICE", "46.73"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "nota-credito-1.1.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Nota de crédito", "41.69"],
         footer: true,
         closing: Some("Valor de la modificación"),
     },
     XmlCase {
         name: "nota-credito-1.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Nota de crédito", "11.50"],
         footer: true,
         closing: Some("Valor de la modificación"),
     },
     XmlCase {
         name: "nota-debito-1.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Nota de débito", "13.80", "Gastos de cobranza"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "retencion-1.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Comprobante de retención", "62.50", "001-001-000004567"],
         footer: true,
         closing: Some("Total retenido (calculado)"),
     },
     XmlCase {
         name: "retencion-2.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Comprobante de retención", "40.38"],
         footer: true,
         closing: Some("Total retenido (calculado)"),
     },
-    // Two recipients overflow the first page: the closing blocks and the
-    // footer move to the second one together (8530b29).
+    // Two recipients overflow the first page in WKWebView: the closing blocks
+    // and the footer move to the second one together (8530b29). WebView2 fits
+    // it on one page; either way the footer is only on the last page.
     XmlCase {
         name: "guia-remision-1.1.0.xml",
-        pages: 2,
+        pages: 1..=2,
         needles: &["Guía de remisión", "GAA-0000", "Guayaquil - Cuenca"],
         footer: true,
         closing: Some("Información adicional"),
     },
     XmlCase {
         name: "guia-remision-1.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Guía de remisión", "GBB-1111"],
         footer: true,
         closing: None,
     },
     XmlCase {
         name: "liquidacion-compra-1.1.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Liquidación de compra", "300.00"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "liquidacion-compra-1.0.0.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["Liquidación de compra", "50.00"],
         footer: true,
         closing: Some("Valor total"),
     },
     XmlCase {
         name: "catalogo-generico.xml",
-        pages: 1,
+        pages: 1..=1,
         needles: &["cat:catalogo", "Taladro percutor"],
         footer: false,
         closing: None,
@@ -1288,7 +1291,12 @@ fn fr_057b_sri_receipts_print_as_ride_pages_on_a4() {
         std::fs::copy(fixtures.join(name), &input).unwrap();
         // Paper `auto`: an XML page is laid out on A4.
         let pdf = convert(&input, &PageSetup::default()).unwrap();
-        assert_eq!(pages(&pdf), case.pages, "{name}: page count");
+        let count = pages(&pdf);
+        assert!(
+            case.pages.contains(&count),
+            "{name}: page count {count}, expected {:?}",
+            case.pages
+        );
         assert_eq!(first_page_size(&pdf), (595, 842), "{name}: A4 by default");
         let Some(text) = pdf_text(&pdf) else {
             text_checked = false;
@@ -1303,7 +1311,7 @@ fn fr_057b_sri_receipts_print_as_ride_pages_on_a4() {
         }
         if case.footer {
             // The footer is on the last page, with the closing blocks.
-            let last = pdf_page_text(&pdf, case.pages).unwrap();
+            let last = pdf_page_text(&pdf, count).unwrap();
             assert!(
                 has_ride_footer(&last),
                 "{name}: footer on the last page:\n{last}"
@@ -1314,7 +1322,7 @@ fn fr_057b_sri_receipts_print_as_ride_pages_on_a4() {
                     "{name}: {closing} shares the last page with the footer:\n{last}"
                 );
             }
-            for page in 1..case.pages {
+            for page in 1..count {
                 let earlier = pdf_page_text(&pdf, page).unwrap();
                 assert!(
                     !has_ride_footer(&earlier),
