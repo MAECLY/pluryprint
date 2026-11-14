@@ -750,3 +750,16 @@ fn nfr_security_xml_mutations_never_panic() {
         }
     }
 }
+
+#[test]
+fn fr_057b_the_page_origin_serves_an_empty_folder() {
+    // The renderer's private origin serves the base folder; for an XML page
+    // it is an empty folder of the job, never the XML's own folder.
+    let work = WorkDir::new("xml-origin-test").unwrap();
+    let dir = empty_origin(&work).unwrap();
+    assert!(dir.starts_with(work.path()));
+    assert!(dir.is_dir());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    // Idempotent.
+    assert_eq!(empty_origin(&work).unwrap(), dir);
+}

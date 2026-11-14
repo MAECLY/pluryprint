@@ -36,7 +36,7 @@
 //! A file that is not well-formed is `xml_invalid`. All four reasons are
 //! terminal: the same file fails the same way again.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -379,6 +379,21 @@ pub fn page_for(page: &PageSetup) -> PageSetup {
     }
 }
 
+/// The folder the page's private origin serves: an empty one inside the
+/// job's work directory, never the XML's own folder. The page escapes
+/// everything and references nothing, so it needs no file; with this, the
+/// origin could not serve one even if it asked (SPEC: inline content only).
+pub(crate) fn empty_origin(work: &WorkDir) -> Result<PathBuf, EngineError> {
+    let dir = work.path().join("xml-origin");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        EngineError::ConversionFailed(Failure::new(
+            "workdir_failed",
+            format!("cannot create a conversion folder: {e}"),
+        ))
+    })?;
+    Ok(dir)
+}
+
 /// Convert the XML file at `input` into a PDF at `output`. The route's entry
 /// point.
 pub fn convert(
@@ -409,10 +424,10 @@ pub fn convert(
         .unwrap_or_else(|| "document.xml".to_string());
     let lang = Lang::from_locale(&crate::settings::Config::load_or_default().app.locale);
     let html = to_html(&bytes, &title, lang).map_err(XmlError::into_engine)?;
-    let base_dir = input.parent().unwrap_or_else(|| Path::new("."));
+    let base_dir = empty_origin(work)?;
     super::html::render_document(
         html.as_bytes(),
-        base_dir,
+        &base_dir,
         output,
         work,
         cancel,
