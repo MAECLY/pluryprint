@@ -1,6 +1,6 @@
 # Supported Formats
 
-> **TL;DR** — Per-format support matrix. Pluryprint prints **PDF** (encrypted ones too, after asking for the password), raster images (**JPG, PNG, TIFF, BMP, WebP**), **HEIC/HEIF**, **SVG/SVGZ**, **Office** (DOCX, XLSX, PPTX and legacy DOC, XLS, PPT), **OpenDocument** (ODT, ODS, ODP), **TXT**, **RTF**, **HTML** and **Markdown**. **GIF is not supported** and is refused with its own message. PDFs print as they are; images, SVG, Markdown and plain text are converted inside Pluryprint; HTML, Markdown and text are paginated by the operating system's own web view (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux) in a hidden worker process. Only two kinds of program may have to be installed: **LibreOffice** for Office, OpenDocument and (on Windows and Linux) RTF, and a **HEIF decoder** for HEIC: the Microsoft Store **HEIF/HEVC extensions** on Windows, libheif's command-line tools or ImageMagick on Linux. The Linux column describes the 0.0.5 design ([ADR-0015](../adr/0015-linux-support.md)); Linux is a preview platform. A missing one pauses the job with a message that names it, and the app offers to install it after asking (FR-058). The file is never silently skipped.
+> **TL;DR** — Per-format support matrix. Pluryprint prints **PDF** (encrypted ones too, after asking for the password), raster images (**JPG, PNG, TIFF, BMP, WebP**), **HEIC/HEIF**, **SVG/SVGZ**, **Office** (DOCX, XLSX, PPTX and legacy DOC, XLS, PPT), **OpenDocument** (ODT, ODS, ODP), **TXT**, **RTF**, **HTML**, **Markdown** and **XML** (an Ecuadorian SRI electronic receipt prints as a RIDE-like page, any other XML as a readable tree). **GIF is not supported** and is refused with its own message. PDFs print as they are; images, SVG, Markdown, plain text and XML are converted inside Pluryprint; HTML, Markdown, text and XML are paginated by the operating system's own web view (WebView2 on Windows, WebKit on macOS, WebKitGTK on Linux) in a hidden worker process. Only two kinds of program may have to be installed: **LibreOffice** for Office, OpenDocument and (on Windows and Linux) RTF, and a **HEIF decoder** for HEIC: the Microsoft Store **HEIF/HEVC extensions** on Windows, libheif's command-line tools or ImageMagick on Linux. The Linux column describes the 0.0.5 design ([ADR-0015](../adr/0015-linux-support.md)); Linux is a preview platform. A missing one pauses the job with a message that names it, and the app offers to install it after asking (FR-058). The file is never silently skipped.
 
 The list of formats is intentionally **bounded**. Print Conductor advertises 90+ formats but supports many of them poorly. We aim to support **fewer formats, very well**, with predictable behavior and clear failure modes.
 
@@ -12,7 +12,7 @@ The authoritative list is a single constant in `src-tauri/src/engine/mod.rs`:
 pub const SUPPORTED_EXTS: &[&str] = &[
     "pdf", "jpg", "jpeg", "png", "tif", "tiff", "bmp", "webp", "heic", "heif", "svg", "svgz",
     "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "txt", "html", "htm",
-    "md", "markdown",
+    "md", "markdown", "xml",
 ];
 ```
 
@@ -32,6 +32,7 @@ Folder expansion, the drop handler, the CLI and the Print Job screen all consult
 | `.txt` | decoded in-process (BOM, UTF-8, else Windows-1252) → wrapping monospaced page → the system web view | — | SumatraPDF / `lp` | Good |
 | `.html` `.htm` | the system web view (WebView2 / WKWebView / WebKitGTK) in a hidden worker, scripts off, no network | — | SumatraPDF / `lp` | As the web view prints it |
 | `.md` `.markdown` | `pulldown-cmark` in-process → HTML → the system web view | — | SumatraPDF / `lp` | Good |
+| `.xml` | `roxmltree` in-process (no DTD) → an SRI receipt becomes a RIDE-like page, any other XML an indented tree → the system web view | — | SumatraPDF / `lp` | Good (RIDE-like page: excellent) |
 
 Everything not listed here is refused at drop time with a reason (see below). `.gif` has a reason of its own.
 
@@ -163,6 +164,27 @@ A Markdown file is text, and printing it must not make it active content:
 ### Plain text
 
 `engine::convert::text` (FR-057) decodes the file without LibreOffice: a byte-order mark first (UTF-8, UTF-16 LE/BE), then strict UTF-8, else Windows-1252, which is what a Western Windows machine writes when it does not write UTF-8. The text is HTML-escaped into a `<pre>` page in a monospaced font that wraps long lines, laid out on the job's paper by the HTML renderer. A binary file is refused as `text_unreadable`.
+
+### XML
+
+`engine::convert::xml` (FR-057a, FR-057b, [ADR-0017](../adr/0017-print-sri-xml-as-ride.md)) reads the file with `roxmltree` and writes an HTML page for the renderer above. The text is decoded first: a byte-order mark (UTF-8, UTF-16), else UTF-8, else Windows-1252 only when the declaration says ISO-8859-1, Latin-1 or Windows-1252.
+
+**An Ecuadorian SRI electronic receipt prints as a RIDE-like representation.** Recognised shapes: the `<autorizacion>` the SRI web service and portal hand out (and Pluryfact saves), with the receipt inside `<comprobante>` as CDATA or escaped text; the whole `RespuestaAutorizacionComprobante`, bare or in its SOAP envelope (the `AUTORIZADO` entry is used, else the first); a bare signed receipt. Fields are found by local name, so namespace prefixes and the `ds:Signature` do not matter.
+
+| Root element | Type (`codDoc`) | Versions | Own sections |
+|---|---|---|---|
+| `factura` | 01 | 1.0.0, 1.1.0, 2.0.0, 2.1.0 | guía de remisión, propina, unit of measure (2.1.0) |
+| `liquidacionCompra` | 03 | 1.0.0, 1.1.0 | supplier instead of buyer |
+| `notaCredito` | 04 | 1.0.0, 1.1.0 | modified document, reason, value of the modification |
+| `notaDebito` | 05 | 1.0.0 | modified document, reasons with their values |
+| `guiaRemision` | 06 | 1.0.0, 1.1.0 | starting point, carrier, plate, dates; per recipient: route, reason, supporting document and goods |
+| `comprobanteRetencion` | 07 | 1.0.0, 2.0.0 | fiscal period; 1.0.0 one line per tax with its document, 2.0.0 grouped by supporting document; total withheld |
+
+The page follows the RIDE convention: issuer box (razón social, nombre comercial, dirección matriz and sucursal, contribuyente especial, obligado a llevar contabilidad, agente de retención, régimen RIMPE) beside the document box (R.U.C., type, number `estab-ptoEmi-secuencial`, authorisation number and date, environment, emission, access key with its Code 128 barcode and its nine segments), the buyer underneath, the detail lines, then additional information and payment methods beside the totals (subtotal per IVA rate — 0 %, 5 %, 12 %, 13 %, 14 %, 15 %, no objeto, exento —, subtotal without taxes, discount, ICE, IVA per rate, IRBPNR, tip, total). Amounts are printed as the file writes them, never rounded. A bare receipt reads "No consta en el archivo" where the authorisation goes; one the SRI did not authorise carries a banner with its state. The labels are Spanish; the footer, "Representación impresa generada por Pluryprint a partir del XML autorizado", follows the app language. The page is laid out on A4 unless the job sets a paper.
+
+**Any other XML prints as a tree**: one line per element with its attributes, short text on the element's line, longer text wrapped under it, comments and processing instructions in grey, a guide line per level. CDATA is printed as text.
+
+**Untrusted input.** No DTD is processed: a `<!DOCTYPE>` is refused (`xml_dtd_refused`) before parsing and the parser runs with DTDs off, so no entity beyond the five predefined ones is expanded (no billion laughs) and nothing is read or fetched (no XXE). At most 20 MiB and 200,000 nodes (`xml_too_large`); nesting is measured by a flat scan before the parser, which descends recursively, and refused past 256 levels (`xml_too_deep`). A malformed file is `xml_invalid`. All four are terminal: retrying cannot help. Every value from the file is HTML-escaped and the page references nothing (the barcode is inline SVG).
 
 ### RTF
 
