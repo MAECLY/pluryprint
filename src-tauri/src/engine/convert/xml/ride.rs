@@ -662,8 +662,8 @@ fn totals(r: &Receipt) -> String {
                 return String::new();
             }
             return format!(
-                "<table class=\"totals\"><tr class=\"grand\"><td>Total retenido</td><td class=\"n\">{}</td></tr></table>",
-                e(&r.total)
+                "<table class=\"totals\"><tr class=\"grand\"><td>Total retenido (calculado)</td><td class=\"n\">{}</td></tr></table>",
+                e(&amount(&r.total, 2))
             );
         }
         _ => {}

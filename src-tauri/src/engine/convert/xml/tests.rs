@@ -311,6 +311,33 @@ fn fr_057b_ice_and_tip_are_printed_only_when_the_file_has_them() {
 }
 
 #[test]
+fn fr_057b_retention_total_is_exact_and_labelled_as_calculated() {
+    assert_eq!(receipt("retencion-1.0.0.xml").total, "62.50");
+    assert_eq!(receipt("retencion-2.0.0.xml").total, "40.38");
+    let page = html("retencion-1.0.0.xml");
+    assert!(
+        page.contains("<td>Total retenido (calculado)</td><td class=\"n\">62.50</td>"),
+        "{page}"
+    );
+    // More decimals than two: the sum keeps them all, nothing is rounded.
+    let precise = String::from_utf8(fixture("retencion-1.0.0.xml"))
+        .unwrap()
+        .replace("<valorRetenido>17.50<", "<valorRetenido>17.505<")
+        .replace("<valorRetenido>45.00<", "<valorRetenido>45.0049<");
+    let page = to_html(precise.as_bytes(), "r.xml", Lang::Es).unwrap();
+    assert!(
+        page.contains("<td class=\"n\">62.5099</td></tr></table>"),
+        "{page}"
+    );
+    // One amount that is not a number: no total at all, never a guess.
+    let broken = String::from_utf8(fixture("retencion-1.0.0.xml"))
+        .unwrap()
+        .replace("<valorRetenido>17.50<", "<valorRetenido>n/a<");
+    let page = to_html(broken.as_bytes(), "r.xml", Lang::Es).unwrap();
+    assert!(!page.contains("Total retenido"), "{page}");
+}
+
+#[test]
 fn fr_057b_footer_follows_the_app_language_labels_stay_spanish() {
     let bytes = fixture("retencion-1.0.0.xml");
     let en = to_html(&bytes, "r.xml", Lang::En).unwrap();

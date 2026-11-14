@@ -739,38 +739,52 @@ fn adicional(root: Node<'_, '_>) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// The sum of every amount withheld, to two decimals; empty when one of
-/// them is not a number. Exact: amounts are added as integer cents
-/// (thousandths, then rounded half away from zero).
+/// The exact sum of every amount withheld, with as many decimals as the
+/// most precise of them (never rounded or truncated); empty when one of
+/// them is not a number or the sum does not fit. The XML does not carry
+/// this total, so the page labels it as calculated. Pure.
 fn total_withheld(r: &Receipt) -> String {
-    let values = r
+    let values: Vec<&str> = r
         .withholdings
         .iter()
         .chain(r.support.iter().flat_map(|g| g.retenciones.iter()))
-        .map(|w| w.valor.as_str());
-    let mut thousandths: i128 = 0;
-    let mut any = false;
-    for v in values {
-        match parse_milli(v) {
-            Some(m) => {
-                thousandths += m;
-                any = true;
-            }
+        .map(|w| w.valor.trim())
+        .collect();
+    if values.is_empty() {
+        return String::new();
+    }
+    let mut parsed = Vec::with_capacity(values.len());
+    for v in &values {
+        match parse_decimal(v) {
+            Some(d) => parsed.push(d),
             None => return String::new(),
         }
     }
-    if !any {
-        return String::new();
+    let scale = parsed.iter().map(|&(_, s)| s).max().unwrap_or(0);
+    let mut sum: i128 = 0;
+    for (units, s) in parsed {
+        let Some(v) = 10i128
+            .checked_pow((scale - s) as u32)
+            .and_then(|f| units.checked_mul(f))
+            .and_then(|v| sum.checked_add(v))
+        else {
+            return String::new();
+        };
+        sum = v;
     }
-    let cents = (thousandths + if thousandths >= 0 { 5 } else { -5 }) / 10;
-    let sign = if cents < 0 { "-" } else { "" };
-    let cents = cents.abs();
-    format!("{sign}{}.{:02}", cents / 100, cents % 100)
+    let sign = if sum < 0 { "-" } else { "" };
+    let digits = format!("{:0>width$}", sum.unsigned_abs(), width = scale + 1);
+    let (int, frac) = digits.split_at(digits.len() - scale);
+    if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    }
 }
 
-/// A decimal string as thousandths (digits past the third are dropped).
-fn parse_milli(s: &str) -> Option<i128> {
-    let s = s.trim();
+/// A decimal string as (value in units of its last decimal, number of
+/// decimals); `None` for anything else or more than 18 decimals.
+fn parse_decimal(s: &str) -> Option<(i128, usize)> {
     let (neg, s) = match s.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, s),
@@ -780,16 +794,17 @@ fn parse_milli(s: &str) -> Option<i128> {
         || !int.bytes().all(|b| b.is_ascii_digit())
         || !frac.bytes().all(|b| b.is_ascii_digit())
         || int.len() > 20
+        || frac.len() > 18
     {
         return None;
     }
-    let int: i128 = if int.is_empty() { 0 } else { int.parse().ok()? };
-    let mut f = frac.chars().take(3).collect::<String>();
-    while f.len() < 3 {
-        f.push('0');
-    }
-    let v = int * 1000 + f.parse::<i128>().ok()?;
-    Some(if neg { -v } else { v })
+    let digits = format!("{int}{frac}");
+    let v: i128 = if digits.is_empty() {
+        0
+    } else {
+        digits.parse().ok()?
+    };
+    Some((if neg { -v } else { v }, frac.len()))
 }
 
 // ---------------------------------------------------------------------------
