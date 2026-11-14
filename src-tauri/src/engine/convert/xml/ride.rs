@@ -87,6 +87,7 @@ table.plain { width: 100%; border-collapse: collapse; }
 table.plain th { text-align: left; font-weight: 700; font-size: 7.4pt; border-bottom: 0.75pt solid #000; padding: 0.6mm 1.2mm 0.8mm; }
 table.plain th.n { text-align: right; }
 table.plain td { padding: 0.7mm 1.2mm; border-bottom: 0.4pt solid #b4b4b4; vertical-align: top; overflow-wrap: anywhere; }
+.end { break-inside: avoid; }
 .note { margin-top: 5mm; padding-top: 1.4mm; border-top: 0.4pt solid #8a8a8a; font-size: 6.8pt; color: #333; }
 "#;
 
@@ -775,14 +776,18 @@ pub fn to_html(r: &Receipt, title: &str, lang: Lang) -> String {
     body.push_str(&item_rows(r));
     body.push_str(&motivo_rows(r));
     body.push_str(&retention_rows(r));
+    // The closing blocks and the footer travel together, so the footer is
+    // never alone on a last page.
     let left = left_column(r);
     let right = totals(r);
+    body.push_str("<div class=\"end\">");
     if !left.is_empty() || !right.is_empty() {
         body.push_str(&format!(
             "<div class=\"foot\"><div class=\"left\">{left}</div><div class=\"right\">{right}</div></div>\n"
         ));
     }
     body.push_str(&footer(r, lang));
+    body.push_str("</div>\n");
     format!(
         "<!DOCTYPE html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><title>{}</title>\n\
          <style>{RIDE_CSS}</style>\n</head><body>\n{body}</body></html>\n",
