@@ -29,6 +29,24 @@
 !define PLURYPRINT_DATA_ORG "Maecly"
 !define PLURYPRINT_DATA_APP "Pluryprint"
 
+; ---- Browser bridge for PluryFact (FR-127, ADR-0016) -------------------------
+;
+; pluryprint-bridge.exe is the Chrome Native Messaging host the PluryFact
+; extension prints through. A browser finds it through a JSON manifest named
+; after the host; on Windows the manifest's location is the default value of
+; a per-user key, one per browser vendor (Brave reads Chrome's). The manifest
+; goes next to the bridge, and its "path" is relative to it, which Chrome
+; allows on Windows only. Its content must stay what
+; src-tauri/src/bridge/register.rs writes (Manifest::new), which
+; tests/installer_hooks.rs checks; the origin is PluryFact's Chrome Web Store
+; id. HKCU only, like everything else here.
+!define PLURYPRINT_BRIDGE_HOST "com.maecly.pluryprint"
+!define PLURYPRINT_BRIDGE_EXE "pluryprint-bridge.exe"
+!define PLURYPRINT_PLURYFACT_ORIGIN "chrome-extension://ibgodfpcihlddbbfaoooehfgbmahipbj/"
+!define PLURY_NMH_CHROME "Software\Google\Chrome\NativeMessagingHosts\${PLURYPRINT_BRIDGE_HOST}"
+!define PLURY_NMH_EDGE "Software\Microsoft\Edge\NativeMessagingHosts\${PLURYPRINT_BRIDGE_HOST}"
+!define PLURY_NMH_CHROMIUM "Software\Chromium\NativeMessagingHosts\${PLURYPRINT_BRIDGE_HOST}"
+
 ; ---- Names Tauri's template defines ----------------------------------------
 ;
 ; The hooks below use four names the template defines right after it includes
@@ -165,6 +183,48 @@
   WriteRegStr HKCU "Software\Classes\${CLASS}\shell\${PLURYPRINT_SHELLEXT_VERB}" "ExplorerCommandHandler" "${PLURYPRINT_SHELLEXT_CLSID}"
   WriteRegStr HKCU "Software\Classes\${CLASS}\shell\${PLURYPRINT_SHELLEXT_VERB}" "MultiSelectModel" "Player"
   WriteRegStr HKCU "Software\Classes\${CLASS}\shell\${PLURYPRINT_SHELLEXT_VERB}" "Icon" "$INSTDIR\pluryprint.exe,0"
+!macroend
+
+; Write the bridge's manifest and point every browser at it. A setup built
+; without the bridge (it is a cargo binary of the app crate, so every release
+; has it) registers nothing rather than a manifest naming a missing program.
+; Saves and restores $R9.
+!macro PLURYPRINT_REGISTER_BRIDGE
+  Push $R9
+  ${If} ${FileExists} "$INSTDIR\${PLURYPRINT_BRIDGE_EXE}"
+    DetailPrint "$(PLURY_BRIDGE_REGISTERING)"
+    ClearErrors
+    FileOpen $R9 "$INSTDIR\${PLURYPRINT_BRIDGE_HOST}.json" w
+    ${If} ${Errors}
+      DetailPrint "$(PLURY_BRIDGE_WRITE_FAILED)"
+    ${Else}
+      FileWrite $R9 '{$\r$\n'
+      FileWrite $R9 '  "name": "${PLURYPRINT_BRIDGE_HOST}",$\r$\n'
+      FileWrite $R9 '  "description": "Pluryprint bridge for PluryFact (prints the documents PluryFact sends)",$\r$\n'
+      FileWrite $R9 '  "path": "${PLURYPRINT_BRIDGE_EXE}",$\r$\n'
+      FileWrite $R9 '  "type": "stdio",$\r$\n'
+      FileWrite $R9 '  "allowed_origins": [$\r$\n'
+      FileWrite $R9 '    "${PLURYPRINT_PLURYFACT_ORIGIN}"$\r$\n'
+      FileWrite $R9 '  ]$\r$\n'
+      FileWrite $R9 '}$\r$\n'
+      FileClose $R9
+      WriteRegStr HKCU "${PLURY_NMH_CHROME}" "" "$INSTDIR\${PLURYPRINT_BRIDGE_HOST}.json"
+      WriteRegStr HKCU "${PLURY_NMH_EDGE}" "" "$INSTDIR\${PLURYPRINT_BRIDGE_HOST}.json"
+      WriteRegStr HKCU "${PLURY_NMH_CHROMIUM}" "" "$INSTDIR\${PLURYPRINT_BRIDGE_HOST}.json"
+    ${EndIf}
+  ${Else}
+    DetailPrint "$(PLURY_BRIDGE_MISSING)"
+  ${EndIf}
+  Pop $R9
+!macroend
+
+; Undo PLURYPRINT_REGISTER_BRIDGE. On an update the next setup writes both
+; again a moment later.
+!macro PLURYPRINT_UNREGISTER_BRIDGE
+  DeleteRegKey HKCU "${PLURY_NMH_CHROME}"
+  DeleteRegKey HKCU "${PLURY_NMH_EDGE}"
+  DeleteRegKey HKCU "${PLURY_NMH_CHROMIUM}"
+  Delete "$INSTDIR\${PLURYPRINT_BRIDGE_HOST}.json"
 !macroend
 
 ; ---- Taking over a MaeclyPrint install (ADR-0009) --------------------------
@@ -439,6 +499,10 @@ VIAddVersionKey "CompanyName" "${PLURYPRINT_COMPANY}"
   !insertmacro PLURY_REQUIRE_TAURI_NAMES
   WriteRegStr HKCU "${UNINSTKEY}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
 
+  ; The browser bridge first: it does not depend on the context-menu DLL,
+  ; whose absence below skips only the Explorer registration.
+  !insertmacro PLURYPRINT_REGISTER_BRIDGE
+
   Push $R8
   !insertmacro PLURYPRINT_MOVE_LOADED_DLL_ASIDE
 
@@ -475,6 +539,7 @@ VIAddVersionKey "CompanyName" "${PLURYPRINT_COMPANY}"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro PLURYPRINT_UNREGISTER_BRIDGE
   DeleteRegKey HKCU "Software\Classes\*\shell\${PLURYPRINT_SHELLEXT_VERB}"
   DeleteRegKey HKCU "Software\Classes\Directory\shell\${PLURYPRINT_SHELLEXT_VERB}"
   DeleteRegKey HKCU "Software\Classes\CLSID\${PLURYPRINT_SHELLEXT_CLSID}"
