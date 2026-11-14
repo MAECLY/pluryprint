@@ -481,11 +481,12 @@ function App() {
       useProfilesStore.getState().profiles,
       profileChoice,
     );
-    const req = buildPrintRequest(
-      list.map((f) => f.path),
-      profileObj,
-      overrides,
-    );
+    const paths = list.map((f) => f.path);
+    // FR-124: a batch made only of PluryFact's files is tagged as such in
+    // the Queue.
+    const req = buildPrintRequest(paths, profileObj, overrides, {
+      origin: originForFiles(jobOrigin, paths),
+    });
     const id = toast.loading(t('print.sending', { count: list.length }));
     try {
       const batch = await printFiles(req);
@@ -547,7 +548,7 @@ function App() {
       list.map((f) => f.path),
       profileObj,
       selectionOverrides,
-      { hold },
+      { hold, origin },
     );
     const id = toast.loading(t('print.sending', { count: list.length }));
     try {

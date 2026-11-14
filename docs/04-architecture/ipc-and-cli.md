@@ -166,7 +166,12 @@ export type PrintRequest = {
   profile_name: string | null;   // display/log only
   hold?: boolean;                // true = every job enqueued `paused` (FR-001 "add to queue");
                                  // scoped to this batch, the global pause flag is untouched
+  origin?: JobOrigin | null;     // FR-124: the integration the batch came from; copied onto
+                                 // every job (bounded), shown on its Queue row
 };
+
+// FR-124: `source` ≤ 32 chars, `label` ≤ 120, control characters dropped.
+export type JobOrigin = { source: string; label?: string | null };
 
 export type JobBatch = { batch_id: string; job_ids: string[] };
 
@@ -205,6 +210,7 @@ export type Job = {
   submitted_at: string;          // RFC 3339 UTC
   started_at: string | null;
   finished_at: string | null;
+  origin?: JobOrigin | null;     // FR-124; absent in a queue.json written before it
 };
 
 export type QueueSnapshot = { schema_version: number; queue_paused: boolean; jobs: Job[] };
@@ -638,7 +644,7 @@ At most 4 jobs may be open per connection. A document restarts from chunk 0 afte
 - **Handoff**: on `commitJob`, `<data dir>/handoff/pluryfact-<jobId>.json`, schema 1, `source: "pluryfact"`, the `action`, `profile_id`, the documents in order, and two optional fields any schema-1 reader may ignore: `label` and `overrides` (`printer`, `copies`, `duplex`, `color`, `paper`, `orientation`, `collate`, in the wire spelling of the profile fields). The app validates both like the rest of the file.
 - **Launch**: `pluryprint --invoke=context-menu --files-from <handoff> --action <a> [--profile <id>]`, the app next to the bridge, detached (own process group on macOS/Linux; `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`, plus `CREATE_BREAKAWAY_FROM_JOB` when the browser's job allows it, on Windows). If the app cannot be started the handoff is deleted, the reply is `launch_failed` and the job stays open.
 
-The app shows a selection whose `source` is `pluryfact` with a **From PluryFact** badge and the label; with `configure` the overrides pre-fill the Print Job settings, with `queue`/`print-default` they are applied on top of the profile.
+The app shows a selection whose `source` is `pluryfact` with a **From PluryFact** badge and the label: on the Print Job screen while every file in the job came from PluryFact (a batch that joins a job the user had already started, or a job the user drops more files into, is not labelled), and on each of its rows in the Queue (`Job.origin`). With `configure` the overrides pre-fill the Print Job settings, unless the job already had files: it then keeps its profile and settings and a toast says PluryFact's were not applied. With `queue`/`print-default` they are applied on top of the profile.
 
 ### 6.4 Registration
 

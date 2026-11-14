@@ -1727,7 +1727,13 @@ started_at: string | null;
 /**
  * RFC 3339 UTC timestamp of reaching a terminal state, if finished.
  */
-finished_at: string | null }
+finished_at: string | null; 
+/**
+ * The integration the job's batch came from ([`PrintRequest::origin`]),
+ * shown on its Queue row. `#[serde(default)]` so an older `queue.json`
+ * loads.
+ */
+origin?: JobOrigin | null }
 /**
  * The result of submitting a [`PrintRequest`]: the batch id and the ids of the
  * jobs it produced (one per input file).
@@ -1790,6 +1796,18 @@ reason?: string | null;
  * Interpolation values for the translated sentence (`secs`, `printer`…).
  */
 params?: Partial<{ [key in string]: string }> | null }
+/**
+ * The integration a batch came from, as the queue shows it (FR-124).
+ */
+export type JobOrigin = { 
+/**
+ * Which integration (`pluryfact`, the only one labelled today).
+ */
+source: string; 
+/**
+ * The integration's own label for the batch, when it sent one.
+ */
+label?: string | null }
 /**
  * Coarse progress for the currently-running phase of a job. `phase` is a short
  * label such as `"converting"` or `"printing"`.
@@ -1999,7 +2017,14 @@ profile_name: string | null;
  * also stop every other batch that was waiting. Optional on the wire —
  * absent means "start normally".
  */
-hold?: boolean }
+hold?: boolean; 
+/**
+ * Where the batch came from, when an integration labelled it (FR-124):
+ * every job of the batch carries it, and the Queue screen shows "From
+ * PluryFact" on its rows. Optional and additive on the wire; absent for
+ * everything the user added by hand.
+ */
+origin?: JobOrigin | null }
 /**
  * A printer installed on the system, enriched with whatever capabilities the
  * OS could be coaxed into reporting.

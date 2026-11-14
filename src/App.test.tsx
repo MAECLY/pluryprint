@@ -602,6 +602,11 @@ describe('App', () => {
         };
       };
       expect(req.hold).toBe(true);
+      // FR-124: every queued job carries where it came from.
+      expect((req as { origin?: unknown }).origin).toEqual({
+        source: 'pluryfact',
+        label: 'Recibidos · octubre 2026',
+      });
       expect(req.settings.copies).toBe(2);
       expect(req.settings.duplex).toBe('long');
       expect(req.settings.color_mode).toBe('monochrome');

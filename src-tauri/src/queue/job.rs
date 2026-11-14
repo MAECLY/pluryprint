@@ -392,6 +392,53 @@ pub struct PrintRequest {
     /// absent means "start normally".
     #[serde(default)]
     pub hold: bool,
+    /// Where the batch came from, when an integration labelled it (FR-124):
+    /// every job of the batch carries it, and the Queue screen shows "From
+    /// PluryFact" on its rows. Optional and additive on the wire; absent for
+    /// everything the user added by hand.
+    #[serde(default)]
+    pub origin: Option<JobOrigin>,
+}
+
+/// The integration a batch came from, as the queue shows it (FR-124).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct JobOrigin {
+    /// Which integration (`pluryfact`, the only one labelled today).
+    pub source: String,
+    /// The integration's own label for the batch, when it sent one.
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+impl JobOrigin {
+    /// Longest `source` kept, in characters.
+    pub const MAX_SOURCE_CHARS: usize = 32;
+
+    /// The origin as stored: `source` and `label` cut to their bounds
+    /// ([`Self::MAX_SOURCE_CHARS`], [`crate::cli::MAX_SELECTION_LABEL_CHARS`])
+    /// with control characters dropped, and an empty label as none. `None`
+    /// when no source is left. The frontend sends what a validated handoff
+    /// carried; this keeps a hand-written request from bloating `queue.json`.
+    pub fn bounded(&self) -> Option<JobOrigin> {
+        let clean = |s: &str, max: usize| -> String {
+            s.chars()
+                .filter(|c| !c.is_control())
+                .take(max)
+                .collect::<String>()
+                .trim()
+                .to_string()
+        };
+        let source = clean(&self.source, Self::MAX_SOURCE_CHARS);
+        if source.is_empty() {
+            return None;
+        }
+        let label = self
+            .label
+            .as_deref()
+            .map(|l| clean(l, crate::cli::MAX_SELECTION_LABEL_CHARS))
+            .filter(|l| !l.is_empty());
+        Some(JobOrigin { source, label })
+    }
 }
 
 /// A structured job error. `code` is a stable machine-readable identifier;
@@ -543,6 +590,11 @@ pub struct Job {
     pub started_at: Option<String>,
     /// RFC 3339 UTC timestamp of reaching a terminal state, if finished.
     pub finished_at: Option<String>,
+    /// The integration the job's batch came from ([`PrintRequest::origin`]),
+    /// shown on its Queue row. `#[serde(default)]` so an older `queue.json`
+    /// loads.
+    #[serde(default)]
+    pub origin: Option<JobOrigin>,
 }
 
 impl Job {
@@ -605,6 +657,7 @@ impl Job {
             submitted_at,
             started_at: None,
             finished_at: None,
+            origin: None,
         }
     }
 }
@@ -985,9 +1038,36 @@ mod tests {
         assert_eq!(job.profile_name.as_deref(), Some("Photo Color"));
         assert_eq!(job.settings.quality, Quality::Normal);
         assert_eq!(job.settings.tray, None);
+        assert_eq!(job.origin, None);
         let progress = job.progress.as_ref().expect("progress survives the read");
         assert_eq!(progress.phase, "converting");
         assert_eq!(progress.percent, Some(0.5));
+    }
+
+    /// FR-124: an origin is cut to its bounds, loses control characters, and
+    /// is dropped when no source is left; a v1 job without one still loads
+    /// (see `v1_queue_json_still_parses`).
+    #[test]
+    fn fr_124_origin_is_bounded() {
+        let o = JobOrigin {
+            source: format!(" plury\u{7}fact{} ", "s".repeat(100)),
+            label: Some("  ".into()),
+        }
+        .bounded()
+        .unwrap();
+        assert!(o.source.starts_with("pluryfact"));
+        assert_eq!(o.source.chars().count(), JobOrigin::MAX_SOURCE_CHARS - 1);
+        assert_eq!(o.label, None);
+        assert_eq!(
+            JobOrigin {
+                source: "\n".into(),
+                label: Some("x".into())
+            }
+            .bounded(),
+            None
+        );
+        let back: JobOrigin = serde_json::from_str(r#"{"source":"pluryfact"}"#).unwrap();
+        assert_eq!(back.label, None);
     }
 
     #[test]

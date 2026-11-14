@@ -507,6 +507,11 @@ export interface UiQueueJobView extends UiQueueJob {
    * restored from `queue.json`). `finishedAt` is only a local clock.
    */
   finishedAtIso?: string;
+  /**
+   * FR-124: the integration the job's batch came from, when the queue shows
+   * one ("From PluryFact" and PluryFact's label for the batch).
+   */
+  origin?: { source: 'pluryfact'; label: string | null };
 }
 
 /**
@@ -547,6 +552,9 @@ export function toUiQueueJob(job: Job): UiQueueJobView {
   if (printer) ui.printer = printer;
   if (!handedOver && job.progress != null && percent === null) {
     ui.indeterminate = true;
+  }
+  if (job.origin?.source === 'pluryfact') {
+    ui.origin = { source: 'pluryfact', label: job.origin.label ?? null };
   }
   const duration = elapsedMs(job.started_at, job.finished_at);
   if (duration !== null) ui.durationMs = duration;

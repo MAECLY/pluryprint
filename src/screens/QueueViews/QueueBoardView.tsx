@@ -129,6 +129,7 @@ export function QueueBoardView({
                 }}
               >
                 {/* An unknown count is left out, never shown as "0p". */}
+                {labels.origin(j) && `${labels.origin(j)} · `}
                 {j.pages != null && `${t('job.pages', { count: j.pages })} · `}
                 {j.profile}
                 {j.noteKey ? ` · ${t(`note.${j.noteKey}`)}` : ''}
