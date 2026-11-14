@@ -96,7 +96,8 @@
         "printer_query_failed": "Windows reported an error while reading the printers.",
         "discovery_failed": "Searching the network for printers failed.",
         "printer_settings_unavailable": "No printer settings app could be opened. You can manage printers at http://localhost:631 in your browser.",
-        "update_state_save_failed": "Your update choice could not be saved."
+        "update_state_save_failed": "Your update choice could not be saved.",
+        "bridge_missing": "The browser bridge is not installed next to the app. Reinstall Pluryprint."
       },
       "InvalidRequest": {
         "url_not_allowed": "That link is not on the list of allowed sites.",
@@ -143,7 +144,8 @@
         "path_not_absolute": "“{{path}}” is not a full path.",
         "printer_uri_invalid": "The printer address is not valid.",
         "printer_option_invalid": "The paper size or tray set for this printer is not valid.",
-        "password_empty": "Enter the PDF's password."
+        "password_empty": "Enter the PDF's password.",
+        "bridge_translocated": "Pluryprint is running from a temporary location. Move it to the Applications folder, open it from there and try again."
       },
       "DependencyMissing": {
         "ippfind_missing": "Network discovery needs the CUPS client tools (ippfind), which are not installed.",
