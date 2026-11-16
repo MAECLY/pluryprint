@@ -131,7 +131,7 @@ encoding_rs = "0.8"
 # RIDE-like page). No DTD, no entities beyond the five predefined ones, no
 # network: `allow_dtd` stays false and a DOCTYPE is refused before parsing.
 # Already in the tree through usvg. MIT OR Apache-2.0.
-roxmltree = "0.20"
+roxmltree = "0.21"
 # FR-059: a PDF password supplied by the user lives only in memory and is
 # wiped when dropped (NFR-082). Already in the tree. MIT OR Apache-2.0.
 zeroize = "1"
